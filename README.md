@@ -4,51 +4,9 @@ A plugin/middleware system for Playwright locator actions — the one Playwright
 
 Wrap `click`, `fill`, `waitFor` and friends with composable middleware, so your tests can be smart about *why* an action is slow or failing, without sprinkling `waitForSomething()` helpers through every test.
 
-
-
-Ships with five plugins:
-
-| Plugin | What it does | |
-| --- | --- | --- |
-| [`spinnerWaiter`](#spinnerwaiter) | If the app is visibly loading, wait longer for elements. If it isn't, fail fast. | [source](./src/plugins/spinner-waiter.ts) |
-| [`hydrationWaiter`](#hydrationwaiter) | Don't interact with the app until it's hydrated. | [source](./src/plugins/hydration-waiter.ts) |
-| [`uiErrorReporter`](#uierrorreporter) | When an action fails, append any visible error toasts to the error message. | [source](./src/plugins/ui-error-reporter.ts) |
-| [`videoMode`](#videomode) | Highlight elements and pause before actions, so recorded videos are watchable. | [source](./src/plugins/video-mode.ts) |
-| [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. | [source](./src/plugins/llm-recover.ts) |
-
-`spinnerWaiter` is the best one. It makes your test pass fast, fail fast, and it incentivises agents to *improve* the product when tests fail, instead of bumping timeouts which makes tests worse and lets your product get away with bad UX.
-
-## ⚠️ This is a hack
-
-You should know what you're buying:
-
-- **It patches `Locator.prototype` at runtime.** Once any page has plugins added, every locator in the process goes through the middleware dispatcher (pages without plugins fall through to the original behavior, but the patch itself is global).
-- **It reaches into Playwright internals.** Clean stack traces in reports depend on `setBoxedStackPrefixes`, which is undocumented and untyped — see [microsoft/playwright#38818](https://github.com/microsoft/playwright/issues/38818) asking for it to be made official. It has *already moved once* (playwright-core ≤ 1.59: `lib/utils`; 1.60+: `lib/coreBundle`). plugwright knows both locations and degrades gracefully (with a console warning, and plugin frames in your stack traces) if a future version moves it again. Set `PLAYWRIGHT_PLUGIN_DEBUG=1` to skip stack-boxing entirely.
-- **Pin your Playwright version** and treat Playwright upgrades as potentially breaking for this package. It's tested against the version in this repo's lockfile (currently 1.60.x).
-
-If Playwright ever ships official action middleware, use that instead and let this package die happy.
-
-## Why does this exist?
-
-It started with action timeouts. A good test suite fails *fast* — a 1-second `actionTimeout` catches real bugs immediately instead of burning 30 seconds per failed assertion. But real apps have operations that legitimately take 20 seconds, and the user-facing contract for those is "show a spinner". So the timeout you actually want is conditional: **1 second normally, 30 seconds while a spinner is visible**. That also creates a nice incentive loop: if a slow operation makes a test flaky, the fix is to add a loading state to the product — which is what your users wanted anyway.
-
-We [asked Playwright for this in 2022](https://github.com/microsoft/playwright/issues/16007). The maintainers' verdict:
-
-> This would be tricky since it might be that spinner shows up after the action has started. \[…\] I don't think it is technically feasible.
-
-Fair enough — *inside* Playwright's watchdog architecture it may not be. But in userland, wrapping the action with a retry-while-spinning loop is straightforward. Once you have one wrapper, you notice the pattern generalizes: waiting for hydration, surfacing error toasts, highlighting for videos, even LLM-assisted recovery are all "do something around a locator action". That's a middleware chain. This package is that middleware chain, extracted from the test infrastructure of a production app at [iterate](https://github.com/iterate).
-
-## Install
-
-```bash
-pnpm add -D plugwright
-```
-
-`@playwright/test` (>= 1.49) is a peer dependency.
-
 ## Quick start
 
-Wire it up once in a fixture:
+Install with `pnpm add -D plugwright` then wire it once in a fixture:
 
 ```ts
 // test-helpers.ts
@@ -86,6 +44,38 @@ test("kick off a slow report", async ({ page }) => {
 Pair it with an aggressive `actionTimeout` in `playwright.config.ts` (e.g. `1_000`) — the plugins are what make that viable.
 
 For a fixture with all five plugins wired together, see the [kitchen sink](#kitchen-sink) below.
+
+Ships with five plugins:
+
+| Plugin | What it does | |
+| --- | --- | --- |
+| [`spinnerWaiter`](#spinnerwaiter) | If the app is visibly loading, wait longer for elements. If it isn't, fail fast. | [source](./src/plugins/spinner-waiter.ts) |
+| [`hydrationWaiter`](#hydrationwaiter) | Don't interact with the app until it's hydrated. | [source](./src/plugins/hydration-waiter.ts) |
+| [`uiErrorReporter`](#uierrorreporter) | When an action fails, append any visible error toasts to the error message. | [source](./src/plugins/ui-error-reporter.ts) |
+| [`videoMode`](#videomode) | Highlight elements and pause before actions, so recorded videos are watchable. | [source](./src/plugins/video-mode.ts) |
+| [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. | [source](./src/plugins/llm-recover.ts) |
+
+`spinnerWaiter` is the best one. It makes your test pass fast, fail fast, and it incentivises agents to *improve* the product when tests fail, instead of bumping timeouts which makes tests worse and lets your product get away with bad UX.
+
+## ⚠️ This is a hack
+
+You should know what you're buying:
+
+- **It patches `Locator.prototype` at runtime.** Once any page has plugins added, every locator in the process goes through the middleware dispatcher (pages without plugins fall through to the original behavior, but the patch itself is global).
+- **It reaches into Playwright internals.** Clean stack traces in reports depend on `setBoxedStackPrefixes`, which is undocumented and untyped — see [microsoft/playwright#38818](https://github.com/microsoft/playwright/issues/38818) asking for it to be made official. It has *already moved once* (playwright-core ≤ 1.59: `lib/utils`; 1.60+: `lib/coreBundle`). plugwright knows both locations and degrades gracefully (with a console warning, and plugin frames in your stack traces) if a future version moves it again. Set `PLAYWRIGHT_PLUGIN_DEBUG=1` to skip stack-boxing entirely.
+- **Pin your Playwright version** and treat Playwright upgrades as potentially breaking for this package. It's tested against the version in this repo's lockfile (currently 1.60.x); the declared `@playwright/test` peer range is >= 1.49.
+
+If Playwright ever ships official action middleware, use that instead and let this package die happy.
+
+## Why does this exist?
+
+It started with action timeouts. A good test suite fails *fast* — a 1-second `actionTimeout` catches real bugs immediately instead of burning 30 seconds per failed assertion. But real apps have operations that legitimately take 20 seconds, and the user-facing contract for those is "show a spinner". So the timeout you actually want is conditional: **1 second normally, 30 seconds while a spinner is visible**. That also creates a nice incentive loop: if a slow operation makes a test flaky, the fix is to add a loading state to the product — which is what your users wanted anyway.
+
+We [asked Playwright for this in 2022](https://github.com/microsoft/playwright/issues/16007). The maintainers' verdict:
+
+> This would be tricky since it might be that spinner shows up after the action has started. \[…\] I don't think it is technically feasible.
+
+Fair enough — *inside* Playwright's watchdog architecture it may not be. But in userland, wrapping the action with a retry-while-spinning loop is straightforward. Once you have one wrapper, you notice the pattern generalizes: waiting for hydration, surfacing error toasts, highlighting for videos, even LLM-assisted recovery are all "do something around a locator action". That's a middleware chain. This package is that middleware chain, extracted from the test infrastructure of a production app at [iterate](https://github.com/iterate).
 
 ## Plugins
 
