@@ -8,8 +8,8 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Locator } from "@playwright/test";
-import type { Plugin, LocatorWithOriginal, OneArgMethod } from "../plugin-system.ts";
-import { oneArgMethods, adjustError } from "../plugin-system.ts";
+import type { Plugin, LocatorWithOriginal } from "../plugin-system.ts";
+import { adjustError } from "../plugin-system.ts";
 
 export type SpinnerWaiterOptions = {
   /** Selectors that indicate loading state */
@@ -56,21 +56,19 @@ const suggestSpinnerMessage = (spinnerLocator: Locator) => [
 
 /**
  * Creates a spinner-waiter plugin.
- * Runtime settings can be overridden via `spinnerWaiter.settings.enterWith(...)`.
+ *
+ * Runtime settings can be overridden per-test via
+ * `spinnerWaiter.settings.enterWith({...})`, or for a single call via
+ * `spinnerWaiter.settings.run({...}, () => locator.click())`.
  */
 export const spinnerWaiter = Object.assign(
   (options: SpinnerWaiterOptions = {}): Plugin => {
     return {
       name: "spinner-waiter",
 
-      middleware: async ({ locator, method, args, page }, next) => {
+      middleware: async ({ locator, method, page }, next) => {
         const settings = getSettings(options);
         if (settings.disabled) return next();
-
-        // Check for skipSpinnerCheck in action options
-        const optionIndex = oneArgMethods.includes(method as OneArgMethod) ? 1 : 0;
-        const actionOptions = (args.at(optionIndex) || {}) as { skipSpinnerCheck?: boolean };
-        if (actionOptions.skipSpinnerCheck) return next();
 
         const start = Date.now();
         settings.log(`${locator}.${method}(...) starting`);

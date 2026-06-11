@@ -4,15 +4,19 @@ A plugin/middleware system for Playwright locator actions — the one Playwright
 
 Wrap `click`, `fill`, `waitFor` and friends with composable middleware, so your tests can be smart about *why* an action is slow or failing, without sprinkling `waitForSomething()` helpers through every test.
 
+
+
 Ships with five plugins:
 
-| Plugin | What it does |
-| --- | --- |
-| [`spinnerWaiter`](#spinnerwaiter) | If the app is visibly loading, wait longer for elements. If it isn't, fail fast. |
-| [`hydrationWaiter`](#hydrationwaiter) | Don't interact with the app until it's hydrated. |
-| [`uiErrorReporter`](#uierrorreporter) | When an action fails, append any visible error toasts to the error message. |
-| [`videoMode`](#videomode) | Highlight elements and pause before actions, so recorded videos are watchable. |
-| [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. |
+| Plugin | What it does | |
+| --- | --- | --- |
+| [`spinnerWaiter`](#spinnerwaiter) | If the app is visibly loading, wait longer for elements. If it isn't, fail fast. | [source](./src/plugins/spinner-waiter.ts) |
+| [`hydrationWaiter`](#hydrationwaiter) | Don't interact with the app until it's hydrated. | [source](./src/plugins/hydration-waiter.ts) |
+| [`uiErrorReporter`](#uierrorreporter) | When an action fails, append any visible error toasts to the error message. | [source](./src/plugins/ui-error-reporter.ts) |
+| [`videoMode`](#videomode) | Highlight elements and pause before actions, so recorded videos are watchable. | [source](./src/plugins/video-mode.ts) |
+| [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. | [source](./src/plugins/llm-recover.ts) |
+
+`spinnerWaiter` is the best one. It makes your test pass fast, fail fast, and it incentivises agents to *improve* the product when tests fail, instead of bumping timeouts which makes tests worse and lets your product get away with bad UX.
 
 ## ⚠️ This is a hack
 
@@ -49,21 +53,14 @@ Wire it up once in a fixture:
 ```ts
 // test-helpers.ts
 import { test as base } from "@playwright/test";
-import { addPlugins, hydrationWaiter, spinnerWaiter, uiErrorReporter, videoMode, llmRecover } from "plugwright";
+import { addPlugins, spinnerWaiter } from "plugwright";
 
 export const test = base.extend({
   page: async ({ page: basePage }, use, testInfo) => {
     await using page = await addPlugins({
       page: basePage,
       testInfo,
-      plugins: [
-        // order matters: first plugin is outermost (sees errors last-enriched)
-        !!process.env.LLM_RECOVER && llmRecover(),
-        hydrationWaiter(),
-        uiErrorReporter(),
-        spinnerWaiter(),
-        !!process.env.VIDEO_MODE && videoMode(),
-      ],
+      plugins: [spinnerWaiter()],
     });
     await use(page);
   },
@@ -88,6 +85,8 @@ test("kick off a slow report", async ({ page }) => {
 
 Pair it with an aggressive `actionTimeout` in `playwright.config.ts` (e.g. `1_000`) — the plugins are what make that viable.
 
+For a fixture with all five plugins wired together, see the [kitchen sink](#kitchen-sink) below.
+
 ## Plugins
 
 ### spinnerWaiter
@@ -109,16 +108,19 @@ spinnerWaiter({
 });
 ```
 
-Per-test runtime overrides go through `AsyncLocalStorage`:
+Runtime overrides go through `AsyncLocalStorage` — `enterWith` for the rest of the test, `run` for a single call:
 
 ```ts
 test("a test where spinners are expected to hang", async ({ page }) => {
   spinnerWaiter.settings.enterWith({ spinnerTimeout: 60_000 });
   // ...
+
+  // or scope an override to one action:
+  await spinnerWaiter.settings.run({ disabled: true }, () =>
+    page.getByText("flash message").click(),
+  );
 });
 ```
-
-Per-action opt-out: `await locator.click({ skipSpinnerCheck: true } as any)`.
 
 ### hydrationWaiter
 
@@ -173,7 +175,58 @@ For testing (or to swap in your own agent/provider), inject `requestRecoveryCode
 
 Artifacts (every attempt, code, errors, timings) are written to `<test-output-dir>/llm-recover/*.json`.
 
+### Kitchen sink
+
+All five plugins wired into one fixture — this mirrors how they ran in the app they were extracted from:
+
+```ts
+// test-helpers.ts
+import { test as base } from "@playwright/test";
+import {
+  addPlugins,
+  hydrationWaiter,
+  llmRecover,
+  spinnerWaiter,
+  uiErrorReporter,
+  videoMode,
+} from "plugwright";
+
+export const test = base.extend({
+  page: async ({ page: basePage }, use, testInfo) => {
+    await using page = await addPlugins({
+      page: basePage,
+      testInfo,
+      plugins: [
+        // order matters: the first plugin is outermost. llmRecover goes first
+        // so it sees errors after the other plugins have enriched them.
+        !!process.env.LLM_RECOVER && llmRecover(),
+        hydrationWaiter({ timeout: 60_000 }),
+        uiErrorReporter(),
+        spinnerWaiter(),
+        // opt-in: slows everything down to make recordings watchable
+        !!process.env.VIDEO_MODE && videoMode({ skipStackFrames: ["test-helpers.ts"] }),
+      ],
+      // also hide this helper file from stack traces in reports
+      boxedStackPrefixes: (defaults) => [...defaults, import.meta.filename],
+    });
+    await use(page);
+  },
+});
+```
+
+```ts
+// playwright.config.ts (the relevant bits)
+export default defineConfig({
+  use: {
+    actionTimeout: process.env.VIDEO_MODE ? 10_000 : 1_000, // fail fast; spinnerWaiter buys time when deserved
+    video: { mode: process.env.VIDEO_MODE ? "on" : "retain-on-failure" },
+  },
+});
+```
+
 ## Writing your own plugin
+
+**Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (page mutation around actions + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/plugwright/src`.
 
 A plugin is a name plus optional `middleware` and `testLifecycle` hooks:
 

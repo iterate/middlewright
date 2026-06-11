@@ -43,6 +43,22 @@ testSlower("slow button fails when spinner times out", async ({ page }) => {
   expect(error.message).toMatch(/spinner was still visible after .*/i);
 });
 
+test("settings.run scopes an override to a single call", async ({ page }) => {
+  await page.locator("button", { hasText: "slow button" }).click();
+
+  // Disabled just for this call — fails fast instead of waiting out the spinner
+  const error = await spinnerWaiter.settings
+    .run({ disabled: true }, () =>
+      page.locator("button", { hasText: "i have been clicked" }).waitFor(),
+    )
+    .catch((e: Error) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toMatch(/Timeout .* exceeded/);
+
+  // Outside the run() scope the spinner waiter is back, so this succeeds
+  await page.locator("button", { hasText: "i have been clicked" }).waitFor();
+});
+
 test("bails early when spinner disappears without expected element", async ({ page }) => {
   // Override page content for this test: spinner shows for 2s then disappears with wrong result
   await page.setContent(`
