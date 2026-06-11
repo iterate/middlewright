@@ -1,0 +1,52 @@
+{
+  "name": "plugwright",
+  "version": "0.1.0",
+  "description": "A plugin/middleware system for Playwright locator actions — spinner-aware waiting, hydration gates, UI error reporting, video highlighting, and LLM-powered recovery. A hack, but a useful one.",
+  "keywords": [
+    "playwright",
+    "plugin",
+    "middleware",
+    "testing",
+    "e2e",
+    "spinner",
+    "flaky-tests"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iterate/plugwright.git"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "dedent": "^1.7.0",
+    "emittery": "^1.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^24.10.9",
+    "publint": "^0.3.14",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.49.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
