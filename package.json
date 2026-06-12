@@ -1,5 +1,5 @@
 {
-  "name": "plugwright",
+  "name": "middlewright",
   "version": "0.1.0",
   "description": "A plugin/middleware system for Playwright locator actions — spinner-aware waiting, hydration gates, UI error reporting, video highlighting, and LLM-powered recovery. A hack, but a useful one.",
   "keywords": [
@@ -13,7 +13,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/iterate/plugwright.git"
+    "url": "git+https://github.com/iterate/middlewright.git"
   },
   "license": "MIT",
   "type": "module",

@@ -1,12 +1,12 @@
 {
-  "name": "plugwright-demo-video",
+  "name": "middlewright-demo-video",
   "private": true,
-  "description": "Remotion project that renders the plugwright demo video for the README",
+  "description": "Remotion project that renders the middlewright demo video for the README",
   "type": "module",
   "scripts": {
     "dev": "remotion studio",
-    "render": "remotion render PlugwrightDemo out/plugwright-demo.mp4",
-    "still": "remotion still PlugwrightDemo out/thumbnail.png --frame=400"
+    "render": "remotion render MiddlewrightDemo out/middlewright-demo.mp4",
+    "still": "remotion still MiddlewrightDemo out/thumbnail.png --frame=400"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",

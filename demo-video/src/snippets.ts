@@ -31,11 +31,11 @@ export const specLines = (opts: {
   { text: `});` },
 ];
 
-/** The plugwright fixture, mirroring the README quick start */
+/** The middlewright fixture, mirroring the README quick start */
 export const helperLines = (appearFrom: number, focusAt: number): CodeLine[] => {
   const lines: Array<Pick<CodeLine, "text" | "kind">> = [
     { text: `import { test as base } from "@playwright/test";` },
-    { text: `import { addPlugins, spinnerWaiter } from "plugwright";` },
+    { text: `import { addPlugins, spinnerWaiter } from "middlewright";` },
     { text: `` },
     { text: `export const test = base.extend({` },
     { text: `  page: async ({ page }, use, testInfo) => {` },

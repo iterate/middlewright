@@ -6,7 +6,7 @@ import { TitleScene } from "./scenes/Title";
 import { SetupScene } from "./scenes/Setup";
 import { RunFailSlowScene } from "./scenes/RunFailSlow";
 import { SadPathScene } from "./scenes/SadPath";
-import { PlugwrightScene } from "./scenes/Plugwright";
+import { MiddlewrightScene } from "./scenes/Middlewright";
 import { RunFailFastScene } from "./scenes/RunFailFast";
 import { AddSpinnerScene } from "./scenes/AddSpinner";
 import { HappyRunScene } from "./scenes/HappyRun";
@@ -20,7 +20,7 @@ const scenes: Array<[React.FC, number]> = [
   [SetupScene, 220],
   [RunFailSlowScene, 320],
   [SadPathScene, 300],
-  [PlugwrightScene, 320],
+  [MiddlewrightScene, 320],
   [RunFailFastScene, 320],
   [AddSpinnerScene, 160],
   [HappyRunScene, 380],
@@ -30,7 +30,7 @@ const scenes: Array<[React.FC, number]> = [
 const totalDuration =
   scenes.reduce((sum, [, duration]) => sum + duration, 0) - (scenes.length - 1) * TRANSITION;
 
-const PlugwrightDemo: React.FC = () => (
+const MiddlewrightDemo: React.FC = () => (
   <TransitionSeries>
     {scenes.flatMap(([Scene, duration], i) => [
       ...(i > 0
@@ -51,8 +51,8 @@ const PlugwrightDemo: React.FC = () => (
 
 export const Root: React.FC = () => (
   <Composition
-    id="PlugwrightDemo"
-    component={PlugwrightDemo}
+    id="MiddlewrightDemo"
+    component={MiddlewrightDemo}
     durationInFrames={totalDuration}
     fps={FPS}
     width={1920}

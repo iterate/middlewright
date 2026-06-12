@@ -1,5 +1,5 @@
 /**
- * plugwright plugin system.
+ * middlewright plugin system.
  *
  * Extracted from the iterate monorepo's internal Playwright test
  * infrastructure (github.com/iterate/iterate, private). Modifications from the
@@ -238,7 +238,7 @@ const patchLocatorPrototype = (
       setBoxedStackPrefixes(prefixes);
     } else {
       console.warn(
-        "[plugwright] could not find setBoxedStackPrefixes in this playwright-core version - " +
+        "[middlewright] could not find setBoxedStackPrefixes in this playwright-core version - " +
           "stack traces in reports will include plugin frames",
       );
     }

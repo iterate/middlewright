@@ -22,7 +22,7 @@ export const RunFailFastScene: React.FC = () => {
 
   return (
     <Workbench
-      label="Run again — with plugwright"
+      label="Run again — with middlewright"
       labelColor={colors.green}
       spec={
         <CodeWindow

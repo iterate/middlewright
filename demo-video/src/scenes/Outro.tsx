@@ -25,7 +25,7 @@ export const OutroScene: React.FC = () => {
     >
       <div style={{ fontSize: 64, fontWeight: 700, ...line(4) }}>
         <span style={{ color: colors.faint }}>❯ </span>
-        <span style={{ color: colors.amber }}>plug</span>
+        <span style={{ color: colors.amber }}>middle</span>
         <span style={{ color: colors.text }}>wright</span>
       </div>
 
@@ -39,11 +39,11 @@ export const OutroScene: React.FC = () => {
       </div>
 
       <div style={{ marginTop: 70, fontSize: 30, color: colors.text, ...line(100) }}>
-        <span style={{ color: colors.green }}>❯ </span>pnpm add -D plugwright
+        <span style={{ color: colors.green }}>❯ </span>pnpm add -D middlewright
         {caretOn && <span style={{ color: colors.faint }}>▋</span>}
       </div>
       <div style={{ marginTop: 22, fontSize: 22, color: colors.faint, ...line(120) }}>
-        # github.com/iterate/plugwright
+        # github.com/iterate/middlewright
       </div>
     </AbsoluteFill>
   );

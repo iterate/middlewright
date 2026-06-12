@@ -8,10 +8,10 @@ import { Workbench } from "../components/Workbench";
 import { helperLines, specLines } from "../snippets";
 import { colors, layout } from "../theme";
 
-export const PlugwrightScene: React.FC = () => {
+export const MiddlewrightScene: React.FC = () => {
   return (
     <Workbench
-      label="The fix: plugwright’s spinnerWaiter"
+      label="The fix: middlewright’s spinnerWaiter"
       labelColor={colors.green}
       spec={
         <CodeWindow
@@ -46,7 +46,7 @@ export const PlugwrightScene: React.FC = () => {
       }
     >
       <Annotation at={95} until={160} x={985} y={700} variant="solution" arrow="left" arrowOffset={42}>
-        Solve with plugwright. Set it up in a fixture, <i>once</i>. Don't touch the test code.
+        Solve with middlewright. Set it up in a fixture, <i>once</i>. Don't touch the test code.
       </Annotation>
       <Annotation at={168} x={985} y={750} variant="info" arrow="left" arrowOffset={42}>
         spinnerWaiter: if the app is <b>visibly loading</b>, wait up to 30s. If it isn’t — fail fast.

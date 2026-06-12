@@ -20,7 +20,7 @@ export const TitleScene: React.FC = () => {
     >
       <div style={{ fontSize: 96, fontWeight: 700, ...line(4) }}>
         <span style={{ color: colors.faint }}>❯ </span>
-        <span style={{ color: colors.amber }}>plug</span>
+        <span style={{ color: colors.amber }}>middle</span>
         <span style={{ color: colors.text }}>wright</span>
         {caretOn && <span style={{ color: colors.faint, fontWeight: 400 }}>▋</span>}
       </div>

@@ -1,4 +1,4 @@
-# plugwright
+# middlewright
 
 A plugin/middleware system for Playwright locator actions — the one Playwright doesn't have.
 
@@ -6,12 +6,12 @@ Wrap `click`, `fill`, `waitFor` and friends with composable middleware, so your 
 
 ## Quick start
 
-Install with `pnpm add -D plugwright` then wire it once in a fixture:
+Install with `pnpm add -D middlewright` then wire it once in a fixture:
 
 ```ts
 // test-helpers.ts
 import { test as base } from "@playwright/test";
-import { addPlugins, spinnerWaiter } from "plugwright";
+import { addPlugins, spinnerWaiter } from "middlewright";
 
 export const test = base.extend({
   page: async ({ page: basePage }, use, testInfo) => {
@@ -62,7 +62,7 @@ Ships with five plugins:
 You should know what you're buying:
 
 - **It patches `Locator.prototype` at runtime.** Once any page has plugins added, every locator in the process goes through the middleware dispatcher (pages without plugins fall through to the original behavior, but the patch itself is global).
-- **It reaches into Playwright internals.** Clean stack traces in reports depend on `setBoxedStackPrefixes`, which is undocumented and untyped — see [microsoft/playwright#38818](https://github.com/microsoft/playwright/issues/38818) asking for it to be made official. It has *already moved once* (playwright-core ≤ 1.59: `lib/utils`; 1.60+: `lib/coreBundle`). plugwright knows both locations and degrades gracefully (with a console warning, and plugin frames in your stack traces) if a future version moves it again. Set `PLAYWRIGHT_PLUGIN_DEBUG=1` to skip stack-boxing entirely.
+- **It reaches into Playwright internals.** Clean stack traces in reports depend on `setBoxedStackPrefixes`, which is undocumented and untyped — see [microsoft/playwright#38818](https://github.com/microsoft/playwright/issues/38818) asking for it to be made official. It has *already moved once* (playwright-core ≤ 1.59: `lib/utils`; 1.60+: `lib/coreBundle`). middlewright knows both locations and degrades gracefully (with a console warning, and plugin frames in your stack traces) if a future version moves it again. Set `PLAYWRIGHT_PLUGIN_DEBUG=1` to skip stack-boxing entirely.
 - **Pin your Playwright version** and treat Playwright upgrades as potentially breaking for this package. It's tested against the version in this repo's lockfile (currently 1.60.x); the declared `@playwright/test` peer range is >= 1.49.
 
 If Playwright ever ships official action middleware, use that instead and let this package die happy.
@@ -179,7 +179,7 @@ import {
   spinnerWaiter,
   uiErrorReporter,
   videoMode,
-} from "plugwright";
+} from "middlewright";
 
 export const test = base.extend({
   page: async ({ page: basePage }, use, testInfo) => {
@@ -216,13 +216,13 @@ export default defineConfig({
 
 ## Writing your own plugin
 
-**Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (page mutation around actions + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/plugwright/src`.
+**Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (page mutation around actions + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.
 
 A plugin is a name plus optional `middleware` and `testLifecycle` hooks:
 
 ```ts
-import type { Plugin } from "plugwright";
-import { adjustError } from "plugwright";
+import type { Plugin } from "middlewright";
+import { adjustError } from "middlewright";
 
 export const slowActionLogger = (thresholdMs = 2000): Plugin => ({
   name: "slow-action-logger",
