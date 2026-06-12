@@ -2,61 +2,72 @@ import { test as base, expect } from "@playwright/test";
 import { addPlugins, spinnerWaiter } from "../src/index.ts";
 
 const test = base.extend<{ slowMutationTimeout: number }>({
-  slowMutationTimeout: 2000,
-  page: async ({ page, slowMutationTimeout }, use, testInfo) => {
+  page: async ({ page }, use, testInfo) => {
     await using _page = await addPlugins({
       page,
       testInfo,
       plugins: [spinnerWaiter()],
     });
-    await _page.setContent(getTestPageHtml(slowMutationTimeout));
+    await _page.setContent(`
+      <head><title>Spinner Waiter Test</title></head>
+      <body>
+        <button id="slow-button" onclick="handleClick()">start work</button>
+        <script>
+          async function handleClick() {
+            const btn = document.querySelector('#slow-button');
+            btn.textContent = 'loading...';
+            setTimeout(() => btn.textContent = 'work done', window.slowMutationTimeout || 2000);
+          }
+        </script>
+      </body>
+    `);
     await use(_page);
   },
 });
 
 test("slow button succeeds when there's a spinner", async ({ page }) => {
-  await run(page);
+  await page.getByText("start work").click();
+  await page.getByText("work done").waitFor();
 });
 
 test("slow button fails without spinner waiter", async ({ page }) => {
   spinnerWaiter.settings.enterWith({ disabled: true });
-  const error = await run(page).catch((e) => e);
+  await page.getByText("start work").click();
+  const error = await page.getByText("work done").waitFor().catch((e) => e);
   expect(error.message).toMatch(/Timeout .* exceeded/);
 });
 
-// The plugin's 1s pre-action visibility check delays the final action, so a
-// 2s mutation could accidentally beat the action timeout - use a slower one.
-const testSlower = test.extend({ slowMutationTimeout: 6000 });
-
-testSlower("slow button fails when spinner doesn't match selector", async ({ page }) => {
+test("slow button fails when spinner doesn't match selector", async ({ page }) => {
+  await page.evaluate(() => Object.assign(window, { slowMutationTimeout: 6000 }));
   spinnerWaiter.settings.enterWith({
     spinnerSelectors: [".myCustomSpinnerClass"],
   });
-  const error = await run(page).catch((e) => e);
+  await page.getByText("start work").click();
+  const error = await page.getByText("work done").waitFor().catch((e) => e);
   expect(error.message).toMatch(/Timeout .* exceeded/);
   expect(error.message).toMatch(/If this is a slow operation.../);
 });
-testSlower("slow button fails when spinner times out", async ({ page }) => {
+test("slow button fails when spinner times out", async ({ page }) => {
+  await page.evaluate(() => Object.assign(window, { slowMutationTimeout: 6000 }));
   spinnerWaiter.settings.enterWith({ spinnerTimeout: 3001 });
-  const error = await run(page).catch((e) => e);
+  await page.getByText("start work").click();
+  const error = await page.getByText("work done").waitFor().catch((e) => e);
   expect(error.message).toMatch(/Timeout .* exceeded/);
   expect(error.message).toMatch(/spinner was still visible after .*/i);
 });
 
 test("settings.run scopes an override to a single call", async ({ page }) => {
-  await page.locator("button", { hasText: "slow button" }).click();
+  await page.getByText("start work").click();
 
   // Disabled just for this call — fails fast instead of waiting out the spinner
-  const error = await spinnerWaiter.settings
-    .run({ disabled: true }, () =>
-      page.locator("button", { hasText: "i have been clicked" }).waitFor(),
-    )
-    .catch((e: Error) => e);
+  const error = await spinnerWaiter.settings.run({ disabled: true }, async () => {
+    return await page.getByText("work done").waitFor().catch((e) => e);
+  });
   expect(error).toBeInstanceOf(Error);
   expect((error as Error).message).toMatch(/Timeout .* exceeded/);
 
   // Outside the run() scope the spinner waiter is back, so this succeeds
-  await page.locator("button", { hasText: "i have been clicked" }).waitFor();
+  await page.getByText("work done").waitFor();
 });
 
 test("bails early when spinner disappears without expected element", async ({ page }) => {
@@ -85,26 +96,3 @@ test("bails early when spinner disappears without expected element", async ({ pa
   // Should bail within ~10s (2s spinner + 3s grace + buffer), not wait full 30s
   expect(elapsed).toBeLessThan(15_000);
 });
-
-function run(page: import("@playwright/test").Page) {
-  return page
-    .locator("button", { hasText: "slow button" })
-    .click()
-    .then(() => page.locator("button", { hasText: "i have been clicked" }).waitFor());
-}
-
-function getTestPageHtml(slowMutationTimeout: number) {
-  return `
-    <head><title>Spinner Waiter Test</title></head>
-    <body>
-      <button id="slow-button" onclick="handleClick()">slow button</button>
-      <script>
-        async function handleClick() {
-          const btn = document.querySelector('#slow-button');
-          btn.textContent = 'loading...';
-          setTimeout(() => btn.textContent = 'i have been clicked', ${slowMutationTimeout});
-        }
-      </script>
-    </body>
-  `;
-}
