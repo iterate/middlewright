@@ -68,10 +68,10 @@ export const RunFailFastScene: React.FC = () => {
       }
     >
       <Annotation at={205} until={248} x={540} y={680} variant="solution" arrow="right" arrowOffset={42}>
-        Fails in <b>1.5 seconds</b>, not 30. The tight feedback loop is back.
+        Fails <i>fast</i>. (Still fails because your app is still bad)
       </Annotation>
       <Annotation at={255} x={540} y={790} variant="info" arrow="right" arrowOffset={42}>
-        And the error tells you the <b>real</b> fix: give the product a loading state.
+        Now the error tells you or your agent what to <i>actually</i> fix: the shitty UX. Either speed up massively, or add a loading state.
       </Annotation>
     </Workbench>
   );

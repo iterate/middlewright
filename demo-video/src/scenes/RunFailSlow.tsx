@@ -17,7 +17,7 @@ export const RunFailSlowScene: React.FC = () => {
   const stopwatchMs =
     frame < CLICK
       ? null
-      : interpolate(frame, [CLICK, FAIL], [0, 2300], { extrapolateRight: "clamp" });
+      : interpolate(frame, [CLICK, FAIL], [0, 3300], { extrapolateRight: "clamp" });
 
   return (
     <Workbench
@@ -52,18 +52,18 @@ export const RunFailSlowScene: React.FC = () => {
             { at: 0, type: "cmd", text: "npx playwright test" },
             { at: 30, text: "Running 1 test using 1 worker", color: colors.dim },
             { at: FAIL, text: "  1) report.spec.ts:3 › generate a report ─────────────", color: colors.red },
-            { at: FAIL + 6, text: "     TimeoutError: locator.click: Timeout 1000ms exceeded.", color: colors.red },
+            { at: FAIL + 6, text: "     TimeoutError: locator.click: Timeout 3000ms exceeded.", color: colors.red },
             { at: FAIL + 12, text: "     waiting for getByText('Report ready')", color: colors.dim },
-            { at: FAIL + 26, text: "  1 failed (2.3s)", color: colors.red, bold: true },
+            { at: FAIL + 26, text: "  1 failed (3.3s)", color: colors.red, bold: true },
           ]}
         />
       }
     >
       <Annotation at={200} x={1100} y={470} width={460} variant="problem" arrow="top" arrowOffset={120}>
-        The app <b>is</b> generating the report — but shows <b>nothing</b>. Your users get this exact experience.
+        The app <i>is</i> generating the report, but it takes a while and there's no progress indicator because you are bad at your job.
       </Annotation>
       <Annotation at={250} x={540} y={690} variant="problem" arrow="right" arrowOffset={42}>
-        Gave up after 1s (this suite’s actionTimeout). Not flaky — the product gave it nothing to wait for.
+        {`Gave up after 3s (playwright's default timeout). The test will likely be flaky if it sometimes takes <3s, sometimes >3s.`}
       </Annotation>
     </Workbench>
   );

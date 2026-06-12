@@ -79,7 +79,7 @@ export const HappyRunScene: React.FC = () => {
         Spinner visible → spinnerWaiter waits patiently (up to 30s). Users see progress too.
       </Annotation>
       <Annotation at={330} x={540} y={690} variant="solution" arrow="right" arrowOffset={42}>
-        Fast when it can be, patient when it should be. No timeout bumping.
+        Aggressively punishes poor UX, but patient when there's affordance in your product.
       </Annotation>
     </Workbench>
   );

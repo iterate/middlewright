@@ -26,7 +26,7 @@ export const SetupScene: React.FC = () => {
       }
     >
       <Annotation at={55} x={260} y={420} width={440} variant="info" arrow="top" arrowOffset={140}>
-        A completely ordinary test — no custom helpers, no explicit waits.
+        A normal test — no custom helpers, no explicit waits.
       </Annotation>
       <Annotation at={130} x={1100} y={470} width={460} variant="warn" arrow="top" arrowOffset={120}>
         One catch: generating the report takes <b>~20 seconds</b>.

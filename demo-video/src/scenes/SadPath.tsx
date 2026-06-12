@@ -25,14 +25,14 @@ export const SadPathScene: React.FC = () => {
         <Terminal lines={[{ at: 0, type: "cmd", text: "" }]} width={layout.terminal.w} height={layout.terminal.h} />
       }
     >
-      <Annotation at={50} until={125} x={720} y={300} variant="warn" arrow="left" arrowOffset={42}>
+      <Annotation at={90} until={125} x={720} y={300} variant="warn" arrow="left" arrowOffset={42}>
         The classic move: give this one slow click <b>30 seconds</b>. Test goes green. Ship it?
       </Annotation>
       <Annotation at={132} x={280} y={430} width={430} variant="problem" arrow="top" arrowOffset={200}>
-        When this flow <b>truly breaks</b>, the test now burns 30s before telling you. Multiply by every slow spot in your suite.
+        When this <b>actually breaks</b>, you now burn 30s before you find out. Multiply by every slow spot in your suite.
       </Annotation>
       <Annotation at={215} x={1180} y={470} width={460} variant="problem" arrow="top" arrowOffset={120}>
-        And users still stare at a frozen page for 20s — the bumped timeout just <b>hides the UX bug</b>.
+        And users still stare at a frozen page for 20s — the bumped timeout just <b>hides the shitty UX</b>.
       </Annotation>
     </Workbench>
   );

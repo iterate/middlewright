@@ -36,7 +36,7 @@ export const PlugwrightScene: React.FC = () => {
           width={layout.chip.w}
           height={layout.chip.h}
           value="1_000"
-          comment="// unchanged — still failing fast"
+          comment="// new — aggressive on purpose"
         />
       }
       chipAt={210}
@@ -46,13 +46,13 @@ export const PlugwrightScene: React.FC = () => {
       }
     >
       <Annotation at={95} until={160} x={985} y={700} variant="solution" arrow="left" arrowOffset={42}>
-        Wire it up <b>once</b>, in a fixture. The test itself stays completely ordinary.
+        Solve with plugwright. Set it up in a fixture, <i>once</i>. Don't touch the test code.
       </Annotation>
       <Annotation at={168} x={985} y={750} variant="info" arrow="left" arrowOffset={42}>
         spinnerWaiter: if the app is <b>visibly loading</b>, wait up to 30s. If it isn’t — fail fast.
       </Annotation>
       <Annotation at={235} x={985} y={545} width={380} variant="info" arrow="left" arrowOffset={36}>
-        No per-click timeout bumps: actionTimeout stays at <b>1 second</b>.
+        Now you can <i><u>reduce</u></i> the actionTimeout to something much more aggressive.
       </Annotation>
     </Workbench>
   );
