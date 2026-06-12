@@ -1,6 +1,6 @@
 {
   "name": "middlewright",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A plugin/middleware system for Playwright locator actions — spinner-aware waiting, hydration gates, UI error reporting, video highlighting, and LLM-powered recovery. A hack, but a useful one.",
   "keywords": [
     "playwright",
