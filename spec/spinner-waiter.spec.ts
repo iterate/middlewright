@@ -47,6 +47,35 @@ test("slow button fails when spinner doesn't match selector", async ({ page }) =
   expect(error.message).toMatch(/Timeout .* exceeded/);
   expect(error.message).toMatch(/If this is a slow operation.../);
 });
+
+test("fails before a late spinner can make the no-spinner hint misleading", async ({ page }) => {
+  await page.setContent(`
+    <button id="start" onclick="
+      const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      Promise.resolve().then(async () => {
+        await sleep(1500);
+        document.querySelector('#spinner').hidden = false;
+        await sleep(1500);
+        document.querySelector('#spinner').hidden = true;
+        document.querySelector('#result').textContent = 'operation complete';
+      });
+    ">start operation</button>
+    <div id="spinner" aria-label="Loading" hidden>Loading...</div>
+    <div id="result"></div>
+  `);
+
+  await page.locator("#start").click();
+
+  const start = Date.now();
+  const error = await page.getByText("operation complete").waitFor().catch((e: Error) => e);
+  const elapsed = Date.now() - start;
+
+  expect(error).toBeInstanceOf(Error);
+  expect(error?.message).toMatch(/If this is a slow operation.../);
+  expect(elapsed).toBeLessThan(1500); // we don't tolerate the spinner taking a long time to appear
+  expect(await page.locator('[aria-label="Loading"]').isVisible()).toBe(false);
+});
+
 test("slow button fails when spinner times out", async ({ page }) => {
   await page.evaluate(() => Object.assign(window, { slowMutationTimeout: 6000 }));
   spinnerWaiter.settings.enterWith({ spinnerTimeout: 3001 });

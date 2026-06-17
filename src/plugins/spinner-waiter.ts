@@ -8,8 +8,8 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Locator } from "@playwright/test";
-import type { Plugin, LocatorWithOriginal } from "../plugin-system.ts";
-import { adjustError } from "../plugin-system.ts";
+import type { ActionContext, LocatorWithOriginal, Plugin } from "../plugin-system.ts";
+import { adjustError, oneArgMethods } from "../plugin-system.ts";
 
 export type SpinnerWaiterOptions = {
   /** Selectors that indicate loading state */
@@ -22,11 +22,16 @@ export type SpinnerWaiterOptions = {
   log?: (message: string) => void;
 };
 
+/** Match `loading...`, (or really `anyVerbing...`). Also matches an ellipsis character "…" rather than "..." since LLMs like fancy unicode. */
+const loadingTextPattern = /(loading|pending|creating|verifying|starting|processing|syncing|building|\b\w+ing)[\s\w]*(\.\.\.|…)$/;
+
 const defaultSelectors = [
   `[aria-label="Loading"]`,
   `[data-spinner='true']`,
-  `:text-matches("(loading|pending|creating|verifying|starting|processing|syncing)\\.\\.\\.$", "i")`,
+  `:text-matches(${JSON.stringify(loadingTextPattern.source)}, "i")`,
 ];
+
+const oneArgMethodNames = new Set<string>(oneArgMethods);
 
 const defaults: Required<SpinnerWaiterOptions> = {
   spinnerSelectors: defaultSelectors,
@@ -66,7 +71,7 @@ export const spinnerWaiter = Object.assign(
     return {
       name: "spinner-waiter",
 
-      middleware: async ({ locator, method, page }, next) => {
+      middleware: async ({ args, locator, method, page }, next) => {
         const settings = getSettings(options);
         if (settings.disabled) return next();
 
@@ -87,9 +92,9 @@ export const spinnerWaiter = Object.assign(
 
         if (!spinnerVisible) {
           // No spinner - call action, suggest adding one if it fails
-          settings.log(`${locator} not visible, no spinner, proceeding anyway`);
+          settings.log(`${locator} not visible, no spinner, failing fast`);
           try {
-            return await next();
+            return await callOriginalWithTimeout(locator, method, args, 1);
           } catch (error) {
             adjustError(error as Error, suggestSpinnerMessage(spinnerLocator), "spinner-waiter.ts");
             throw error;
@@ -147,7 +152,34 @@ async function waitForVisible(locator: Locator, { timeout = 1000 } = {}) {
     if (await locator.isVisible()) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  return false;
+  return await locator.isVisible();
+}
+
+async function callOriginalWithTimeout(
+  locator: LocatorWithOriginal,
+  method: ActionContext["method"],
+  args: unknown[],
+  timeout: number,
+) {
+  return await (locator[`${method}_original`] as Function)(
+    ...withTimeoutOption(method, args, timeout),
+  );
+}
+
+function withTimeoutOption(method: ActionContext["method"], args: unknown[], timeout: number) {
+  const optionsIndex = oneArgMethodNames.has(method) ? 1 : 0;
+  const nextArgs = [...args];
+  const options = nextArgs[optionsIndex];
+  if (isOptionsObject(options)) {
+    nextArgs[optionsIndex] = { ...options, timeout };
+  } else {
+    nextArgs[optionsIndex] = { timeout };
+  }
+  return nextArgs;
+}
+
+function isOptionsObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
