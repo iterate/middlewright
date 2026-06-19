@@ -130,17 +130,28 @@ uiErrorReporter({ selector: '[data-type="error"]' });
 
 ### videoMode
 
-For producing demo/debugging videos people can actually follow: outlines the element in gold, pauses before each action, and pauses after the test so the video doesn't cut off abruptly. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
+For producing demo/debugging videos people can actually follow: waits for the target element to become attached as dead air, outlines the element in gold, pauses before each action, and pauses after the test as dead air so the final cut doesn't keep teardown padding. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
 
 ```ts
-videoMode({
+const video = videoMode({
   pauseBefore: 1000,
   pauseAfterTest: 3000,
   highlightStyle: "3px solid gold",
   skipMethods: ["waitFor"],
   skipStackFrames: ["test-helpers.ts"], // don't slow down internal login/setup helpers
 });
+
+// Use the returned plugin for invisible setup/bookkeeping that should not be
+// highlighted or slowed in video mode.
+await video.deadAir(async () => {
+  await page.goto("/login");
+  await page.locator("#email").fill("demo@example.com");
+});
 ```
+
+When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-tight.webm` with dead air removed, and attaches both videos plus `video-mode.json` to the test report. If `ffmpeg` or `ffprobe` is missing, the trim step fails plainly so you know to install ffmpeg.
+
+Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode observes the pre-action "wait for attached" period as dead air and highlights immediately before the action.
 
 ### llmRecover
 

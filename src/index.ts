@@ -6,6 +6,8 @@ export {
   type Plugin,
   type ActionContext,
   type ActionMiddleware,
+  type ActionMiddlewareTiming,
+  type ActionTiming,
   type NextFn,
   type TestLifecycleEvents,
   type LocatorWithOriginal,

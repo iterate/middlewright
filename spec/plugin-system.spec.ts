@@ -72,6 +72,39 @@ test("middleware receives testInfo", async ({ page }, testInfo) => {
   expect(seenTitle).toBe("middleware receives testInfo");
 });
 
+test("middleware receives action timing", async ({ page }, testInfo) => {
+  let seenTiming: any;
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [
+      {
+        name: "timing-spy",
+        middleware: async (ctx, next) => {
+          seenTiming = ctx.timing;
+          return next();
+        },
+      },
+    ],
+  });
+  await plugged.setContent(`<button>hi</button>`);
+
+  await plugged.locator("button").click();
+
+  expect(seenTiming).toMatchObject({
+    actionStartedAt: expect.any(Number),
+    attachedAt: expect.any(Number),
+    attachedAtStart: true,
+    middlewares: [
+      expect.objectContaining({
+        endedAt: expect.any(Number),
+        name: "timing-spy",
+        startedAt: expect.any(Number),
+      }),
+    ],
+  });
+});
+
 test("pages without plugins fall through to the original behavior", async ({
   page,
   context,

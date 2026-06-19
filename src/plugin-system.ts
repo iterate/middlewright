@@ -71,6 +71,20 @@ export type ActionContext = {
   args: unknown[];
   page: Page;
   testInfo: TestInfo;
+  timing: ActionTiming;
+};
+
+export type ActionMiddlewareTiming = {
+  name: string;
+  startedAt: number;
+  endedAt?: number;
+};
+
+export type ActionTiming = {
+  actionStartedAt: number;
+  attachedAt?: number;
+  attachedAtStart: boolean;
+  middlewares: ActionMiddlewareTiming[];
 };
 
 /** Function that calls the next middleware or the original action */
@@ -95,10 +109,15 @@ export type Plugin = {
 const PLUGIN_STATE = Symbol("playwrightPluginState");
 
 type PluginState = {
-  actionMiddlewares: ActionMiddleware[];
+  actionMiddlewares: RegisteredActionMiddleware[];
   lifecycleEmitter: Emittery<TestLifecycleEvents>;
   lifecycleCleanups: (() => void)[];
   testInfo: TestInfo;
+};
+
+type RegisteredActionMiddleware = {
+  name: string;
+  middleware: ActionMiddleware;
 };
 
 type PageWithPlugins = Page & {
@@ -153,7 +172,10 @@ export const addPlugins = async (params: {
     if (!plugin) continue;
 
     if (plugin.middleware) {
-      state.actionMiddlewares.push(plugin.middleware);
+      state.actionMiddlewares.push({
+        middleware: plugin.middleware,
+        name: plugin.name,
+      });
     }
 
     if (plugin.testLifecycle) {
@@ -214,6 +236,47 @@ const loadSetBoxedStackPrefixes = (corePkg: string): ((prefixes: string[]) => vo
   return null;
 };
 
+const locatorIsAttached = async (locator: Locator) => {
+  try {
+    return (await locator.count()) > 0;
+  } catch {
+    return false;
+  }
+};
+
+const observeAttachedAt = (
+  locator: Locator,
+  timing: ActionTiming,
+  pollIntervalMs = 50,
+) => {
+  let stopped = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const poll = async () => {
+    if (stopped || timing.attachedAt !== undefined) {
+      return;
+    }
+
+    if (await locatorIsAttached(locator)) {
+      timing.attachedAt = performance.now();
+      return;
+    }
+
+    timeout = setTimeout(() => {
+      void poll();
+    }, pollIntervalMs);
+  };
+
+  void poll();
+
+  return () => {
+    stopped = true;
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  };
+};
+
 /** Patch Locator prototype to run middleware. Safe to call multiple times. */
 const patchLocatorPrototype = (
   page: Page,
@@ -261,6 +324,17 @@ const patchLocatorPrototype = (
       const state = getPluginState(this.page());
       if (!state) return callOriginal();
       const actionMiddlewares = state.actionMiddlewares;
+      const actionStartedAt = performance.now();
+      const attachedAtStart = await locatorIsAttached(this);
+      const timing: ActionTiming = {
+        actionStartedAt,
+        attachedAt: attachedAtStart ? actionStartedAt : undefined,
+        attachedAtStart,
+        middlewares: [],
+      };
+      const stopObservingAttached = attachedAtStart
+        ? () => {}
+        : observeAttachedAt(this, timing);
 
       const ctx: ActionContext = {
         locator: this,
@@ -268,19 +342,33 @@ const patchLocatorPrototype = (
         args,
         page: this.page(),
         testInfo: state.testInfo,
+        timing,
       };
 
       // Build middleware chain - each middleware calls next() to continue
       let index = 0;
       const next: NextFn = async () => {
         if (index < actionMiddlewares.length) {
-          const middleware = actionMiddlewares[index++];
-          return middleware(ctx, next);
+          const { middleware, name } = actionMiddlewares[index++];
+          const middlewareTiming: ActionMiddlewareTiming = {
+            name,
+            startedAt: performance.now(),
+          };
+          timing.middlewares.push(middlewareTiming);
+          try {
+            return await middleware(ctx, next);
+          } finally {
+            middlewareTiming.endedAt = performance.now();
+          }
         }
         return callOriginal();
       };
 
-      return next();
+      try {
+        return await next();
+      } finally {
+        stopObservingAttached();
+      }
     };
 
     Object.defineProperty(locatorPrototype, method, { value });
