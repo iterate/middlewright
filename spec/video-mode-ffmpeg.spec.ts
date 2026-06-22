@@ -87,7 +87,7 @@ test("writes a video with dead air removed", async ({ page }, testInfo) => {
     await plugged.getByText("Start import").click();
     await plugged.getByText("Review records").click();
     await plugged.getByText("Approve import").click();
-    await video.deadAir(async () => {
+    await plugged.videoMode.deadAir(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1700));
     });
     await plugged.getByText("Download receipt").click();

@@ -32,15 +32,23 @@ export type VideoModeMetadata = {
   outputs: VideoModeOutputs;
 };
 
-export type VideoModePlugin = Plugin & {
+export type VideoModeControls = {
   /**
    * Run invisible video bookkeeping without video-mode highlighting/pauses,
    * and write the elapsed span to video-mode metadata.
    */
   deadAir<T>(action: () => Promise<T>): Promise<T>;
+  /** Milliseconds since video-mode started recording metadata for this test. */
+  getVideoTimestamp(): number;
   /** Current metadata snapshot. Written to video-mode.json after the test. */
   metadata(): VideoModeMetadata;
 };
+
+export type VideoModePageExtension = {
+  videoMode: VideoModeControls;
+};
+
+export type VideoModePlugin = Plugin<VideoModePageExtension> & VideoModeControls;
 
 export type VideoModeOptions = {
   /** Pause duration before action (ms). Default: 1000 */
@@ -473,9 +481,21 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     outputs: {},
     startedAt: performance.now(),
   };
+  const controls: VideoModeControls = {
+    deadAir: async (action) => {
+      return await recordDeadAir(state, action);
+    },
+    getVideoTimestamp: () => {
+      const now = performance.now();
+      return Math.round(now - (state.startedAt ?? now));
+    },
+    metadata: () => metadataFor(state),
+  };
 
   return {
+    ...controls,
     name: "video-mode",
+    pageExtension: () => ({ videoMode: controls }),
 
     middleware: async ({ args, locator, method, timing }, next) => {
       if (state.deadAirDepth > 0) return next();
@@ -515,12 +535,6 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         await recordAttachedWaitFromTiming(state, timing, locator);
       }
     },
-
-    deadAir: async (action) => {
-      return await recordDeadAir(state, action);
-    },
-
-    metadata: () => metadataFor(state),
 
     testLifecycle: (emitter) => {
       const offBeforeTest = emitter.on("beforeTest", () => {

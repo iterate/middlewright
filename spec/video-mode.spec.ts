@@ -133,12 +133,11 @@ test("marks explicit attached waitFor calls as dead air", async ({ page }, testI
 test("deadAir runs actions without video highlighting and records metadata", async ({
   page,
 }, testInfo) => {
-  const video = videoMode({ pauseBefore: 5000, pauseAfterTest: 50 });
   {
     await using plugged = await addPlugins({
       page,
       testInfo,
-      plugins: [video],
+      plugins: [videoMode({ pauseBefore: 5000, pauseAfterTest: 50 })],
     });
 
     await plugged.setContent(`
@@ -152,19 +151,21 @@ test("deadAir runs actions without video highlighting and records metadata", asy
     `);
 
     const start = Date.now();
-    await video.deadAir(async () => {
+    const videoTimestamp = plugged.videoMode.getVideoTimestamp();
+    await plugged.videoMode.deadAir(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       await plugged.locator("#btn").click();
     });
 
     expect(Date.now() - start).toBeLessThan(2000);
+    expect(plugged.videoMode.getVideoTimestamp()).toBeGreaterThanOrEqual(videoTimestamp);
     await expect(plugged.locator("#result")).toContainText("(no style)");
-    expect(video.metadata()).toMatchObject({
+    expect(plugged.videoMode.metadata()).toMatchObject({
       outputs: {},
       schemaVersion: 1,
       timebase: "ms",
     });
-    expect(video.metadata().deadAir).toContainEqual(
+    expect(plugged.videoMode.metadata().deadAir).toContainEqual(
       expect.objectContaining({ end: expect.any(Number), start: expect.any(Number) }),
     );
   }

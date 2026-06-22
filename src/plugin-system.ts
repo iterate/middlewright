@@ -98,12 +98,19 @@ export type TestLifecycleEvents = {
   afterTest: { page: Page; testInfo: TestInfo };
 };
 
-export type Plugin = {
+export type PageExtensionContext = {
+  page: Page;
+  testInfo: TestInfo;
+};
+
+export type Plugin<PageExtension extends object = {}> = {
   name: string;
   /** Middleware to wrap locator actions. Called in registration order. */
   middleware?: ActionMiddleware;
   /** Subscribe to test lifecycle events */
   testLifecycle?: (emitter: Emittery<TestLifecycleEvents>) => void | (() => void);
+  /** Add explicit test controls to the page returned from addPlugins. */
+  pageExtension?: (ctx: PageExtensionContext) => PageExtension;
 };
 
 const PLUGIN_STATE = Symbol("playwrightPluginState");
@@ -120,7 +127,30 @@ type RegisteredActionMiddleware = {
   middleware: ActionMiddleware;
 };
 
-type PageWithPlugins = Page & {
+type MaybePlugin = Plugin<object> | false | null | undefined;
+
+type PluginPageExtension<T> = T extends Plugin<infer PageExtension> ? PageExtension : {};
+
+type PluginPageExtensionForEntry<T> = [Extract<T, Plugin<object>>] extends [never]
+  ? {}
+  : [Exclude<T, Plugin<object>>] extends [never]
+    ? PluginPageExtension<T>
+    : Partial<PluginPageExtension<T>>;
+
+type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (
+  value: infer Intersection,
+) => void
+  ? Intersection
+  : never;
+
+type PageExtensions<T extends readonly MaybePlugin[]> = UnionToIntersection<
+  {
+    [Index in keyof T]: PluginPageExtensionForEntry<T[Index]>;
+  }[number]
+> &
+  object;
+
+type PageWithPlugins<PageExtension extends object = {}> = Page & PageExtension & {
   [PLUGIN_STATE]: PluginState;
   [Symbol.asyncDispose]: () => Promise<void>;
 };
@@ -149,12 +179,12 @@ const getPluginState = (page: Page): PluginState | undefined => {
  * });
  * ```
  */
-export const addPlugins = async (params: {
+export const addPlugins = async <const Plugins extends readonly MaybePlugin[]>(params: {
   page: Page;
   testInfo: TestInfo;
-  plugins: (Plugin | false | null | undefined)[];
+  plugins: Plugins;
   boxedStackPrefixes?: (defaults: string[]) => string[];
-}): Promise<PageWithPlugins> => {
+}): Promise<PageWithPlugins<PageExtensions<Plugins>>> => {
   const { page, testInfo, plugins, boxedStackPrefixes } = params;
   // Patch Locator prototype once globally
   patchLocatorPrototype(page, boxedStackPrefixes);
@@ -184,8 +214,15 @@ export const addPlugins = async (params: {
     }
   }
 
-  const pageWithPlugins = page as PageWithPlugins;
+  const pageWithPlugins = page as PageWithPlugins<PageExtensions<Plugins>>;
   pageWithPlugins[PLUGIN_STATE] = state;
+
+  for (const plugin of plugins) {
+    if (!plugin) continue;
+    if (!plugin.pageExtension) continue;
+
+    Object.assign(pageWithPlugins, plugin.pageExtension({ page, testInfo }));
+  }
 
   // Emit beforeTest
   await state.lifecycleEmitter.emitSerial("beforeTest", { page, testInfo });

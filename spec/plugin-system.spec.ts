@@ -105,6 +105,36 @@ test("middleware receives action timing", async ({ page }, testInfo) => {
   });
 });
 
+test("plugins can expose typed controls on the plugged page", async ({ page }, testInfo) => {
+  const helper = {
+    name: "page-helper",
+    pageExtension: ({ page, testInfo }) => ({
+      pageHelper: {
+        renderMessage: async (message: string) => {
+          await page.setContent(`<main>${message}</main>`);
+        },
+        title: () => testInfo.title,
+      },
+    }),
+  } satisfies Plugin<{
+    pageHelper: {
+      renderMessage(message: string): Promise<void>;
+      title(): string;
+    };
+  }>;
+
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [helper],
+  });
+
+  await plugged.pageHelper.renderMessage("hello from a page extension");
+
+  await expect(plugged.locator("main")).toContainText("hello from a page extension");
+  expect(plugged.pageHelper.title()).toBe("plugins can expose typed controls on the plugged page");
+});
+
 test("pages without plugins fall through to the original behavior", async ({
   page,
   context,

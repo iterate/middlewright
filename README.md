@@ -133,18 +133,24 @@ uiErrorReporter({ selector: '[data-type="error"]' });
 For producing demo/debugging videos people can actually follow: marks pre-action waiting as dead air, outlines the element in gold, pauses before each action, and keeps a short final hold before trimming after-test padding as dead air. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
 
 ```ts
-const video = videoMode({
-  pauseBefore: 1000,
-  pauseAfterTest: 3000,
-  deadAirThreshold: 300,
-  highlightStyle: "3px solid gold",
-  skipMethods: ["waitFor"],
-  skipStackFrames: ["test-helpers.ts"], // don't slow down internal login/setup helpers
+await using page = await addPlugins({
+  page: basePage,
+  testInfo,
+  plugins: [
+    videoMode({
+      pauseBefore: 1000,
+      pauseAfterTest: 3000,
+      deadAirThreshold: 300,
+      highlightStyle: "3px solid gold",
+      skipMethods: ["waitFor"],
+      skipStackFrames: ["test-helpers.ts"], // don't slow down internal login/setup helpers
+    }),
+  ],
 });
 
-// Use the returned plugin for invisible setup/bookkeeping that should not be
+// Use page.videoMode for invisible setup/bookkeeping that should not be
 // highlighted or slowed in video mode.
-await video.deadAir(async () => {
+await page.videoMode.deadAir(async () => {
   await page.goto("/login");
   await page.locator("#email").fill("demo@example.com");
 });
@@ -232,7 +238,7 @@ export default defineConfig({
 
 **Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (page mutation around actions + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.
 
-A plugin is a name plus optional `middleware` and `testLifecycle` hooks:
+A plugin is a name plus optional `middleware`, `testLifecycle`, and `pageExtension` hooks:
 
 ```ts
 import type { Plugin } from "middlewright";
@@ -263,9 +269,35 @@ export const slowActionLogger = (thresholdMs = 2000): Plugin => ({
 });
 ```
 
+Use `pageExtension` for explicit controls tests can call through the page returned from `addPlugins`:
+
+```ts
+export const debugTools = (): Plugin<{
+  debugTools: {
+    title(): string;
+  };
+}> => ({
+  name: "debug-tools",
+  pageExtension: ({ testInfo }) => ({
+    debugTools: {
+      title: () => testInfo.title,
+    },
+  }),
+});
+
+await using page = await addPlugins({
+  page: basePage,
+  testInfo,
+  plugins: [debugTools()],
+});
+
+expect(page.debugTools.title()).toBe(testInfo.title);
+```
+
 Notes for plugin authors:
 
 - Middleware runs in registration order; the first plugin in the array is outermost. Error-enriching plugins (like `uiErrorReporter`) should generally be registered *before* the plugins whose errors they enrich, and recovery plugins (like `llmRecover`) first of all, so they see fully-enriched errors.
+- Keep page extensions namespaced (`page.videoMode`, `page.debugTools`) so plugin controls do not collide with Playwright's own `Page` methods or other plugins.
 - Inside middleware, use the `_original` methods (`locator.waitFor_original(...)` etc. — see the `LocatorWithOriginal` type) when you need to perform locator actions *without* re-entering the middleware chain.
 - `adjustError(error, infoLines, filterFile?)` appends colored info lines to an error message and optionally scrubs your plugin's frames from the stack trace.
 

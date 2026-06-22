@@ -4,6 +4,7 @@ export {
   oneArgMethods,
   overrideableMethods,
   type Plugin,
+  type PageExtensionContext,
   type ActionContext,
   type ActionMiddleware,
   type ActionMiddlewareTiming,
