@@ -25,71 +25,70 @@ test("writes a video with dead air removed", async ({ page }, testInfo) => {
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <main style="display: grid; gap: 16px; min-height: 100vh; place-items: center; font: 24px sans-serif;">
-        <h1>Dead air workflow</h1>
-        <p id="status">Ready</p>
-        <button id="start">Start import</button>
+      <main style="display: flex; flex-direction: column; gap: 16px">
+        <div data-spinner="true" style="visibility: hidden;">Loading...</div>
+        <div class="stages" style="display: flex; gap: 16px;">
+          <button data-stage-index="0">Start import</button>
+          <button data-stage-index="1">Review records</button>
+          <button data-stage-index="2">Approve import</button>
+          <button data-stage-index="3">Download receipt</button>
+        </div>
+        <div id="result"></div>
       </main>
       <script>
-        const main = document.querySelector('main');
-        const status = document.getElementById('status');
+        const spinner = document.querySelector('[data-spinner]');
+        const buttons = Array.from(document.querySelectorAll('button[data-stage-index]'));
+        const result = document.querySelector('#result');
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const stages = [
+          { delay: 2200 },
+          { delay: 2600 },
+          { delay: 1600 },
+          { delay: 1800, done: true },
+        ];
 
-        function showSpinner(text) {
-          document.getElementById('spinner')?.remove();
-          main.insertAdjacentHTML('beforeend', '<div id="spinner" aria-label="Loading">' + text + '...</div>');
+        function setActiveStage(index) {
+          spinner.style.visibility = 'hidden';
+          buttons.forEach((button, buttonIndex) => {
+            button.disabled = buttonIndex !== index;
+          });
         }
 
-        function hideSpinner() {
-          document.getElementById('spinner')?.remove();
-        }
-
-        document.getElementById('start').addEventListener('click', async () => {
-          status.textContent = 'Import requested';
-          document.getElementById('start').remove();
-          showSpinner('Loading records');
-          await sleep(2200);
-          hideSpinner();
-          main.insertAdjacentHTML('beforeend', '<button id="review">Review records</button>');
-
-          document.getElementById('review').addEventListener('click', async () => {
-            status.textContent = 'Records reviewed';
-            document.getElementById('review').remove();
-            showSpinner('Processing approval');
-            await sleep(2600);
-            hideSpinner();
-            main.insertAdjacentHTML('beforeend', '<button id="approve">Approve import</button>');
-
-            document.getElementById('approve').addEventListener('click', async () => {
-              status.textContent = 'Approved';
-              document.getElementById('approve').remove();
-              await sleep(1600);
-              main.insertAdjacentHTML('beforeend', '<button id="receipt">Download receipt</button>');
-
-              document.getElementById('receipt').addEventListener('click', async () => {
-                status.textContent = 'Receipt requested';
-                document.getElementById('receipt').remove();
-                showSpinner('Finalizing receipt');
-                await sleep(1800);
-                hideSpinner();
-                main.insertAdjacentHTML('beforeend', '<div id="done">Receipt ready</div>');
-              });
+        buttons.forEach((button) => {
+          button.addEventListener('click', async () => {
+            buttons.forEach((button) => {
+              button.disabled = true;
             });
+            spinner.style.visibility = 'visible';
+
+            const index = Number(button.dataset.stageIndex);
+            const stage = stages[index];
+            await sleep(stage.delay);
+
+            if (stage.done) {
+              spinner.style.visibility = 'hidden';
+              result.textContent = 'Receipt ready';
+              return;
+            }
+
+            setActiveStage(index + 1);
           });
         });
+
+        setActiveStage(0);
       </script>
     `);
 
-    await plugged.locator("#start").click();
-    await plugged.locator("#review").click();
-    await plugged.locator("#approve").click();
+    await plugged.getByText("Start import").click();
+    await plugged.getByText("Review records").click();
+    await plugged.getByText("Approve import").click();
     await video.deadAir(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1700));
     });
-    await plugged.locator("#receipt").click();
+    await plugged.getByText("Download receipt").click();
 
-    await plugged.locator("#done").waitFor();
-    await expect(plugged.locator("#done")).toContainText("Receipt ready");
+    await plugged.getByText("Receipt ready").waitFor();
+    await expect(plugged.getByText("Receipt ready")).toContainText("Receipt ready");
   }
 
   const metadata = JSON.parse(
@@ -105,6 +104,9 @@ test("writes a video with dead air removed", async ({ page }, testInfo) => {
     metadata.deadAir.filter((span: { end: number; start: number }) => span.end - span.start >= 1500)
       .length,
   ).toBeGreaterThanOrEqual(4);
+  const finalDeadAirSpan = metadata.deadAir[metadata.deadAir.length - 1];
+  const previousDeadAirSpan = metadata.deadAir[metadata.deadAir.length - 2];
+  expect(finalDeadAirSpan.start - previousDeadAirSpan.end).toBeGreaterThanOrEqual(400);
 
   const rawPath = join(testInfo.outputDir, metadata.outputs.raw);
   const tightPath = join(testInfo.outputDir, metadata.outputs.deadAirRemoved);

@@ -130,7 +130,7 @@ uiErrorReporter({ selector: '[data-type="error"]' });
 
 ### videoMode
 
-For producing demo/debugging videos people can actually follow: waits for the target element to become attached as dead air, outlines the element in gold, pauses before each action, and pauses after the test as dead air so the final cut doesn't keep teardown padding. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
+For producing demo/debugging videos people can actually follow: marks pre-action waiting as dead air, outlines the element in gold, pauses before each action, and keeps a short final hold before trimming after-test padding as dead air. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
 
 ```ts
 const video = videoMode({
@@ -151,7 +151,7 @@ await video.deadAir(async () => {
 
 When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-tight.webm` with dead air removed, and attaches both videos plus `video-mode.json` to the test report. If `ffmpeg` or `ffprobe` is missing, the trim step fails plainly so you know to install ffmpeg.
 
-Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode observes the pre-action "wait for attached" period as dead air and highlights immediately before the action.
+Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and highlights immediately before the action.
 
 ### llmRecover
 

@@ -32,6 +32,15 @@ const defaultSelectors = [
 ];
 
 const oneArgMethodNames = new Set<string>(oneArgMethods);
+const enabledActionMethods = new Set<ActionContext["method"]>([
+  "clear",
+  "click",
+  "dblclick",
+  "fill",
+  "focus",
+  "press",
+  "type",
+]);
 
 const defaults: Required<SpinnerWaiterOptions> = {
   spinnerSelectors: defaultSelectors,
@@ -78,10 +87,10 @@ export const spinnerWaiter = Object.assign(
         const start = Date.now();
         settings.log(`${locator}.${method}(...) starting`);
 
-        // Quick check if element is already visible
-        const elementVisible = await waitForVisible(locator, { timeout: 1000 });
-        if (elementVisible) {
-          settings.log(`${locator} already visible, proceeding`);
+        // Quick check if element is already ready for the attempted action.
+        const elementReady = await waitForReady(locator, method, { timeout: 1000 });
+        if (elementReady) {
+          settings.log(`${locator} already ready, proceeding`);
           return next();
         }
 
@@ -92,7 +101,7 @@ export const spinnerWaiter = Object.assign(
 
         if (!spinnerVisible) {
           // No spinner - call action, suggest adding one if it fails
-          settings.log(`${locator} not visible, no spinner, failing fast`);
+          settings.log(`${locator} not ready, no spinner, failing fast`);
           try {
             return await callOriginalWithTimeout(locator, method, args, 1);
           } catch (error) {
@@ -107,18 +116,18 @@ export const spinnerWaiter = Object.assign(
 
         // Spinner is visible — wait for the element, but bail early if the spinner
         // disappears (the loading operation finished without producing the expected element).
-        const waitResult = await waitForVisibleWhileSpinning(locator, spinnerLocator, {
+        const waitResult = await waitForReadyWhileSpinning(locator, method, spinnerLocator, {
           timeout: settings.spinnerTimeout - 2000,
         });
 
         if (waitResult === "appeared") {
-          settings.log(`${locator} appeared after waiting`);
+          settings.log(`${locator} became ready after waiting`);
           return next();
         }
 
         if (waitResult === "spinner-gone") {
           settings.log(
-            `Spinner disappeared but element not visible — loading finished without expected result`,
+            `Spinner disappeared but element not ready — loading finished without expected result`,
           );
         } else {
           settings.log(`Spinner still visible after ${settings.spinnerTimeout}ms, UI likely stuck`);
@@ -130,7 +139,7 @@ export const spinnerWaiter = Object.assign(
         } catch (error) {
           const message =
             waitResult === "spinner-gone"
-              ? `Loading finished (spinner disappeared after ${Date.now() - start}ms) but the expected element never appeared.`
+              ? `Loading finished (spinner disappeared after ${Date.now() - start}ms) but the expected element was not ready.`
               : `Spinner was still visible after ${settings.spinnerTimeout}ms, the UI is likely stuck.`;
           adjustError(error as Error, [message], "spinner-waiter.ts");
           throw error;
@@ -146,13 +155,23 @@ export const spinnerWaiter = Object.assign(
   },
 );
 
-async function waitForVisible(locator: Locator, { timeout = 1000 } = {}) {
+async function locatorIsReady(locator: Locator, method: ActionContext["method"]) {
+  if (!(await locator.isVisible())) return false;
+  if (!enabledActionMethods.has(method)) return true;
+  return await locator.isEnabled();
+}
+
+async function waitForReady(
+  locator: Locator,
+  method: ActionContext["method"],
+  { timeout = 1000 } = {},
+) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    if (await locator.isVisible()) return true;
+    if (await locatorIsReady(locator, method)) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  return await locator.isVisible();
+  return await locatorIsReady(locator, method);
 }
 
 async function callOriginalWithTimeout(
@@ -183,12 +202,13 @@ function isOptionsObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Wait for `target` to become visible, but bail early if `spinner` disappears.
- * Returns "appeared" if target showed up, "spinner-gone" if loading finished
+ * Wait for `target` to become ready, but bail early if `spinner` disappears.
+ * Returns "appeared" if target became ready, "spinner-gone" if loading finished
  * without the target, or "timeout" if spinner was still visible at deadline.
  */
-async function waitForVisibleWhileSpinning(
+async function waitForReadyWhileSpinning(
   target: Locator,
+  method: ActionContext["method"],
   spinner: Locator,
   { timeout = 1000 } = {},
 ): Promise<"appeared" | "spinner-gone" | "timeout"> {
@@ -196,7 +216,7 @@ async function waitForVisibleWhileSpinning(
   // Give the spinner a grace period before checking — it may flicker during transitions
   const spinnerGracePeriodMs = 3000;
   while (Date.now() - start < timeout) {
-    if (await target.isVisible()) return "appeared";
+    if (await locatorIsReady(target, method)) return "appeared";
     const elapsed = Date.now() - start;
     if (elapsed > spinnerGracePeriodMs && !(await spinner.isVisible())) return "spinner-gone";
     await new Promise((resolve) => setTimeout(resolve, 250));

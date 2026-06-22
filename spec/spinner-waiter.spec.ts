@@ -30,6 +30,27 @@ test("slow button succeeds when there's a spinner", async ({ page }) => {
   await page.getByText("work done").waitFor();
 });
 
+test("visible disabled button succeeds when there's a spinner", async ({ page }) => {
+  await page.setContent(`
+    <button
+      disabled
+      onclick="document.querySelector('#result').textContent = 'approval submitted'"
+    >Submit approval</button>
+    <div data-spinner="true">Processing approval...</div>
+    <div id="result"></div>
+    <script>
+      setTimeout(() => {
+        document.querySelector('button').disabled = false;
+        document.querySelector('[data-spinner="true"]').remove();
+      }, 2000);
+    </script>
+  `);
+
+  await page.getByRole("button", { name: "Submit approval" }).click();
+
+  await expect(page.locator("#result")).toContainText("approval submitted");
+});
+
 test("slow button fails without spinner waiter", async ({ page }) => {
   spinnerWaiter.settings.enterWith({ disabled: true });
   await page.getByText("start work").click();

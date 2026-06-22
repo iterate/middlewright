@@ -7,11 +7,11 @@
  * `skipStackFrames` option.
  */
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Locator } from "@playwright/test";
-import type { Plugin, OverrideableMethod } from "../plugin-system.ts";
+import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
 
@@ -198,6 +198,8 @@ const waitForTargetsAttached = (args: unknown[]) => {
   return !targetState || targetState === "attached";
 };
 
+const visibleTailAfterTestMs = (pauseAfterTest: number) => Math.min(500, pauseAfterTest);
+
 const recordAttachedWaitFromTiming = async (
   state: VideoModeState,
   timing: { actionStartedAt: number; attachedAt?: number; attachedAtStart: boolean },
@@ -217,6 +219,27 @@ const recordAttachedWaitFromTiming = async (
 
   const start = Math.round(timing.actionStartedAt - state.startedAt);
   const end = Math.round(timing.attachedAt - state.startedAt);
+
+  if (end > start) {
+    state.deadAirSpans.push({ end, start });
+  }
+};
+
+const recordMiddlewareWaitBeforeVideoMode = (state: VideoModeState, timing: ActionTiming) => {
+  if (!state.startedAt) {
+    return;
+  }
+
+  const currentMiddleware = [...timing.middlewares]
+    .reverse()
+    .find((middleware) => middleware.name === "video-mode" && middleware.endedAt === undefined);
+
+  if (!currentMiddleware) {
+    return;
+  }
+
+  const start = Math.round(timing.actionStartedAt - state.startedAt);
+  const end = Math.round(currentMiddleware.startedAt - state.startedAt);
 
   if (end > start) {
     state.deadAirSpans.push({ end, start });
@@ -327,6 +350,29 @@ const videoDurationMs = async (path: string) => {
   return Math.round(seconds * 1000);
 };
 
+const waitForNonEmptyFile = async (path: string, timeoutMs = 5000) => {
+  const start = Date.now();
+  let lastError: unknown;
+
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const stats = await stat(path);
+      if (stats.size > 0) {
+        return;
+      }
+      lastError = new Error(`File exists but is empty: ${path}`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Timed out waiting for non-empty file: ${path}`);
+};
+
 const removeDeadAirFromVideo = async (options: {
   inputPath: string;
   outputPath: string;
@@ -394,12 +440,15 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         if (!waitForTargetsAttached(args)) {
           return next();
         }
+        recordMiddlewareWaitBeforeVideoMode(state, timing);
         try {
           return await next();
         } finally {
           await recordAttachedWaitFromTiming(state, timing, locator);
         }
       }
+
+      recordMiddlewareWaitBeforeVideoMode(state, timing);
 
       if (skipMethods.includes(method)) {
         try {
@@ -439,9 +488,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       });
 
       const offAfterTest = emitter.on("afterTest", async ({ page, testInfo }) => {
-        await recordDeadAir(state, async () => {
-          await new Promise((resolve) => setTimeout(resolve, pauseAfterTest));
-        });
+        const visibleTailMs = visibleTailAfterTestMs(pauseAfterTest);
+        if (visibleTailMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, visibleTailMs));
+        }
+
+        const remainingAfterTestMs = pauseAfterTest - visibleTailMs;
+        if (remainingAfterTestMs > 0) {
+          await recordDeadAir(state, async () => {
+            await new Promise((resolve) => setTimeout(resolve, remainingAfterTestMs));
+          });
+        }
 
         const deadAir = metadataFor(state).deadAir;
         const video = page.video();
@@ -455,7 +512,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             await page.close({ runBeforeUnload: false });
           }
 
-          await video.saveAs(rawPath);
+          const recordedVideoPath = await video.path();
+          await waitForNonEmptyFile(recordedVideoPath);
+          await copyFile(recordedVideoPath, rawPath);
           state.outputs.raw = "video-raw.webm";
           await testInfo.attach("video-raw", {
             contentType: "video/webm",
