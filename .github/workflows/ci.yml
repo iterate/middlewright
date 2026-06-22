@@ -21,6 +21,8 @@ jobs:
       - run: pnpm exec publint
       - run: pnpm exec playwright install chromium --with-deps
       - run: pnpm test
+      - run: pnpm exec pkg-pr-new publish --packageManager=pnpm
+        if: github.event_name == 'pull_request'
       - uses: actions/upload-artifact@v5
         if: failure()
         with:

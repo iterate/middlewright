@@ -21,6 +21,9 @@ importers:
       '@types/node':
         specifier: ^24.10.9
         version: 24.13.2
+      pkg-pr-new:
+        specifier: ^0.0.75
+        version: 0.0.75
       publint:
         specifier: ^0.3.14
         version: 0.3.21
@@ -68,6 +71,10 @@ packages:
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
+
+  pkg-pr-new@0.0.75:
+    resolution: {integrity: sha512-u9mdErTewKSMsr+ceCt8VcNuNP0ro5AXiPXhUVApuEyqr2Zlvt+DdCFBcm+yGWN8mhOdZJ27meIDbnoZgfzpOw==}
+    hasBin: true
 
   playwright-core@1.60.0:
     resolution: {integrity: sha512-9bW6zvX/m0lEbgTKJ6YppOKx8H3VOPBMOCFh2irXFOT4BbHgrx5hPjwJYLT40Lu+4qtD36qKc/Hn56StUW57IA==}
@@ -120,6 +127,8 @@ snapshots:
   package-manager-detector@1.6.0: {}
 
   picocolors@1.1.1: {}
+
+  pkg-pr-new@0.0.75: {}
 
   playwright-core@1.60.0: {}
 
