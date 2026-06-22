@@ -328,13 +328,26 @@ const clipVideoSpan = (span: VideoModeSpan, finalEnd: number): VideoModeSpan | u
   return { end, start };
 };
 
-const trimDeadAirSpan = (
-  span: VideoModeSpan,
-  thresholdMs: number,
-): VideoModeSpan | undefined => {
+const trimDeadAirSpan = (options: {
+  highlights: VideoModeHighlight[];
+  span: VideoModeSpan;
+  thresholdMs: number;
+}): VideoModeSpan | undefined => {
+  const span = options.span;
+  const thresholdMs = options.thresholdMs;
+
+  if (span.end - span.start <= thresholdMs) {
+    return undefined;
+  }
+
   const padding = thresholdMs / 2;
+  // A following highlight already shows the post-wait state, so don't also
+  // render an unhighlighted tail frame for the same transition.
+  const followingHighlight = options.highlights.find((highlight) => {
+    return highlight.start >= span.end && highlight.start - span.end <= thresholdMs;
+  });
   const start = Math.round(span.start + padding);
-  const end = Math.round(span.end - padding);
+  const end = Math.round(followingHighlight ? followingHighlight.start : span.end - padding);
 
   if (end <= start) {
     return undefined;
@@ -408,6 +421,7 @@ const recordMiddlewareWaitBeforeVideoMode = (
 const tightVideoSegments = (options: {
   deadAir: VideoModeSpan[];
   finalEnd: number;
+  highlights: VideoModeHighlight[];
   thresholdMs?: number;
 }): TightVideoSegment[] => {
   const finalEnd = Math.max(0, Math.round(options.finalEnd));
@@ -421,11 +435,12 @@ const tightVideoSegments = (options: {
   }
 
   const thresholdMs = options.thresholdMs;
+  const highlights = normalizeVideoHighlights(options.highlights);
   const deadAir = mergeVideoSpans(
     options.deadAir
       .map((span) => clipVideoSpan(span, finalEnd))
       .filter((span): span is VideoModeSpan => Boolean(span))
-      .map((span) => trimDeadAirSpan(span, thresholdMs))
+      .map((span) => trimDeadAirSpan({ highlights, span, thresholdMs }))
       .filter((span): span is VideoModeSpan => Boolean(span)),
   );
   const boundaries = new Set([0, finalEnd]);
@@ -703,6 +718,7 @@ const renderVideo = async (options: {
   const segments = tightVideoSegments({
     deadAir: options.deadAir,
     finalEnd: info.durationMs,
+    highlights: options.highlights,
     thresholdMs: options.thresholdMs,
   });
   const filter = renderedVideoFilter({
