@@ -453,17 +453,12 @@ const waitForTargetsAttached = (args: unknown[]) => {
   return !targetState || targetState === "attached";
 };
 
-const recordAttachedWaitFromTiming = async (
+const recordAttachedWaitFromTiming = (
   state: VideoModeState,
   timing: { actionStartedAt: number; attachedAt?: number; attachedAtStart: boolean },
-  locator: Locator,
 ) => {
   if (state.startedAt === undefined || timing.attachedAtStart) {
     return;
-  }
-
-  if (timing.attachedAt === undefined && (await locatorIsAttached(locator))) {
-    timing.attachedAt = performance.now();
   }
 
   if (timing.attachedAt === undefined) {
@@ -1184,7 +1179,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         try {
           return await next();
         } finally {
-          await recordAttachedWaitFromTiming(state, timing, locator);
+          recordAttachedWaitFromTiming(state, timing);
         }
       }
 
@@ -1194,7 +1189,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         try {
           return await next();
         } finally {
-          await recordAttachedWaitFromTiming(state, timing, locator);
+          recordAttachedWaitFromTiming(state, timing);
         }
       }
 
@@ -1209,7 +1204,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         });
         return await next();
       } finally {
-        await recordAttachedWaitFromTiming(state, timing, locator);
+        recordAttachedWaitFromTiming(state, timing);
       }
     },
 
