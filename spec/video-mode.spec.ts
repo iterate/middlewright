@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
@@ -28,24 +27,26 @@ test("records highlight metadata without mutating element styles", async ({
 
   expect(Date.now() - start).toBeLessThan(1000);
   await expect(plugged.locator("#result")).toContainText("(no style)");
-  expect(plugged.videoMode.metadata().highlights).toContainEqual(
-    expect.objectContaining({
-      color: "gold",
-      end: expect.any(Number),
-      rect: expect.objectContaining({
-        height: expect.any(Number),
-        width: expect.any(Number),
-        x: expect.any(Number),
-        y: expect.any(Number),
+  await expect(plugged.videoMode.metadata()).resolves.toMatchObject({
+    highlights: expect.arrayContaining([
+      expect.objectContaining({
+        color: "gold",
+        end: expect.any(Number),
+        rect: expect.objectContaining({
+          height: expect.any(Number),
+          width: expect.any(Number),
+          x: expect.any(Number),
+          y: expect.any(Number),
+        }),
+        start: expect.any(Number),
+        thickness: 3,
+        viewport: expect.objectContaining({
+          height: expect.any(Number),
+          width: expect.any(Number),
+        }),
       }),
-      start: expect.any(Number),
-      thickness: 3,
-      viewport: expect.objectContaining({
-        height: expect.any(Number),
-        width: expect.any(Number),
-      }),
-    }),
-  );
+    ]),
+  });
 });
 
 test("skipped methods are not highlighted", async ({ page }, testInfo) => {
@@ -69,8 +70,9 @@ test("skipped methods are not highlighted", async ({ page }, testInfo) => {
   const start = Date.now();
   await plugged.locator("#btn").click();
   expect(Date.now() - start).toBeLessThan(2000);
-  expect(video.metadata().deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
-  expect(video.metadata().highlights).toEqual([]);
+  const metadata = await video.metadata();
+  expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  expect(metadata.highlights).toEqual([]);
 });
 
 test("marks pre-action waits for attachment as dead air", async ({ page }, testInfo) => {
@@ -95,13 +97,14 @@ test("marks pre-action waits for attachment as dead air", async ({ page }, testI
   await plugged.locator("#late").click();
 
   await expect(plugged.locator("#result")).toContainText("clicked");
-  expect(video.metadata().deadAir).toContainEqual(
+  const metadata = await video.metadata();
+  expect(metadata.deadAir).toContainEqual(
     expect.objectContaining({
       end: expect.any(Number),
       start: expect.any(Number),
     }),
   );
-  expect(video.metadata().deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
 test("pre-action attached waits honor action timeout", async ({ page }, testInfo) => {
@@ -143,17 +146,18 @@ test("marks explicit attached waitFor calls as dead air", async ({ page }, testI
 
   await plugged.locator("#late").waitFor({ state: "attached" });
 
-  expect(video.metadata().deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
 test("deadAir runs actions without video highlighting and records metadata", async ({
   page,
 }, testInfo) => {
+  const video = videoMode({ finalHold: 50, highlightDuration: 5000 });
   {
     await using plugged = await addPlugins({
       page,
       testInfo,
-      plugins: [videoMode({ finalHold: 50, highlightDuration: 5000 })],
+      plugins: [video],
     });
 
     await plugged.setContent(`
@@ -176,20 +180,25 @@ test("deadAir runs actions without video highlighting and records metadata", asy
     expect(Date.now() - start).toBeLessThan(2000);
     expect(plugged.videoMode.getVideoTimestamp()).toBeGreaterThanOrEqual(videoTimestamp);
     await expect(plugged.locator("#result")).toContainText("(no style)");
-    expect(plugged.videoMode.metadata()).toMatchObject({
+    await expect(plugged.videoMode.metadata()).resolves.toMatchObject({
       outputs: {},
       schemaVersion: 1,
       timebase: "ms",
     });
-    expect(plugged.videoMode.metadata().deadAir).toContainEqual(
+    expect((await plugged.videoMode.metadata()).deadAir).toContainEqual(
       expect.objectContaining({ end: expect.any(Number), start: expect.any(Number) }),
     );
-    expect(plugged.videoMode.metadata().highlights).toEqual([]);
+    expect((await plugged.videoMode.metadata()).highlights).toEqual([]);
   }
 
-  const metadata = JSON.parse(
-    await readFile(join(testInfo.outputDir, "video-mode.json"), "utf8"),
-  );
+  const paths = video.outputPaths();
+  expect(paths.metadata).toBe(join(testInfo.outputDir, "video-mode.json"));
+  expect(paths.player).toBe(join(testInfo.outputDir, "video-mode.html"));
+  expect(paths.raw).toBe(join(testInfo.outputDir, "video-raw.webm"));
+  expect(paths.rendered).toBe(join(testInfo.outputDir, "video-rendered.webm"));
+  expect(paths.reportPlayer).toBe(join(testInfo.outputDir, "video-mode-report.html"));
+
+  const metadata = await video.metadata();
   expect(metadata).toMatchObject({
     highlights: [],
     outputs: {},

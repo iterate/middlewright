@@ -5,6 +5,7 @@ export {
   type VideoModeHighlight,
   type VideoModeMetadata,
   type VideoModeOptions,
+  type VideoModeOutputPaths,
   type VideoModeOutputs,
   type VideoModePageExtension,
   type VideoModeRect,

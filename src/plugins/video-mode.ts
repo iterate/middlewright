@@ -15,6 +15,11 @@ import type { Locator, TestInfo } from "@playwright/test";
 import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
+const VIDEO_MODE_METADATA_FILE = "video-mode.json";
+const VIDEO_MODE_PLAYER_FILE = "video-mode.html";
+const VIDEO_MODE_RAW_FILE = "video-raw.webm";
+const VIDEO_MODE_RENDERED_FILE = "video-rendered.webm";
+const VIDEO_MODE_REPORT_PLAYER_FILE = "video-mode-report.html";
 
 export type VideoModeSpan = {
   start: number;
@@ -25,6 +30,14 @@ export type VideoModeOutputs = {
   player?: string;
   raw?: string;
   rendered?: string;
+};
+
+export type VideoModeOutputPaths = {
+  metadata: string;
+  player: string;
+  raw: string;
+  rendered: string;
+  reportPlayer: string;
 };
 
 export type VideoModeRect = {
@@ -62,8 +75,10 @@ export type VideoModeControls = {
   deadAir<T>(action: () => Promise<T>): Promise<T>;
   /** Milliseconds since video-mode started recording metadata for this test. */
   getVideoTimestamp(): number;
-  /** Current metadata snapshot. Written to video-mode.json after the test. */
-  metadata(): VideoModeMetadata;
+  /** Parsed video-mode metadata JSON after the test, or the current in-memory snapshot during the test. */
+  metadata(): Promise<VideoModeMetadata>;
+  /** Absolute artifact paths for the current test's video-mode outputs. */
+  outputPaths(): VideoModeOutputPaths;
 };
 
 export type VideoModePageExtension = {
@@ -168,6 +183,31 @@ const metadataFor = (state: VideoModeState): VideoModeMetadata => {
     schemaVersion: 1,
     timebase: "ms",
   };
+};
+
+const videoModeOutputPaths = (testInfo: TestInfo): VideoModeOutputPaths => {
+  return {
+    metadata: join(testInfo.outputDir, VIDEO_MODE_METADATA_FILE),
+    player: join(testInfo.outputDir, VIDEO_MODE_PLAYER_FILE),
+    raw: join(testInfo.outputDir, VIDEO_MODE_RAW_FILE),
+    rendered: join(testInfo.outputDir, VIDEO_MODE_RENDERED_FILE),
+    reportPlayer: join(testInfo.outputDir, VIDEO_MODE_REPORT_PLAYER_FILE),
+  };
+};
+
+const readVideoModeMetadata = async (
+  path: string,
+  fallback: () => VideoModeMetadata,
+): Promise<VideoModeMetadata> => {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as VideoModeMetadata;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return fallback();
+    }
+
+    throw error;
+  }
 };
 
 const recordHighlight = async (options: {
@@ -872,7 +912,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
       <div>frame: <span id="frame">0</span></div>
       <div>duration: <span id="duration">?</span>s</div>
       <div class="hint">Left/right steps one frame. Shift+left/right steps ten. Space toggles play.</div>
-      <div class="hint"><a href="video-mode.json">video-mode.json</a></div>
+      <div class="hint"><a href="${VIDEO_MODE_METADATA_FILE}">${VIDEO_MODE_METADATA_FILE}</a></div>
     </aside>
   </main>
   <script>
@@ -1030,6 +1070,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     outputs: {},
     startedAt: performance.now(),
   };
+  let testInfoForOutputPaths: TestInfo | undefined;
   const controls: VideoModeControls = {
     deadAir: async (action) => {
       return await recordDeadAir(state, action);
@@ -1038,13 +1079,31 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       const now = performance.now();
       return Math.round(now - (state.startedAt || now));
     },
-    metadata: () => metadataFor(state),
+    metadata: async () => {
+      if (!testInfoForOutputPaths) {
+        return metadataFor(state);
+      }
+
+      return await readVideoModeMetadata(videoModeOutputPaths(testInfoForOutputPaths).metadata, () =>
+        metadataFor(state),
+      );
+    },
+    outputPaths: () => {
+      if (!testInfoForOutputPaths) {
+        throw new Error("videoMode.outputPaths() is only available after addPlugins registers videoMode");
+      }
+
+      return videoModeOutputPaths(testInfoForOutputPaths);
+    },
   };
 
   return {
     ...controls,
     name: "video-mode",
-    pageExtension: () => ({ videoMode: controls }),
+    pageExtension: ({ testInfo }) => {
+      testInfoForOutputPaths = testInfo;
+      return { videoMode: controls };
+    },
 
     middleware: async ({ args, locator, method, testInfo, timing }, next) => {
       if (state.deadAirDepth > 0) return next();
@@ -1116,10 +1175,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         const video = page.video();
 
         if (video) {
-          const rawPath = join(testInfo.outputDir, "video-raw.webm");
-          const renderedPath = join(testInfo.outputDir, "video-rendered.webm");
-          const playerPath = join(testInfo.outputDir, "video-mode.html");
-          const reportPlayerPath = join(testInfo.outputDir, "video-mode-report.html");
+          const paths = videoModeOutputPaths(testInfo);
           await mkdir(testInfo.outputDir, { recursive: true });
 
           if (!page.isClosed()) {
@@ -1128,11 +1184,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
           const recordedVideoPath = await video.path();
           await waitForNonEmptyFile(recordedVideoPath);
-          await copyFile(recordedVideoPath, rawPath);
-          state.outputs.raw = "video-raw.webm";
+          await copyFile(recordedVideoPath, paths.raw);
+          state.outputs.raw = VIDEO_MODE_RAW_FILE;
           await testInfo.attach("video-raw", {
             contentType: "video/webm",
-            path: rawPath,
+            path: paths.raw,
           });
 
           if (highlights.length > 0 || deadAirThreshold !== undefined || finalHold > 0) {
@@ -1140,24 +1196,24 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               deadAir,
               finalHoldMs: finalHold,
               highlights,
-              inputPath: rawPath,
+              inputPath: paths.raw,
               outputDir: testInfo.outputDir,
-              outputPath: renderedPath,
+              outputPath: paths.rendered,
               thresholdMs: deadAirThreshold,
             });
 
             if (wroteRenderedVideo) {
-              state.outputs.rendered = "video-rendered.webm";
+              state.outputs.rendered = VIDEO_MODE_RENDERED_FILE;
               await testInfo.attach("video-rendered", {
                 contentType: "video/webm",
-                path: renderedPath,
+                path: paths.rendered,
               });
             }
           }
 
-          state.outputs.player = "video-mode.html";
+          state.outputs.player = VIDEO_MODE_PLAYER_FILE;
           await writeFile(
-            playerPath,
+            paths.player,
             videoModePlayerHtml({
               raw: state.outputs.raw,
               rendered: state.outputs.rendered,
@@ -1165,15 +1221,15 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           );
 
           const reportPlayerHtml = videoModePlayerHtml({
-            raw: await playwrightReportAttachmentName(rawPath),
+            raw: await playwrightReportAttachmentName(paths.raw),
             rendered: state.outputs.rendered
-              ? await playwrightReportAttachmentName(renderedPath)
+              ? await playwrightReportAttachmentName(paths.rendered)
               : undefined,
           });
-          await writeFile(reportPlayerPath, reportPlayerHtml);
+          await writeFile(paths.reportPlayer, reportPlayerHtml);
           await testInfo.attach("video-mode-player", {
             contentType: "text/html",
-            path: reportPlayerPath,
+            path: paths.reportPlayer,
           });
         }
 
@@ -1185,7 +1241,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           metadata.outputs.raw ||
           metadata.outputs.rendered
         ) {
-          const path = join(testInfo.outputDir, "video-mode.json");
+          const path = videoModeOutputPaths(testInfo).metadata;
           await mkdir(testInfo.outputDir, { recursive: true });
           await writeFile(path, `${JSON.stringify(metadata, null, 2)}\n`);
           await testInfo.attach("video-mode", {
@@ -1195,7 +1251,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         }
 
         state.startedAt = undefined;
-        console.log(`video-mode metadata written to ${testInfo.outputDir}/video-mode.json`);
+        console.log(`video-mode metadata written to ${videoModeOutputPaths(testInfo).metadata}`);
       });
 
       return () => {
