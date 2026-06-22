@@ -31,6 +31,33 @@ test("middleware wraps actions in registration order", async ({ page }, testInfo
   ]);
 });
 
+test("middleware can pass adjusted action args to later middleware", async ({ page }, testInfo) => {
+  let innerArgs: unknown[] = [];
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [
+      {
+        name: "rewrite-fill",
+        middleware: async (_ctx, next) => next(["rewritten"]),
+      },
+      {
+        name: "inner-spy",
+        middleware: async (ctx, next) => {
+          innerArgs = ctx.args;
+          return next();
+        },
+      },
+    ],
+  });
+  await plugged.setContent(`<input id="name">`);
+
+  await plugged.locator("#name").fill("original");
+
+  expect(innerArgs).toEqual(["rewritten"]);
+  expect(await plugged.locator("#name").inputValue()).toBe("rewritten");
+});
+
 test("falsy entries in the plugins array are skipped", async ({ page }, testInfo) => {
   const calls: string[] = [];
   await using plugged = await addPlugins({

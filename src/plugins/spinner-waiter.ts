@@ -103,7 +103,7 @@ export const spinnerWaiter = Object.assign(
           // No spinner - call action, suggest adding one if it fails
           settings.log(`${locator} not ready, no spinner, failing fast`);
           try {
-            return await callOriginalWithTimeout(locator, method, args, 1);
+            return await next(withTimeoutOption(method, args, 1));
           } catch (error) {
             adjustError(error as Error, suggestSpinnerMessage(spinnerLocator), "spinner-waiter.ts");
             throw error;
@@ -172,17 +172,6 @@ async function waitForReady(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return await locatorIsReady(locator, method);
-}
-
-async function callOriginalWithTimeout(
-  locator: LocatorWithOriginal,
-  method: ActionContext["method"],
-  args: unknown[],
-  timeout: number,
-) {
-  return await (locator[`${method}_original`] as Function)(
-    ...withTimeoutOption(method, args, timeout),
-  );
 }
 
 function withTimeoutOption(method: ActionContext["method"], args: unknown[], timeout: number) {
