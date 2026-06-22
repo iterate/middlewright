@@ -7,8 +7,9 @@
  * `skipStackFrames` option.
  */
 import { execFile as execFileCallback } from "node:child_process";
-import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Locator, TestInfo } from "@playwright/test";
 import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
@@ -21,6 +22,7 @@ export type VideoModeSpan = {
 };
 
 export type VideoModeOutputs = {
+  player?: string;
   raw?: string;
   rendered?: string;
 };
@@ -697,6 +699,249 @@ const waitForNonEmptyFile = async (path: string, timeoutMs = 5000) => {
     : new Error(`Timed out waiting for non-empty file: ${path}`);
 };
 
+const escapeHtml = (value: string) => {
+  const entities: Record<string, string> = {
+    "&": "&amp;",
+    '"': "&quot;",
+    "'": "&#39;",
+    "<": "&lt;",
+    ">": "&gt;",
+  };
+
+  return value.replace(/[&"'<>]/g, (character) => entities[character]);
+};
+
+const videoElementHtml = (options: { label: string; source: string }) => {
+  const label = escapeHtml(options.label);
+  const source = escapeHtml(options.source);
+
+  return `
+      <section class="video-section">
+        <div class="section-title">${label}</div>
+        <video controls preload="metadata" tabindex="0">
+          <source src="${source}" type="video/webm" />
+        </video>
+      </section>`;
+};
+
+const playwrightReportAttachmentName = async (path: string) => {
+  const data = await readFile(path);
+  return `${createHash("sha1").update(data).digest("hex")}${extname(path)}`;
+};
+
+const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
+  const primary = options.rendered || options.raw;
+  const primaryLabel = options.rendered ? "Rendered video" : "Raw video";
+  const rawDetails = options.rendered
+    ? `
+      <details>
+        <summary>Raw video</summary>
+        ${videoElementHtml({ label: "Raw video", source: options.raw })}
+      </details>`
+    : "";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>video-mode player</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #eee;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #111;
+    }
+
+    header {
+      align-items: center;
+      background: #1d1d1d;
+      border-bottom: 1px solid #333;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr auto auto auto;
+      padding: 10px 12px;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    main {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      padding: 12px;
+    }
+
+    video {
+      background: #000;
+      max-height: calc(100vh - 92px);
+      outline: 1px solid #333;
+      width: 100%;
+    }
+
+    label,
+    button,
+    input {
+      font: inherit;
+    }
+
+    input {
+      background: #050505;
+      border: 1px solid #555;
+      color: #eee;
+      padding: 6px 8px;
+      width: 72px;
+    }
+
+    button {
+      background: #333;
+      border: 1px solid #666;
+      color: #eee;
+      cursor: pointer;
+      padding: 6px 10px;
+    }
+
+    aside {
+      color: #ddd;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    details {
+      border-top: 1px solid #333;
+      margin-top: 14px;
+      padding-top: 12px;
+    }
+
+    summary {
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+
+    a {
+      color: #9ecbff;
+    }
+
+    .section-title {
+      color: #aaa;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .hint {
+      color: #aaa;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 820px) {
+      header,
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      video {
+        max-height: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>video-mode player</div>
+    <label>fps <input id="fps" type="number" min="1" step="1" value="25" /></label>
+    <button id="back" type="button">-1 frame</button>
+    <button id="forward" type="button">+1 frame</button>
+  </header>
+  <main>
+    <div>
+      ${videoElementHtml({ label: primaryLabel, source: primary })}
+      ${rawDetails}
+    </div>
+    <aside>
+      <div>active: <span id="active">-</span></div>
+      <div>time: <span id="time">0.000</span>s</div>
+      <div>frame: <span id="frame">0</span></div>
+      <div>duration: <span id="duration">?</span>s</div>
+      <div class="hint">Left/right steps one frame. Shift+left/right steps ten. Space toggles play.</div>
+      <div class="hint"><a href="video-mode.json">video-mode.json</a></div>
+    </aside>
+  </main>
+  <script>
+    const videos = Array.from(document.querySelectorAll("video"));
+    const fps = document.querySelector("#fps");
+    const active = document.querySelector("#active");
+    const time = document.querySelector("#time");
+    const frame = document.querySelector("#frame");
+    const duration = document.querySelector("#duration");
+    let activeVideo = videos[0];
+
+    const setActiveVideo = (video) => {
+      activeVideo = video;
+      update();
+    };
+
+    const update = () => {
+      const rate = Number(fps.value) || 25;
+      const title = activeVideo.closest(".video-section").querySelector(".section-title").textContent;
+      active.textContent = title;
+      time.textContent = activeVideo.currentTime.toFixed(3);
+      frame.textContent = String(Math.round(activeVideo.currentTime * rate));
+      duration.textContent = Number.isFinite(activeVideo.duration) ? activeVideo.duration.toFixed(3) : "?";
+    };
+
+    const stepFrames = (count) => {
+      const rate = Number(fps.value) || 25;
+      activeVideo.pause();
+      activeVideo.currentTime = Math.max(
+        0,
+        Math.min(activeVideo.duration || Infinity, activeVideo.currentTime + count / rate),
+      );
+    };
+
+    for (const video of videos) {
+      video.addEventListener("focus", () => setActiveVideo(video));
+      video.addEventListener("pointerdown", () => setActiveVideo(video));
+      video.addEventListener("mouseenter", () => setActiveVideo(video));
+      video.addEventListener("loadedmetadata", update);
+      video.addEventListener("seeked", update);
+      video.addEventListener("timeupdate", update);
+    }
+
+    document.querySelector("#back").addEventListener("click", () => stepFrames(-1));
+    document.querySelector("#forward").addEventListener("click", () => stepFrames(1));
+    document.addEventListener("keydown", (event) => {
+      if (event.target instanceof HTMLInputElement) return;
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        stepFrames(event.shiftKey ? 10 : 1);
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        stepFrames(event.shiftKey ? -10 : -1);
+      }
+      if (event.key === " ") {
+        event.preventDefault();
+        if (activeVideo.paused) activeVideo.play();
+        else activeVideo.pause();
+      }
+    });
+
+    update();
+  </script>
+</body>
+</html>
+`;
+};
+
 const renderVideo = async (options: {
   finalHoldMs: number;
   highlights: VideoModeHighlight[];
@@ -785,16 +1030,16 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     outputs: {},
     startedAt: performance.now(),
   };
-  const controls: VideoModeControls = {
-    deadAir: async (action) => {
-      return await recordDeadAir(state, action);
-    },
+	  const controls: VideoModeControls = {
+	    deadAir: async (action) => {
+	      return await recordDeadAir(state, action);
+	    },
 	    getVideoTimestamp: () => {
 	      const now = performance.now();
 	      return Math.round(now - (state.startedAt || now));
 	    },
-    metadata: () => metadataFor(state),
-  };
+	    metadata: () => metadataFor(state),
+	  };
 
   return {
     ...controls,
@@ -873,6 +1118,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         if (video) {
           const rawPath = join(testInfo.outputDir, "video-raw.webm");
           const renderedPath = join(testInfo.outputDir, "video-rendered.webm");
+          const playerPath = join(testInfo.outputDir, "video-mode.html");
+          const reportPlayerPath = join(testInfo.outputDir, "video-mode-report.html");
           await mkdir(testInfo.outputDir, { recursive: true });
 
           if (!page.isClosed()) {
@@ -907,15 +1154,37 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               });
             }
           }
+
+          state.outputs.player = "video-mode.html";
+          await writeFile(
+            playerPath,
+            videoModePlayerHtml({
+              raw: state.outputs.raw,
+              rendered: state.outputs.rendered,
+            }),
+          );
+
+          const reportPlayerHtml = videoModePlayerHtml({
+            raw: await playwrightReportAttachmentName(rawPath),
+            rendered: state.outputs.rendered
+              ? await playwrightReportAttachmentName(renderedPath)
+              : undefined,
+          });
+          await writeFile(reportPlayerPath, reportPlayerHtml);
+          await testInfo.attach("video-mode-player", {
+            contentType: "text/html",
+            path: reportPlayerPath,
+          });
         }
 
         const metadata = metadataFor(state);
         if (
-          metadata.deadAir.length > 0 ||
-          metadata.highlights.length > 0 ||
-          metadata.outputs.raw ||
-          metadata.outputs.rendered
-        ) {
+	          metadata.deadAir.length > 0 ||
+	          metadata.highlights.length > 0 ||
+	          metadata.outputs.player ||
+	          metadata.outputs.raw ||
+	          metadata.outputs.rendered
+	        ) {
           const path = join(testInfo.outputDir, "video-mode.json");
           await mkdir(testInfo.outputDir, { recursive: true });
           await writeFile(path, `${JSON.stringify(metadata, null, 2)}\n`);

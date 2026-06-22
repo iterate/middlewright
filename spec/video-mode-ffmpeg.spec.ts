@@ -1,6 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
 import { addPlugins, spinnerWaiter, videoMode } from "../src/index.ts";
@@ -105,6 +106,7 @@ test("writes a rendered video with dead air removed and highlights added in post
   );
   expect(metadata).toMatchObject({
     outputs: {
+      player: "video-mode.html",
       rendered: "video-rendered.webm",
       raw: "video-raw.webm",
     },
@@ -117,13 +119,30 @@ test("writes a rendered video with dead air removed and highlights added in post
 
   const rawPath = join(testInfo.outputDir, metadata.outputs.raw);
   const renderedPath = join(testInfo.outputDir, metadata.outputs.rendered);
+  const playerPath = join(testInfo.outputDir, metadata.outputs.player);
+  const reportPlayerPath = join(testInfo.outputDir, "video-mode-report.html");
   const rawStats = await stat(rawPath);
   const renderedStats = await stat(renderedPath);
+  const playerStats = await stat(playerPath);
+  const reportPlayerStats = await stat(reportPlayerPath);
   console.log(`raw video written to ${rawPath}`);
   console.log(`rendered video written to ${renderedPath}`);
+  console.log(`video player written to ${playerPath}`);
+  console.log(`report video player written to ${reportPlayerPath}`);
 
   expect(rawStats.size).toBeGreaterThan(0);
   expect(renderedStats.size).toBeGreaterThan(0);
+  expect(playerStats.size).toBeGreaterThan(0);
+  expect(reportPlayerStats.size).toBeGreaterThan(0);
+  await expect(readFile(playerPath, "utf8")).resolves.toContain('src="video-rendered.webm"');
+  await expect(readFile(playerPath, "utf8")).resolves.toContain('src="video-raw.webm"');
+  await expect(readFile(playerPath, "utf8")).resolves.toContain("<details>");
+  await expect(readFile(reportPlayerPath, "utf8")).resolves.toContain(
+    `src="${await playwrightReportAttachmentName(renderedPath)}"`,
+  );
+  await expect(readFile(reportPlayerPath, "utf8")).resolves.toContain(
+    `src="${await playwrightReportAttachmentName(rawPath)}"`,
+  );
 
   const rawDuration = await videoDurationMs(rawPath);
   const renderedDuration = await videoDurationMs(renderedPath);
@@ -393,6 +412,11 @@ type VideoFrame = {
 type VideoSpan = {
   end: number;
   start: number;
+};
+
+const playwrightReportAttachmentName = async (path: string) => {
+  const data = await readFile(path);
+  return `${createHash("sha1").update(data).digest("hex")}${extname(path)}`;
 };
 
 const trimmedDeadAirDuration = (
