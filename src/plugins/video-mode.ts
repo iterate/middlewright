@@ -57,6 +57,11 @@ export type VideoModeOptions = {
    * flows that shouldn't be slowed down. Default: []
    */
   skipStackFrames?: string[];
+  /**
+   * Minimum amount of each dead-air span to keep in video-tight.webm, split
+   * evenly before and after the removed middle.
+   */
+  deadAirThreshold?: number;
 };
 
 type VideoModeState = {
@@ -69,6 +74,18 @@ type VideoModeState = {
 type TightVideoSegment = {
   start: number;
   end: number;
+};
+
+const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
+  if (thresholdMs === undefined) {
+    return undefined;
+  }
+
+  if (!Number.isFinite(thresholdMs) || thresholdMs < 0) {
+    throw new Error("videoMode deadAirThreshold must be a non-negative number");
+  }
+
+  return thresholdMs;
 };
 
 /** Highlight element, pause, return disposable that unhighlights */
@@ -120,7 +137,19 @@ const metadataFor = (state: VideoModeState): VideoModeMetadata => {
   };
 };
 
-const recordDeadAir = async <T>(state: VideoModeState, action: () => Promise<T>) => {
+const recordDeadAirSpan = (state: VideoModeState, span: VideoModeSpan) => {
+  const start = Math.round(span.start);
+  const end = Math.round(span.end);
+
+  if (end > start) {
+    state.deadAirSpans.push({ end, start });
+  }
+};
+
+const recordDeadAir = async <T>(
+  state: VideoModeState,
+  action: () => Promise<T>,
+) => {
   if (!state.startedAt || state.deadAirDepth > 0) {
     return await action();
   }
@@ -133,7 +162,7 @@ const recordDeadAir = async <T>(state: VideoModeState, action: () => Promise<T>)
   } finally {
     state.deadAirDepth -= 1;
     const end = performance.now() - state.startedAt;
-    state.deadAirSpans.push({
+    recordDeadAirSpan(state, {
       end: Math.round(end),
       start: Math.round(start),
     });
@@ -181,6 +210,21 @@ const clipVideoSpan = (span: VideoModeSpan, finalEnd: number): VideoModeSpan | u
   return { end, start };
 };
 
+const trimDeadAirSpan = (
+  span: VideoModeSpan,
+  thresholdMs: number,
+): VideoModeSpan | undefined => {
+  const padding = thresholdMs / 2;
+  const start = Math.round(span.start + padding);
+  const end = Math.round(span.end - padding);
+
+  if (end <= start) {
+    return undefined;
+  }
+
+  return { end, start };
+};
+
 const videoSpansOverlap = (left: VideoModeSpan, right: VideoModeSpan) => {
   return left.start < right.end && right.start < left.end;
 };
@@ -220,12 +264,13 @@ const recordAttachedWaitFromTiming = async (
   const start = Math.round(timing.actionStartedAt - state.startedAt);
   const end = Math.round(timing.attachedAt - state.startedAt);
 
-  if (end > start) {
-    state.deadAirSpans.push({ end, start });
-  }
+  recordDeadAirSpan(state, { end, start });
 };
 
-const recordMiddlewareWaitBeforeVideoMode = (state: VideoModeState, timing: ActionTiming) => {
+const recordMiddlewareWaitBeforeVideoMode = (
+  state: VideoModeState,
+  timing: ActionTiming,
+) => {
   if (!state.startedAt) {
     return;
   }
@@ -241,14 +286,13 @@ const recordMiddlewareWaitBeforeVideoMode = (state: VideoModeState, timing: Acti
   const start = Math.round(timing.actionStartedAt - state.startedAt);
   const end = Math.round(currentMiddleware.startedAt - state.startedAt);
 
-  if (end > start) {
-    state.deadAirSpans.push({ end, start });
-  }
+  recordDeadAirSpan(state, { end, start });
 };
 
 const tightVideoSegments = (options: {
   deadAir: VideoModeSpan[];
   finalEnd: number;
+  thresholdMs: number;
 }): TightVideoSegment[] => {
   const finalEnd = Math.max(0, Math.round(options.finalEnd));
 
@@ -259,6 +303,8 @@ const tightVideoSegments = (options: {
   const deadAir = mergeVideoSpans(
     options.deadAir
       .map((span) => clipVideoSpan(span, finalEnd))
+      .filter((span): span is VideoModeSpan => Boolean(span))
+      .map((span) => trimDeadAirSpan(span, options.thresholdMs))
       .filter((span): span is VideoModeSpan => Boolean(span)),
   );
   const boundaries = new Set([0, finalEnd]);
@@ -299,6 +345,7 @@ const tightVideoSegments = (options: {
 const tightVideoFilter = (options: {
   deadAir: VideoModeSpan[];
   finalEnd: number;
+  thresholdMs: number;
 }) => {
   const segments = tightVideoSegments(options);
 
@@ -377,11 +424,13 @@ const removeDeadAirFromVideo = async (options: {
   inputPath: string;
   outputPath: string;
   deadAir: VideoModeSpan[];
+  thresholdMs: number;
 }) => {
   const finalEnd = await videoDurationMs(options.inputPath);
   const filter = tightVideoFilter({
     deadAir: options.deadAir,
     finalEnd,
+    thresholdMs: options.thresholdMs,
   });
 
   if (!filter) {
@@ -417,6 +466,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const highlightStyle = options.highlightStyle || "3px solid gold";
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
+  const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
   const state: VideoModeState = {
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -478,7 +528,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         state.deadAirSpans = [];
         state.outputs = {};
         if (state.startedAt) {
-          state.deadAirSpans.push({
+          recordDeadAirSpan(state, {
             end: Math.round(performance.now() - state.startedAt),
             start: 0,
           });
@@ -521,11 +571,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             path: rawPath,
           });
 
-          if (deadAir.length > 0) {
+          if (deadAir.length > 0 && deadAirThreshold !== undefined) {
             const wroteTightVideo = await removeDeadAirFromVideo({
               deadAir,
               inputPath: rawPath,
               outputPath: tightPath,
+              thresholdMs: deadAirThreshold,
             });
 
             if (wroteTightVideo) {

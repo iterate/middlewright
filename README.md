@@ -136,6 +136,7 @@ For producing demo/debugging videos people can actually follow: marks pre-action
 const video = videoMode({
   pauseBefore: 1000,
   pauseAfterTest: 3000,
+  deadAirThreshold: 300,
   highlightStyle: "3px solid gold",
   skipMethods: ["waitFor"],
   skipStackFrames: ["test-helpers.ts"], // don't slow down internal login/setup helpers
@@ -149,7 +150,9 @@ await video.deadAir(async () => {
 });
 ```
 
-When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-tight.webm` with dead air removed, and attaches both videos plus `video-mode.json` to the test report. If `ffmpeg` or `ffprobe` is missing, the trim step fails plainly so you know to install ffmpeg.
+When Playwright video recording is enabled, `videoMode` saves `video-raw.webm` and attaches it with `video-mode.json` to the test report. Set `deadAirThreshold` to also use `ffmpeg` to write `video-tight.webm` with dead air removed. If `ffmpeg` or `ffprobe` is missing, the trim step fails plainly so you know to install ffmpeg.
+
+`video-mode.json` records raw dead-air spans. `deadAirThreshold` is applied only when writing the tight video: it keeps that much of each dead-air span, split across the start and end of the span. Spans at or below the threshold are left intact.
 
 Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and highlights immediately before the action.
 

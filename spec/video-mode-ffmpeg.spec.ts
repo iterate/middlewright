@@ -10,7 +10,12 @@ const execFile = promisify(execFileCallback);
 test.use({ video: "on" });
 
 test("writes a video with dead air removed", async ({ page }, testInfo) => {
-  const video = videoMode({ pauseBefore: 1000, pauseAfterTest: 700 });
+  const deadAirThresholdMs = 300;
+  const video = videoMode({
+    deadAirThreshold: deadAirThresholdMs,
+    pauseBefore: 1000,
+    pauseAfterTest: 700,
+  });
   {
     await using plugged = await addPlugins({
       page,
@@ -120,7 +125,14 @@ test("writes a video with dead air removed", async ({ page }, testInfo) => {
 
   const rawDuration = await videoDurationMs(rawPath);
   const tightDuration = await videoDurationMs(tightPath);
+  const expectedTightDuration =
+    rawDuration -
+    metadata.deadAir.reduce((removedDuration: number, span: { end: number; start: number }) => {
+      return removedDuration + Math.max(0, span.end - span.start - deadAirThresholdMs);
+    }, 0);
+
   expect(tightDuration).toBeLessThan(rawDuration);
+  expect(Math.abs(tightDuration - expectedTightDuration)).toBeLessThan(1000);
 });
 
 const videoDurationMs = async (path: string) => {
