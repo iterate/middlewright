@@ -149,6 +149,35 @@ test("marks explicit attached waitFor calls as dead air", async ({ page }, testI
   expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
+test("sets video source range from current timestamps", async ({ page }, testInfo) => {
+  const video = videoMode({ finalHold: 50, highlightDuration: 20 });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+
+  const startBefore = plugged.videoMode.getVideoTimestamp();
+  plugged.videoMode.setStartTime();
+  const startAfter = plugged.videoMode.getVideoTimestamp();
+  await plugged.waitForTimeout(20);
+  const endBefore = plugged.videoMode.getVideoTimestamp();
+  plugged.videoMode.setEndTime();
+  const endAfter = plugged.videoMode.getVideoTimestamp();
+
+  const metadata = await plugged.videoMode.metadata();
+  expect(metadata).toMatchObject({
+    sourceRange: {
+      end: expect.any(Number),
+      start: expect.any(Number),
+    },
+  });
+  expect(metadata.sourceRange.start).toBeGreaterThanOrEqual(startBefore);
+  expect(metadata.sourceRange.start).toBeLessThanOrEqual(startAfter);
+  expect(metadata.sourceRange.end).toBeGreaterThanOrEqual(endBefore);
+  expect(metadata.sourceRange.end).toBeLessThanOrEqual(endAfter);
+});
+
 test("deadAir runs actions without video highlighting and records metadata", async ({
   page,
 }, testInfo) => {

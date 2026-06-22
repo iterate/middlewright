@@ -160,6 +160,10 @@ const videoPaths = page.videoMode.outputPaths();
 const videoMetadata = await page.videoMode.metadata();
 console.log(videoPaths.rendered);
 console.log(videoMetadata.highlights.length);
+
+page.videoMode.setStartTime();
+await page.locator("#important-flow").click();
+page.videoMode.setEndTime();
 ```
 
 When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.

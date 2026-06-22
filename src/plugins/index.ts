@@ -10,6 +10,7 @@ export {
   type VideoModePageExtension,
   type VideoModeRect,
   type VideoModePlugin,
+  type VideoModeSourceRange,
   type VideoModeSpan,
   type VideoModeViewport,
 } from "./video-mode.ts";

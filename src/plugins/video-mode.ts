@@ -40,6 +40,11 @@ export type VideoModeOutputPaths = {
   reportPlayer: string;
 };
 
+export type VideoModeSourceRange = {
+  start?: number;
+  end?: number;
+};
+
 export type VideoModeRect = {
   x: number;
   y: number;
@@ -66,6 +71,7 @@ export type VideoModeMetadata = {
   deadAir: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   outputs: VideoModeOutputs;
+  sourceRange: VideoModeSourceRange;
 };
 
 export type VideoModeControls = {
@@ -79,6 +85,10 @@ export type VideoModeControls = {
   metadata(): Promise<VideoModeMetadata>;
   /** Absolute artifact paths for the current test's video-mode outputs. */
   outputPaths(): VideoModeOutputPaths;
+  /** Render the video from this source timestamp, in ms. Defaults to the current video timestamp. */
+  setStartTime(ms?: number): void;
+  /** Render the video until this source timestamp, in ms. Defaults to the current video timestamp. */
+  setEndTime(ms?: number): void;
 };
 
 export type VideoModePageExtension = {
@@ -117,6 +127,7 @@ type VideoModeState = {
   highlights: VideoModeHighlight[];
   highlightImageIndex: number;
   outputs: VideoModeOutputs;
+  sourceRange: VideoModeSourceRange;
   startedAt?: number;
 };
 
@@ -175,12 +186,39 @@ const resolveNonNegativeNumber = (options: {
   return value;
 };
 
+const resolveVideoTimestamp = (name: string, ms: number) => {
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new Error(`videoMode.${name}() requires a non-negative timestamp`);
+  }
+
+  return Math.round(ms);
+};
+
+const normalizeSourceRange = (sourceRange: VideoModeSourceRange): VideoModeSourceRange => {
+  const normalized: VideoModeSourceRange = {};
+
+  if (sourceRange.start !== undefined) {
+    normalized.start = Math.round(sourceRange.start);
+  }
+
+  if (sourceRange.end !== undefined) {
+    normalized.end = Math.round(sourceRange.end);
+  }
+
+  return normalized;
+};
+
+const sourceRangeIsSet = (sourceRange: VideoModeSourceRange) => {
+  return sourceRange.start !== undefined || sourceRange.end !== undefined;
+};
+
 const metadataFor = (state: VideoModeState): VideoModeMetadata => {
   return {
     deadAir: mergeVideoSpans(state.deadAirSpans),
     highlights: normalizeVideoHighlights(state.highlights),
     outputs: state.outputs,
     schemaVersion: 1,
+    sourceRange: normalizeSourceRange(state.sourceRange),
     timebase: "ms",
   };
 };
@@ -359,9 +397,9 @@ const formatSeconds = (ms: number) => {
   return value || "0";
 };
 
-const clipVideoSpan = (span: VideoModeSpan, finalEnd: number): VideoModeSpan | undefined => {
-  const start = Math.max(0, Math.min(Math.round(span.start), finalEnd));
-  const end = Math.max(0, Math.min(Math.round(span.end), finalEnd));
+const clipVideoSpan = (span: VideoModeSpan, range: VideoModeSpan): VideoModeSpan | undefined => {
+  const start = Math.max(range.start, Math.min(Math.round(span.start), range.end));
+  const end = Math.max(range.start, Math.min(Math.round(span.end), range.end));
 
   if (end <= start) {
     return undefined;
@@ -464,28 +502,30 @@ const tightVideoSegments = (options: {
   deadAir: VideoModeSpan[];
   finalEnd: number;
   highlights: VideoModeHighlight[];
+  start: number;
   thresholdMs?: number;
 }): TightVideoSegment[] => {
   const finalEnd = Math.max(0, Math.round(options.finalEnd));
+  const start = Math.max(0, Math.min(Math.round(options.start), finalEnd));
 
-  if (finalEnd === 0) {
+  if (finalEnd <= start) {
     return [];
   }
 
   if (options.thresholdMs === undefined) {
-    return [{ end: finalEnd, start: 0 }];
+    return [{ end: finalEnd, start }];
   }
 
   const thresholdMs = options.thresholdMs;
   const highlights = normalizeVideoHighlights(options.highlights);
   const deadAir = mergeVideoSpans(
     options.deadAir
-      .map((span) => clipVideoSpan(span, finalEnd))
+      .map((span) => clipVideoSpan(span, { end: finalEnd, start }))
       .filter((span): span is VideoModeSpan => Boolean(span))
       .map((span) => trimDeadAirSpan({ highlights, span, thresholdMs }))
       .filter((span): span is VideoModeSpan => Boolean(span)),
   );
-  const boundaries = new Set([0, finalEnd]);
+  const boundaries = new Set([start, finalEnd]);
 
   for (const span of deadAir) {
     boundaries.add(span.start);
@@ -989,9 +1029,22 @@ const renderVideo = async (options: {
   outputDir: string;
   outputPath: string;
   deadAir: VideoModeSpan[];
+  sourceRange: VideoModeSourceRange;
   thresholdMs: number | undefined;
 }) => {
   const info = await videoInfo(options.inputPath);
+  const rangeStart = Math.max(0, Math.min(Math.round(options.sourceRange.start || 0), info.durationMs));
+  const rangeEnd = Math.max(
+    0,
+    Math.min(Math.round(options.sourceRange.end || info.durationMs), info.durationMs),
+  );
+
+  if (rangeEnd <= rangeStart) {
+    throw new Error(
+      `videoMode source range is empty: start ${rangeStart}ms must be before end ${rangeEnd}ms`,
+    );
+  }
+
   const highlightInputs = options.highlights
     .filter((highlight) => highlight.image)
     .map((highlight, index) => ({
@@ -1002,8 +1055,9 @@ const renderVideo = async (options: {
     }));
   const segments = tightVideoSegments({
     deadAir: options.deadAir,
-    finalEnd: info.durationMs,
+    finalEnd: rangeEnd,
     highlights: options.highlights,
+    start: rangeStart,
     thresholdMs: options.thresholdMs,
   });
   const filter = renderedVideoFilter({
@@ -1068,17 +1122,19 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     highlightImageIndex: 0,
     highlights: [],
     outputs: {},
+    sourceRange: {},
     startedAt: performance.now(),
   };
   let testInfoForOutputPaths: TestInfo | undefined;
+  const getVideoTimestamp = () => {
+    const now = performance.now();
+    return Math.round(now - (state.startedAt || now));
+  };
   const controls: VideoModeControls = {
     deadAir: async (action) => {
       return await recordDeadAir(state, action);
     },
-    getVideoTimestamp: () => {
-      const now = performance.now();
-      return Math.round(now - (state.startedAt || now));
-    },
+    getVideoTimestamp,
     metadata: async () => {
       if (!testInfoForOutputPaths) {
         return metadataFor(state);
@@ -1094,6 +1150,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       }
 
       return videoModeOutputPaths(testInfoForOutputPaths);
+    },
+    setEndTime: (ms = getVideoTimestamp()) => {
+      state.sourceRange.end = resolveVideoTimestamp("setEndTime", ms);
+    },
+    setStartTime: (ms = getVideoTimestamp()) => {
+      state.sourceRange.start = resolveVideoTimestamp("setStartTime", ms);
     },
   };
 
@@ -1158,6 +1220,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         state.highlightImageIndex = 0;
         state.highlights = [];
         state.outputs = {};
+        state.sourceRange = {};
         if (state.startedAt) {
           recordDeadAirSpan(state, {
             end: Math.round(performance.now() - state.startedAt),
@@ -1172,6 +1235,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
+        const sourceRange = metadataBeforeVideo.sourceRange;
         const video = page.video();
 
         if (video) {
@@ -1191,7 +1255,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             path: paths.raw,
           });
 
-          if (highlights.length > 0 || deadAirThreshold !== undefined || finalHold > 0) {
+          if (
+            highlights.length > 0 ||
+            deadAirThreshold !== undefined ||
+            finalHold > 0 ||
+            sourceRangeIsSet(sourceRange)
+          ) {
             const wroteRenderedVideo = await renderVideo({
               deadAir,
               finalHoldMs: finalHold,
@@ -1199,6 +1268,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               inputPath: paths.raw,
               outputDir: testInfo.outputDir,
               outputPath: paths.rendered,
+              sourceRange,
               thresholdMs: deadAirThreshold,
             });
 
@@ -1239,7 +1309,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           metadata.highlights.length > 0 ||
           metadata.outputs.player ||
           metadata.outputs.raw ||
-          metadata.outputs.rendered
+          metadata.outputs.rendered ||
+          sourceRangeIsSet(metadata.sourceRange)
         ) {
           const path = videoModeOutputPaths(testInfo).metadata;
           await mkdir(testInfo.outputDir, { recursive: true });

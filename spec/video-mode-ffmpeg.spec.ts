@@ -172,6 +172,43 @@ test("writes video-mode artifact files and report player", async ({ page }, test
   expect(Math.abs(renderedDuration - expectedRenderedDuration)).toBeLessThan(1500);
 });
 
+test("renders only the selected video source range", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlightDuration: 0,
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setContent(`
+      <main style="font: 24px sans-serif">source range</main>
+    `);
+
+    await plugged.waitForTimeout(700);
+    plugged.videoMode.setStartTime();
+    await plugged.waitForTimeout(1100);
+    plugged.videoMode.setEndTime();
+    await plugged.waitForTimeout(700);
+  }
+
+  const metadata = await video.metadata();
+  expect(metadata.sourceRange).toMatchObject({
+    end: expect.any(Number),
+    start: expect.any(Number),
+  });
+
+  const paths = video.outputPaths();
+  const rawDuration = await videoDurationMs(paths.raw);
+  const renderedDuration = await videoDurationMs(paths.rendered);
+  const expectedRenderedDuration = metadata.sourceRange.end! - metadata.sourceRange.start!;
+
+  expect(rawDuration).toBeGreaterThan(expectedRenderedDuration + 500);
+  expect(Math.abs(renderedDuration - expectedRenderedDuration)).toBeLessThan(700);
+});
+
 test("renders calibrated highlight boxes on a paused pre-click frame", async ({ page }, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({
