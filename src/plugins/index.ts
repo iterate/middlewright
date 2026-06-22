@@ -2,12 +2,15 @@ export { hydrationWaiter, type HydrationWaiterOptions } from "./hydration-waiter
 export {
   videoMode,
   type VideoModeControls,
+  type VideoModeHighlight,
   type VideoModeMetadata,
   type VideoModeOptions,
   type VideoModeOutputs,
   type VideoModePageExtension,
+  type VideoModeRect,
   type VideoModePlugin,
   type VideoModeSpan,
+  type VideoModeViewport,
 } from "./video-mode.ts";
 export { spinnerWaiter, type SpinnerWaiterOptions, defaultSelectors } from "./spinner-waiter.ts";
 export { uiErrorReporter, type UIErrorReporterOptions } from "./ui-error-reporter.ts";

@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
-test("highlights the element while the action runs, then cleans up", async ({
+test("records highlight metadata without mutating element styles", async ({
   page,
 }, testInfo) => {
   await using plugged = await addPlugins({
     page,
     testInfo,
-    plugins: [videoMode({ pauseBefore: 300, pauseAfterTest: 50 })],
+    plugins: [videoMode({ finalHold: 50, highlightDuration: 300 })],
   });
   await plugged.setContent(`
     <button id="btn">press</button>
@@ -23,17 +23,33 @@ test("highlights the element while the action runs, then cleans up", async ({
     </script>
   `);
 
+  const start = Date.now();
   await plugged.locator("#btn").click();
 
-  await expect(plugged.locator("#result")).toContainText("outline: 3px solid gold");
-  // Cleanup is fire-and-forget, so poll until the highlight is gone
-  await expect
-    .poll(() => plugged.locator("#btn").getAttribute("style"))
-    .not.toContain("gold");
+  expect(Date.now() - start).toBeLessThan(1000);
+  await expect(plugged.locator("#result")).toContainText("(no style)");
+  expect(plugged.videoMode.metadata().highlights).toContainEqual(
+    expect.objectContaining({
+      color: "gold",
+      end: expect.any(Number),
+      rect: expect.objectContaining({
+        height: expect.any(Number),
+        width: expect.any(Number),
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }),
+      start: expect.any(Number),
+      thickness: 3,
+      viewport: expect.objectContaining({
+        height: expect.any(Number),
+        width: expect.any(Number),
+      }),
+    }),
+  );
 });
 
-test("skipped methods are not highlighted or slowed down", async ({ page }, testInfo) => {
-  const video = videoMode({ pauseBefore: 5000, pauseAfterTest: 50, skipMethods: ["click"] });
+test("skipped methods are not highlighted", async ({ page }, testInfo) => {
+  const video = videoMode({ finalHold: 50, highlightDuration: 5000, skipMethods: ["click"] });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -52,13 +68,13 @@ test("skipped methods are not highlighted or slowed down", async ({ page }, test
 
   const start = Date.now();
   await plugged.locator("#btn").click();
-  // A 5s pauseBefore would blow way past this if click weren't skipped
   expect(Date.now() - start).toBeLessThan(2000);
   expect(video.metadata().deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  expect(video.metadata().highlights).toEqual([]);
 });
 
 test("marks pre-action waits for attachment as dead air", async ({ page }, testInfo) => {
-  const video = videoMode({ pauseBefore: 20, pauseAfterTest: 50 });
+  const video = videoMode({ finalHold: 50, highlightDuration: 20 });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -92,7 +108,7 @@ test("pre-action attached waits honor action timeout", async ({ page }, testInfo
   await using plugged = await addPlugins({
     page,
     testInfo,
-    plugins: [videoMode({ pauseBefore: 20, pauseAfterTest: 50 })],
+    plugins: [videoMode({ finalHold: 50, highlightDuration: 20 })],
   });
   await plugged.setContent(`
     <script>
@@ -111,7 +127,7 @@ test("pre-action attached waits honor action timeout", async ({ page }, testInfo
 });
 
 test("marks explicit attached waitFor calls as dead air", async ({ page }, testInfo) => {
-  const video = videoMode({ pauseBefore: 20, pauseAfterTest: 50 });
+  const video = videoMode({ finalHold: 50, highlightDuration: 20 });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -137,7 +153,7 @@ test("deadAir runs actions without video highlighting and records metadata", asy
     await using plugged = await addPlugins({
       page,
       testInfo,
-      plugins: [videoMode({ pauseBefore: 5000, pauseAfterTest: 50 })],
+      plugins: [videoMode({ finalHold: 50, highlightDuration: 5000 })],
     });
 
     await plugged.setContent(`
@@ -168,12 +184,14 @@ test("deadAir runs actions without video highlighting and records metadata", asy
     expect(plugged.videoMode.metadata().deadAir).toContainEqual(
       expect.objectContaining({ end: expect.any(Number), start: expect.any(Number) }),
     );
+    expect(plugged.videoMode.metadata().highlights).toEqual([]);
   }
 
   const metadata = JSON.parse(
     await readFile(join(testInfo.outputDir, "video-mode.json"), "utf8"),
   );
   expect(metadata).toMatchObject({
+    highlights: [],
     outputs: {},
     schemaVersion: 1,
     timebase: "ms",

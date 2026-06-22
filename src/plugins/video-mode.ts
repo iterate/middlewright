@@ -1,5 +1,5 @@
 /**
- * video-mode: slow down and highlight actions so recorded videos are watchable.
+ * video-mode: record action timings and render watchable videos after the run.
  *
  * Extracted from the iterate monorepo's internal Playwright test
  * infrastructure (github.com/iterate/iterate, private). Modification from the
@@ -10,7 +10,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { Locator } from "@playwright/test";
+import type { Locator, TestInfo } from "@playwright/test";
 import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
@@ -22,20 +22,40 @@ export type VideoModeSpan = {
 
 export type VideoModeOutputs = {
   raw?: string;
-  deadAirRemoved?: string;
+  rendered?: string;
+};
+
+export type VideoModeRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type VideoModeViewport = {
+  width: number;
+  height: number;
+};
+
+export type VideoModeHighlight = VideoModeSpan & {
+  color: string;
+  image?: string;
+  rect: VideoModeRect;
+  thickness: number;
+  viewport: VideoModeViewport;
 };
 
 export type VideoModeMetadata = {
   schemaVersion: 1;
   timebase: "ms";
   deadAir: VideoModeSpan[];
+  highlights: VideoModeHighlight[];
   outputs: VideoModeOutputs;
 };
 
 export type VideoModeControls = {
   /**
-   * Run invisible video bookkeeping without video-mode highlighting/pauses,
-   * and write the elapsed span to video-mode metadata.
+   * Run invisible video bookkeeping and write the elapsed span as dead air.
    */
   deadAir<T>(action: () => Promise<T>): Promise<T>;
   /** Milliseconds since video-mode started recording metadata for this test. */
@@ -51,12 +71,14 @@ export type VideoModePageExtension = {
 export type VideoModePlugin = Plugin<VideoModePageExtension> & VideoModeControls;
 
 export type VideoModeOptions = {
-  /** Pause duration before action (ms). Default: 1000 */
-  pauseBefore?: number;
-  /** Pause duration after test (ms). Default: 3000 */
-  pauseAfterTest?: number;
-  /** Highlight style. Default: '3px solid gold' */
-  highlightStyle?: string;
+  /** Highlight duration in the rendered video (ms). Default: 1000 */
+  highlightDuration?: number;
+  /** Final hold duration in the rendered video (ms). Default: 3000 */
+  finalHold?: number;
+  /** Highlight color for the rendered video. Default: 'gold' */
+  highlightColor?: string;
+  /** Highlight outline thickness in the rendered video. Default: 3 */
+  highlightThickness?: number;
   /** Methods to skip highlighting. Default: ['waitFor'] */
   skipMethods?: OverrideableMethod[];
   /**
@@ -66,7 +88,7 @@ export type VideoModeOptions = {
    */
   skipStackFrames?: string[];
   /**
-   * Minimum amount of each dead-air span to keep in video-tight.webm, split
+   * Minimum amount of each dead-air span to keep in video-rendered.webm, split
    * evenly before and after the removed middle.
    */
   deadAirThreshold?: number;
@@ -75,6 +97,8 @@ export type VideoModeOptions = {
 type VideoModeState = {
   deadAirDepth: number;
   deadAirSpans: VideoModeSpan[];
+  highlights: VideoModeHighlight[];
+  highlightImageIndex: number;
   outputs: VideoModeOutputs;
   startedAt?: number;
 };
@@ -82,6 +106,30 @@ type VideoModeState = {
 type TightVideoSegment = {
   start: number;
   end: number;
+};
+
+type VideoInfo = {
+  width: number;
+  height: number;
+  durationMs: number;
+};
+
+type VideoFilter = {
+  outputLabel: string;
+  value: string;
+};
+
+type VideoPiece = {
+  end: number;
+  highlight?: VideoModeHighlight;
+  start: number;
+};
+
+type HighlightInput = {
+  durationMs: number;
+  image: string;
+  inputIndex: number;
+  path: string;
 };
 
 const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
@@ -96,53 +144,91 @@ const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
   return thresholdMs;
 };
 
-/** Highlight element, pause, return disposable that unhighlights */
-const setupHighlight = async (locator: Locator, style: string, pauseMs: number) => {
-  if (!(await locatorIsAttached(locator))) {
-    return {
-      [Symbol.dispose]: () => {},
-    };
+const resolveNonNegativeNumber = (options: {
+  defaultValue: number;
+  name: string;
+  value: number | undefined;
+}) => {
+  const value = options.value === undefined ? options.defaultValue : options.value;
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${options.name} must be a non-negative number`);
   }
 
-  try {
-    await locator.evaluate((el, s) => {
-      const prev = el.getAttribute("style") || "";
-      el.setAttribute("data-video-prev-style", prev);
-      el.setAttribute(
-        "style",
-        `${prev}; outline: ${s} !important; outline-offset: 2px !important;`,
-      );
-    }, style);
-  } catch {
-    // Element may not be ready yet, ignore
-  }
-  await new Promise((resolve) => setTimeout(resolve, pauseMs));
-
-  return {
-    [Symbol.dispose]: () => {
-      // Fire-and-forget cleanup - don't wait for it
-      locator
-        .evaluate((el) => {
-          const prev = el.getAttribute("data-video-prev-style");
-          if (typeof prev === "string") {
-            el.setAttribute("style", prev);
-            el.removeAttribute("data-video-prev-style");
-          }
-        })
-        .catch(() => {
-          // Element may be gone or not actionable, ignore
-        });
-    },
-  };
+  return value;
 };
 
 const metadataFor = (state: VideoModeState): VideoModeMetadata => {
   return {
     deadAir: mergeVideoSpans(state.deadAirSpans),
+    highlights: normalizeVideoHighlights(state.highlights),
     outputs: state.outputs,
     schemaVersion: 1,
     timebase: "ms",
   };
+};
+
+const recordHighlight = async (options: {
+  color: string;
+  durationMs: number;
+  locator: Locator;
+  state: VideoModeState;
+  testInfo: TestInfo;
+  thickness: number;
+}) => {
+  if (options.state.startedAt === undefined || options.durationMs <= 0) {
+    return;
+  }
+
+  if (!(await locatorIsAttached(options.locator))) {
+    return;
+  }
+
+  try {
+    const snapshot = await options.locator.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        rect: {
+          height: rect.height,
+          width: rect.width,
+          x: rect.left,
+          y: rect.top,
+        },
+        viewport: {
+          height: window.innerHeight,
+          width: window.innerWidth,
+        },
+      };
+    });
+
+    if (
+      snapshot.rect.width <= 0 ||
+      snapshot.rect.height <= 0 ||
+      snapshot.viewport.width <= 0 ||
+      snapshot.viewport.height <= 0
+    ) {
+      return;
+    }
+
+    const image = `video-mode-highlight-${options.state.highlightImageIndex}.png`;
+    options.state.highlightImageIndex += 1;
+    const imagePath = join(options.testInfo.outputDir, image);
+    await mkdir(options.testInfo.outputDir, { recursive: true });
+    await options.locator.page().screenshot({ path: imagePath, scale: "css" });
+
+    const start = Math.round(performance.now() - options.state.startedAt);
+    options.state.highlights.push({
+      color: options.color,
+      end: start + Math.round(options.durationMs),
+      image,
+      rect: snapshot.rect,
+      start,
+      thickness: options.thickness,
+      viewport: snapshot.viewport,
+    });
+  } catch {
+    // Element may disappear between the actionability wait and the snapshot.
+  }
 };
 
 const recordDeadAirSpan = (state: VideoModeState, span: VideoModeSpan) => {
@@ -158,7 +244,7 @@ const recordDeadAir = async <T>(
   state: VideoModeState,
   action: () => Promise<T>,
 ) => {
-  if (!state.startedAt || state.deadAirDepth > 0) {
+  if (state.startedAt === undefined || state.deadAirDepth > 0) {
     return await action();
   }
 
@@ -200,6 +286,30 @@ const mergeVideoSpans = (spans: VideoModeSpan[]) => {
   }
 
   return merged;
+};
+
+const normalizeVideoHighlights = (highlights: VideoModeHighlight[]) => {
+  return highlights
+    .map((highlight) => ({
+      ...highlight,
+      end: Math.round(highlight.end),
+      rect: {
+        height: Math.round(highlight.rect.height),
+        width: Math.round(highlight.rect.width),
+        x: Math.round(highlight.rect.x),
+        y: Math.round(highlight.rect.y),
+      },
+      start: Math.round(highlight.start),
+      thickness: Math.round(highlight.thickness),
+      viewport: {
+        height: Math.round(highlight.viewport.height),
+        width: Math.round(highlight.viewport.width),
+      },
+    }))
+    .filter((highlight) => highlight.end > highlight.start)
+    .filter((highlight) => highlight.rect.width > 0 && highlight.rect.height > 0)
+    .filter((highlight) => highlight.viewport.width > 0 && highlight.viewport.height > 0)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
 };
 
 const formatSeconds = (ms: number) => {
@@ -250,14 +360,12 @@ const waitForTargetsAttached = (args: unknown[]) => {
   return !targetState || targetState === "attached";
 };
 
-const visibleTailAfterTestMs = (pauseAfterTest: number) => Math.min(500, pauseAfterTest);
-
 const recordAttachedWaitFromTiming = async (
   state: VideoModeState,
   timing: { actionStartedAt: number; attachedAt?: number; attachedAtStart: boolean },
   locator: Locator,
 ) => {
-  if (!state.startedAt || timing.attachedAtStart) {
+  if (state.startedAt === undefined || timing.attachedAtStart) {
     return;
   }
 
@@ -279,7 +387,7 @@ const recordMiddlewareWaitBeforeVideoMode = (
   state: VideoModeState,
   timing: ActionTiming,
 ) => {
-  if (!state.startedAt) {
+  if (state.startedAt === undefined) {
     return;
   }
 
@@ -300,7 +408,7 @@ const recordMiddlewareWaitBeforeVideoMode = (
 const tightVideoSegments = (options: {
   deadAir: VideoModeSpan[];
   finalEnd: number;
-  thresholdMs: number;
+  thresholdMs?: number;
 }): TightVideoSegment[] => {
   const finalEnd = Math.max(0, Math.round(options.finalEnd));
 
@@ -308,11 +416,16 @@ const tightVideoSegments = (options: {
     return [];
   }
 
+  if (options.thresholdMs === undefined) {
+    return [{ end: finalEnd, start: 0 }];
+  }
+
+  const thresholdMs = options.thresholdMs;
   const deadAir = mergeVideoSpans(
     options.deadAir
       .map((span) => clipVideoSpan(span, finalEnd))
       .filter((span): span is VideoModeSpan => Boolean(span))
-      .map((span) => trimDeadAirSpan(span, options.thresholdMs))
+      .map((span) => trimDeadAirSpan(span, thresholdMs))
       .filter((span): span is VideoModeSpan => Boolean(span)),
   );
   const boundaries = new Set([0, finalEnd]);
@@ -350,38 +463,165 @@ const tightVideoSegments = (options: {
   return segments;
 };
 
-const tightVideoFilter = (options: {
-  deadAir: VideoModeSpan[];
-  finalEnd: number;
-  thresholdMs: number;
-}) => {
-  const segments = tightVideoSegments(options);
+const videoPieces = (options: {
+  highlights: VideoModeHighlight[];
+  segments: TightVideoSegment[];
+}): VideoPiece[] => {
+  const pieces: VideoPiece[] = [];
+  const frameMs = 50;
 
-  if (
-    segments.length === 0 ||
-    (segments.length === 1 &&
-      segments[0].start === 0 &&
-      segments[0].end === Math.round(options.finalEnd))
-  ) {
+  for (const segment of options.segments) {
+    let cursor = segment.start;
+    const highlights = options.highlights.filter(
+      (highlight) => highlight.start >= segment.start && highlight.start < segment.end,
+    );
+
+    for (const highlight of highlights) {
+      if (highlight.start > cursor) {
+        pieces.push({ end: highlight.start, start: cursor });
+      }
+
+      let frameStart = Math.max(segment.start, highlight.start - frameMs);
+      let frameEnd = highlight.start;
+
+      if (frameEnd <= frameStart) {
+        frameStart = highlight.start;
+        frameEnd = Math.min(segment.end, frameStart + frameMs);
+      }
+
+      if (frameEnd > frameStart) {
+        pieces.push({ end: frameEnd, highlight, start: frameStart });
+      }
+
+      cursor = highlight.start;
+    }
+
+    if (segment.end > cursor) {
+      pieces.push({ end: segment.end, start: cursor });
+    }
+  }
+
+  return pieces.filter((piece) => piece.end > piece.start);
+};
+
+const scaleHighlight = (highlight: VideoModeHighlight, video: { width: number; height: number }) => {
+  const scale = Math.min(
+    video.width / highlight.viewport.width,
+    video.height / highlight.viewport.height,
+  );
+  const x = Math.max(0, Math.round(highlight.rect.x * scale));
+  const y = Math.max(0, Math.round(highlight.rect.y * scale));
+  const width = Math.max(1, Math.round(highlight.rect.width * scale));
+  const height = Math.max(1, Math.round(highlight.rect.height * scale));
+
+  return {
+    height: Math.min(height, Math.max(1, video.height - y)),
+    width: Math.min(width, Math.max(1, video.width - x)),
+    x,
+    y,
+  };
+};
+
+const scaledViewportSize = (
+  viewport: VideoModeViewport,
+  video: { width: number; height: number },
+) => {
+  const scale = Math.min(video.width / viewport.width, video.height / viewport.height);
+
+  return {
+    height: Math.max(1, Math.round(viewport.height * scale)),
+    width: Math.max(1, Math.round(viewport.width * scale)),
+  };
+};
+
+const drawboxFilter = (highlight: VideoModeHighlight, video: { width: number; height: number }) => {
+  const rect = scaleHighlight(highlight, video);
+  return [
+    `drawbox=x=${rect.x}`,
+    `y=${rect.y}`,
+    `w=${rect.width}`,
+    `h=${rect.height}`,
+    `color=${highlight.color}`,
+    `t=${Math.max(1, Math.round(highlight.thickness))}`,
+  ].join(":");
+};
+
+const renderedVideoFilter = (options: {
+  finalHoldMs: number;
+  highlightInputs: HighlightInput[];
+  highlights: VideoModeHighlight[];
+  segments: TightVideoSegment[];
+  video: { width: number; height: number };
+}): VideoFilter | undefined => {
+  const highlightInputByImage = new Map(
+    options.highlightInputs.map((input) => [input.image, input]),
+  );
+  const pieces = videoPieces({
+    highlights: options.highlights,
+    segments: options.segments,
+  });
+
+  if (pieces.length === 0) {
     return undefined;
   }
 
   const filters: string[] = [];
   const labels: string[] = [];
 
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index];
-    const label = `tight${index}`;
+  for (let index = 0; index < pieces.length; index += 1) {
+    const piece = pieces[index];
+    const label = `render${index}`;
     labels.push(`[${label}]`);
-    filters.push(
-      `[0:v]trim=start=${formatSeconds(segment.start)}:end=${formatSeconds(segment.end)},setpts=PTS-STARTPTS[${label}]`,
-    );
+
+    const operations: string[] = [];
+
+    if (piece.highlight?.image && highlightInputByImage.has(piece.highlight.image)) {
+      const input = highlightInputByImage.get(piece.highlight.image)!;
+      const scaledViewport = scaledViewportSize(piece.highlight.viewport, options.video);
+      operations.push(
+        `[${input.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+      );
+      operations.push(
+        `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+      );
+      operations.push(drawboxFilter(piece.highlight, options.video));
+      operations.push(
+        `trim=start=0:end=${formatSeconds(piece.highlight.end - piece.highlight.start)}`,
+      );
+      operations.push("setpts=PTS-STARTPTS");
+    } else {
+      operations.push(
+        `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
+      );
+      operations.push("setpts=PTS-STARTPTS");
+    }
+
+    if (piece.highlight && !piece.highlight.image) {
+      const sourceDuration = piece.end - piece.start;
+      operations.push(drawboxFilter(piece.highlight, options.video));
+      operations.push(
+        `tpad=stop_mode=clone:stop_duration=${formatSeconds(
+          Math.max(0, piece.highlight.end - piece.highlight.start - sourceDuration),
+        )}`,
+      );
+    }
+
+    filters.push(`${operations.join(",")}[${label}]`);
   }
 
-  const outputLabel = labels.length === 1 ? labels[0].slice(1, -1) : "tightout";
+  const concatLabel = labels.length === 1 ? labels[0].slice(1, -1) : "renderconcat";
 
   if (labels.length > 1) {
-    filters.push(`${labels.join("")}concat=n=${labels.length}:v=1:a=0[${outputLabel}]`);
+    filters.push(`${labels.join("")}concat=n=${labels.length}:v=1:a=0[${concatLabel}]`);
+  }
+
+  const finalHoldMs = Math.max(0, Math.round(options.finalHoldMs));
+  const outputLabel = finalHoldMs > 0 ? "renderout" : concatLabel;
+
+  if (finalHoldMs > 0) {
+    filters.push(
+      `[${concatLabel}]tpad=stop_mode=clone:stop_duration=${formatSeconds(finalHoldMs)}[${outputLabel}]`,
+    );
   }
 
   return {
@@ -390,19 +630,33 @@ const tightVideoFilter = (options: {
   };
 };
 
-const videoDurationMs = async (path: string) => {
+const videoInfo = async (path: string): Promise<VideoInfo> => {
   const { stdout } = await execFile(
     "ffprobe",
-    ["-v", "error", "-show_entries", "format=duration", "-of", "default=nokey=1:noprint_wrappers=1", path],
+    [
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration:stream=width,height",
+      "-of",
+      "json",
+      path,
+    ],
     { maxBuffer: 1024 * 1024 },
   );
-  const seconds = Number(stdout.trim());
+  const payload = JSON.parse(stdout);
+  const seconds = Number(payload.format?.duration);
+  const stream = payload.streams?.find((candidate: any) => candidate.width && candidate.height);
 
-  if (!Number.isFinite(seconds) || seconds <= 0) {
+  if (!Number.isFinite(seconds) || seconds <= 0 || !stream) {
     throw new Error(`Could not read video duration from ffprobe output: ${stdout}`);
   }
 
-  return Math.round(seconds * 1000);
+  return {
+    durationMs: Math.round(seconds * 1000),
+    height: Number(stream.height),
+    width: Number(stream.width),
+  };
 };
 
 const waitForNonEmptyFile = async (path: string, timeoutMs = 5000) => {
@@ -428,17 +682,35 @@ const waitForNonEmptyFile = async (path: string, timeoutMs = 5000) => {
     : new Error(`Timed out waiting for non-empty file: ${path}`);
 };
 
-const removeDeadAirFromVideo = async (options: {
+const renderVideo = async (options: {
+  finalHoldMs: number;
+  highlights: VideoModeHighlight[];
   inputPath: string;
+  outputDir: string;
   outputPath: string;
   deadAir: VideoModeSpan[];
-  thresholdMs: number;
+  thresholdMs: number | undefined;
 }) => {
-  const finalEnd = await videoDurationMs(options.inputPath);
-  const filter = tightVideoFilter({
+  const info = await videoInfo(options.inputPath);
+  const highlightInputs = options.highlights
+    .filter((highlight) => highlight.image)
+    .map((highlight, index) => ({
+      durationMs: highlight.end - highlight.start,
+      image: highlight.image!,
+      inputIndex: index + 1,
+      path: join(options.outputDir, highlight.image!),
+    }));
+  const segments = tightVideoSegments({
     deadAir: options.deadAir,
-    finalEnd,
+    finalEnd: info.durationMs,
     thresholdMs: options.thresholdMs,
+  });
+  const filter = renderedVideoFilter({
+    finalHoldMs: options.finalHoldMs,
+    highlightInputs,
+    highlights: options.highlights,
+    segments,
+    video: info,
   });
 
   if (!filter) {
@@ -451,6 +723,14 @@ const removeDeadAirFromVideo = async (options: {
       "-y",
       "-i",
       options.inputPath,
+      ...highlightInputs.flatMap((input) => [
+        "-loop",
+        "1",
+        "-t",
+        formatSeconds(input.durationMs),
+        "-i",
+        input.path,
+      ]),
       "-filter_complex",
       filter.value,
       "-map",
@@ -464,20 +744,28 @@ const removeDeadAirFromVideo = async (options: {
   return true;
 };
 
-/**
- * Highlights elements before actions and pauses for video recording.
- * Also pauses after tests complete for better video endings.
- */
+/** Records video-mode facts and renders annotations into the recorded video. */
 export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
-  const pauseBefore = options.pauseBefore || 1000;
-  const pauseAfterTest = options.pauseAfterTest || 3000;
-  const highlightStyle = options.highlightStyle || "3px solid gold";
+  const highlightDuration = resolveNonNegativeNumber({
+    defaultValue: 1000,
+    name: "videoMode highlightDuration",
+    value: options.highlightDuration,
+  });
+  const finalHold = resolveNonNegativeNumber({
+    defaultValue: 3000,
+    name: "videoMode finalHold",
+    value: options.finalHold,
+  });
+  const highlightColor = options.highlightColor || "gold";
+  const highlightThickness = options.highlightThickness || 3;
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
   const state: VideoModeState = {
     deadAirDepth: 0,
     deadAirSpans: [],
+    highlightImageIndex: 0,
+    highlights: [],
     outputs: {},
     startedAt: performance.now(),
   };
@@ -485,10 +773,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     deadAir: async (action) => {
       return await recordDeadAir(state, action);
     },
-    getVideoTimestamp: () => {
-      const now = performance.now();
-      return Math.round(now - (state.startedAt ?? now));
-    },
+	    getVideoTimestamp: () => {
+	      const now = performance.now();
+	      return Math.round(now - (state.startedAt || now));
+	    },
     metadata: () => metadataFor(state),
   };
 
@@ -497,7 +785,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     name: "video-mode",
     pageExtension: () => ({ videoMode: controls }),
 
-    middleware: async ({ args, locator, method, timing }, next) => {
+    middleware: async ({ args, locator, method, testInfo, timing }, next) => {
       if (state.deadAirDepth > 0) return next();
 
       // Skip if called from internal helpers (navigation, login flows etc)
@@ -529,7 +817,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       }
 
       try {
-        using _ = await setupHighlight(locator, highlightStyle, pauseBefore);
+        await recordHighlight({
+          color: highlightColor,
+          durationMs: highlightDuration,
+          locator,
+          state,
+          testInfo,
+          thickness: highlightThickness,
+        });
         return await next();
       } finally {
         await recordAttachedWaitFromTiming(state, timing, locator);
@@ -540,6 +835,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       const offBeforeTest = emitter.on("beforeTest", () => {
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
+        state.highlightImageIndex = 0;
+        state.highlights = [];
         state.outputs = {};
         if (state.startedAt) {
           recordDeadAirSpan(state, {
@@ -552,24 +849,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       });
 
       const offAfterTest = emitter.on("afterTest", async ({ page, testInfo }) => {
-        const visibleTailMs = visibleTailAfterTestMs(pauseAfterTest);
-        if (visibleTailMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, visibleTailMs));
-        }
-
-        const remainingAfterTestMs = pauseAfterTest - visibleTailMs;
-        if (remainingAfterTestMs > 0) {
-          await recordDeadAir(state, async () => {
-            await new Promise((resolve) => setTimeout(resolve, remainingAfterTestMs));
-          });
-        }
-
-        const deadAir = metadataFor(state).deadAir;
+        const metadataBeforeVideo = metadataFor(state);
+        const deadAir = metadataBeforeVideo.deadAir;
+        const highlights = metadataBeforeVideo.highlights;
         const video = page.video();
 
         if (video) {
           const rawPath = join(testInfo.outputDir, "video-raw.webm");
-          const tightPath = join(testInfo.outputDir, "video-tight.webm");
+          const renderedPath = join(testInfo.outputDir, "video-rendered.webm");
           await mkdir(testInfo.outputDir, { recursive: true });
 
           if (!page.isClosed()) {
@@ -585,26 +872,34 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             path: rawPath,
           });
 
-          if (deadAir.length > 0 && deadAirThreshold !== undefined) {
-            const wroteTightVideo = await removeDeadAirFromVideo({
+          if (highlights.length > 0 || deadAirThreshold !== undefined || finalHold > 0) {
+            const wroteRenderedVideo = await renderVideo({
               deadAir,
+              finalHoldMs: finalHold,
+              highlights,
               inputPath: rawPath,
-              outputPath: tightPath,
+              outputDir: testInfo.outputDir,
+              outputPath: renderedPath,
               thresholdMs: deadAirThreshold,
             });
 
-            if (wroteTightVideo) {
-              state.outputs.deadAirRemoved = "video-tight.webm";
-              await testInfo.attach("video-tight", {
+            if (wroteRenderedVideo) {
+              state.outputs.rendered = "video-rendered.webm";
+              await testInfo.attach("video-rendered", {
                 contentType: "video/webm",
-                path: tightPath,
+                path: renderedPath,
               });
             }
           }
         }
 
         const metadata = metadataFor(state);
-        if (metadata.deadAir.length > 0) {
+        if (
+          metadata.deadAir.length > 0 ||
+          metadata.highlights.length > 0 ||
+          metadata.outputs.raw ||
+          metadata.outputs.rendered
+        ) {
           const path = join(testInfo.outputDir, "video-mode.json");
           await mkdir(testInfo.outputDir, { recursive: true });
           await writeFile(path, `${JSON.stringify(metadata, null, 2)}\n`);

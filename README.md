@@ -52,7 +52,7 @@ Ships with five plugins:
 | [`spinnerWaiter`](#spinnerwaiter) | If the app is visibly loading, wait longer for elements. If it isn't, fail fast. | [source](./src/plugins/spinner-waiter.ts) |
 | [`hydrationWaiter`](#hydrationwaiter) | Don't interact with the app until it's hydrated. | [source](./src/plugins/hydration-waiter.ts) |
 | [`uiErrorReporter`](#uierrorreporter) | When an action fails, append any visible error toasts to the error message. | [source](./src/plugins/ui-error-reporter.ts) |
-| [`videoMode`](#videomode) | Highlight elements and pause before actions, so recorded videos are watchable. | [source](./src/plugins/video-mode.ts) |
+| [`videoMode`](#videomode) | Record action/dead-air facts and render watchable annotated videos after the run. | [source](./src/plugins/video-mode.ts) |
 | [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. | [source](./src/plugins/llm-recover.ts) |
 
 `spinnerWaiter` is the best one. It makes your test pass fast, fail fast, and it incentivises agents to *improve* the product when tests fail, instead of bumping timeouts which makes tests worse and lets your product get away with bad UX.
@@ -130,7 +130,7 @@ uiErrorReporter({ selector: '[data-type="error"]' });
 
 ### videoMode
 
-For producing demo/debugging videos people can actually follow: marks pre-action waiting as dead air, outlines the element in gold, pauses before each action, and keeps a short final hold before trimming after-test padding as dead air. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
+For producing demo/debugging videos people can actually follow: marks pre-action waiting as dead air, records action bounding boxes, and renders highlights/final holds into the video after the test run. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
 
 ```ts
 await using page = await addPlugins({
@@ -138,29 +138,30 @@ await using page = await addPlugins({
   testInfo,
   plugins: [
     videoMode({
-      pauseBefore: 1000,
-      pauseAfterTest: 3000,
+      highlightDuration: 1000,
+      finalHold: 3000,
       deadAirThreshold: 300,
-      highlightStyle: "3px solid gold",
+      highlightColor: "gold",
+      highlightThickness: 3,
       skipMethods: ["waitFor"],
-      skipStackFrames: ["test-helpers.ts"], // don't slow down internal login/setup helpers
+      skipStackFrames: ["test-helpers.ts"], // don't annotate internal login/setup helpers
     }),
   ],
 });
 
-// Use page.videoMode for invisible setup/bookkeeping that should not be
-// highlighted or slowed in video mode.
+// Use page.videoMode for invisible setup/bookkeeping that should be marked as
+// dead air instead of highlighted in video mode.
 await page.videoMode.deadAir(async () => {
   await page.goto("/login");
   await page.locator("#email").fill("demo@example.com");
 });
 ```
 
-When Playwright video recording is enabled, `videoMode` saves `video-raw.webm` and attaches it with `video-mode.json` to the test report. Set `deadAirThreshold` to also use `ffmpeg` to write `video-tight.webm` with dead air removed. If `ffmpeg` or `ffprobe` is missing, the trim step fails plainly so you know to install ffmpeg.
+When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-rendered.webm`, and attaches both with `video-mode.json` to the test report. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
 
-`video-mode.json` records raw dead-air spans. `deadAirThreshold` is applied only when writing the tight video: it keeps that much of each dead-air span, split across the start and end of the span. Spans at or below the threshold are left intact.
+`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: it keeps that much of each dead-air span, split across the start and end of the span. Spans at or below the threshold are left intact. `highlightDuration` and `finalHold` are also applied at render time, so they do not slow down the browser test.
 
-Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and highlights immediately before the action.
+Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and records the action target immediately before the action.
 
 ### llmRecover
 
@@ -236,7 +237,7 @@ export default defineConfig({
 
 ## Writing your own plugin
 
-**Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (page mutation around actions + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.
+**Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (video annotations/artifacts + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.
 
 A plugin is a name plus optional `middleware`, `testLifecycle`, and `pageExtension` hooks:
 
