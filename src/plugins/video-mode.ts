@@ -1030,16 +1030,16 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     outputs: {},
     startedAt: performance.now(),
   };
-	  const controls: VideoModeControls = {
-	    deadAir: async (action) => {
-	      return await recordDeadAir(state, action);
-	    },
-	    getVideoTimestamp: () => {
-	      const now = performance.now();
-	      return Math.round(now - (state.startedAt || now));
-	    },
-	    metadata: () => metadataFor(state),
-	  };
+  const controls: VideoModeControls = {
+    deadAir: async (action) => {
+      return await recordDeadAir(state, action);
+    },
+    getVideoTimestamp: () => {
+      const now = performance.now();
+      return Math.round(now - (state.startedAt || now));
+    },
+    metadata: () => metadataFor(state),
+  };
 
   return {
     ...controls,
@@ -1179,12 +1179,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
         const metadata = metadataFor(state);
         if (
-	          metadata.deadAir.length > 0 ||
-	          metadata.highlights.length > 0 ||
-	          metadata.outputs.player ||
-	          metadata.outputs.raw ||
-	          metadata.outputs.rendered
-	        ) {
+          metadata.deadAir.length > 0 ||
+          metadata.highlights.length > 0 ||
+          metadata.outputs.player ||
+          metadata.outputs.raw ||
+          metadata.outputs.rendered
+        ) {
           const path = join(testInfo.outputDir, "video-mode.json");
           await mkdir(testInfo.outputDir, { recursive: true });
           await writeFile(path, `${JSON.stringify(metadata, null, 2)}\n`);
