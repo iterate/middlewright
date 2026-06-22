@@ -294,7 +294,12 @@ const observeAttachedAt = (
       return;
     }
 
-    if (await locatorIsAttached(locator)) {
+    const attached = await locatorIsAttached(locator);
+    if (stopped || timing.attachedAt !== undefined) {
+      return;
+    }
+
+    if (attached) {
       timing.attachedAt = performance.now();
       return;
     }
