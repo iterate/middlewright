@@ -77,6 +77,10 @@ const suggestSpinnerMessage = (spinnerLocator: Locator) => [
  */
 export const spinnerWaiter = Object.assign(
   (options: SpinnerWaiterOptions = {}): Plugin => {
+    if (process.env.PWDEBUG) {
+      return { name: "spinner-waiter" };
+    }
+
     return {
       name: "spinner-waiter",
 

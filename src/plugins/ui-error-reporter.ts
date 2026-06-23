@@ -20,6 +20,10 @@ export type UIErrorReporterOptions = {
  * their text to the error message for easier debugging.
  */
 export const uiErrorReporter = (options: UIErrorReporterOptions = {}): Plugin => {
+  if (process.env.PWDEBUG) {
+    return { name: "ui-error-reporter" };
+  }
+
   const selector = options.selector || '[data-type="error"]';
 
   return {

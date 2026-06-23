@@ -1086,6 +1086,42 @@ const renderVideo = async (options: {
 
 /** Records video-mode facts and renders annotations into the recorded video. */
 export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
+  if (process.env.PWDEBUG) {
+    let testInfoForOutputPaths: TestInfo | undefined;
+    const controls: VideoModeControls = {
+      deadAir: async (action) => {
+        return await action();
+      },
+      getVideoTimestamp: () => 0,
+      metadata: async () => ({
+        deadAir: [],
+        highlights: [],
+        outputs: {},
+        schemaVersion: 1,
+        sourceRange: {},
+        timebase: "ms",
+      }),
+      outputPaths: () => {
+        if (!testInfoForOutputPaths) {
+          throw new Error("videoMode.outputPaths() is only available after addPlugins registers videoMode");
+        }
+
+        return videoModeOutputPaths(testInfoForOutputPaths);
+      },
+      setEndTime: () => {},
+      setStartTime: () => {},
+    };
+
+    return {
+      ...controls,
+      name: "video-mode",
+      pageExtension: ({ testInfo }) => {
+        testInfoForOutputPaths = testInfo;
+        return { videoMode: controls };
+      },
+    };
+  }
+
   const highlightDuration = resolveNonNegativeNumber({
     defaultValue: 1000,
     name: "videoMode highlightDuration",

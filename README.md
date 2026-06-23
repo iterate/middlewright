@@ -55,6 +55,8 @@ Ships with five plugins:
 | [`videoMode`](#videomode) | Record action/dead-air facts and render watchable annotated videos after the run. | [source](./src/plugins/video-mode.ts) |
 | [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. | [source](./src/plugins/llm-recover.ts) |
 
+When Playwright is launched with `--debug`, it sets `PWDEBUG=1`; the bundled plugins treat that as a hard debug-mode no-op. They still return plugin objects so your fixture can stay unchanged, but they do not wrap locator actions, wait for app state, recover failures, or write video artifacts.
+
 `spinnerWaiter` is the best one. It makes your test pass fast, fail fast, and it incentivises agents to *improve* the product when tests fail, instead of bumping timeouts which makes tests worse and lets your product get away with bad UX.
 
 ## ⚠️ This is a hack

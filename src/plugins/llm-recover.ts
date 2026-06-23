@@ -69,6 +69,10 @@ export type RequestRecoveryCodeFn = (
 const pagesInRecovery = new WeakSet<object>();
 
 export const llmRecover = (options: LlmRecoverOptions = {}): Plugin => {
+  if (process.env.PWDEBUG) {
+    return { name: "llm-recover" };
+  }
+
   const expect = options.expect || playwrightExpect;
   const maxAttempts = options.maxAttempts || 3;
   const requestRecovery = options.requestRecoveryCode || createAnthropicProvider(options);
