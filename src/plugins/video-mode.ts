@@ -115,15 +115,31 @@ export type VideoModePageExtension = {
 
 export type VideoModePlugin = Plugin<VideoModePageExtension> & VideoModeControls;
 
+export type VideoModeOutlineHighlightStyle = `${number}px solid ${string}`;
+
+export type VideoModeHighlightOptions =
+  | boolean
+  | {
+      /** Highlight duration in the rendered video (ms). Default: 1000 */
+      duration?: number;
+      mode: "pointer";
+    }
+  | {
+      /** Highlight duration in the rendered video (ms). Default: 1000 */
+      duration?: number;
+      mode: "outline";
+      /** Outline style for the rendered video. Default: '3px solid gold' */
+      style?: VideoModeOutlineHighlightStyle;
+    };
+
 export type VideoModeOptions = {
-  /** Highlight duration in the rendered video (ms). Default: 1000 */
-  highlightDuration?: number;
+  /**
+   * Render action annotations. `true` uses pointer mode with default options.
+   * Default: true
+   */
+  highlight?: VideoModeHighlightOptions;
   /** Final hold duration in the rendered video (ms). Default: 3000 */
   finalHold?: number;
-  /** Highlight color for the rendered video. Default: 'gold' */
-  highlightColor?: string;
-  /** Highlight outline thickness in the rendered video. Default: 3 */
-  highlightThickness?: number;
   /** Methods to skip highlighting. Default: ['waitFor'] */
   skipMethods?: OverrideableMethod[];
   /**
@@ -205,6 +221,23 @@ type PointerInput = {
   sourceSize: number;
 };
 
+type ResolvedVideoModeHighlight =
+  | {
+      color: string;
+      durationMs: number;
+      mode: "outline";
+      thickness: number;
+    }
+  | {
+      color: string;
+      durationMs: number;
+      mode: "pointer";
+      thickness: number;
+    }
+  | {
+      mode: "off";
+    };
+
 const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
   if (thresholdMs === undefined) {
     return undefined;
@@ -229,6 +262,76 @@ const resolveNonNegativeNumber = (options: {
   }
 
   return value;
+};
+
+const parseOutlineHighlightStyle = (style: VideoModeOutlineHighlightStyle) => {
+  const match = /^([0-9]+(?:\.[0-9]+)?)px solid (.+)$/.exec(style.trim());
+
+  if (!match) {
+    throw new Error("videoMode highlight.style must look like '1px solid yellow'");
+  }
+
+  const thickness = Number(match[1]);
+  const color = match[2].trim();
+
+  if (!Number.isFinite(thickness) || thickness < 0 || color.length === 0) {
+    throw new Error("videoMode highlight.style must look like '1px solid yellow'");
+  }
+
+  return { color, thickness };
+};
+
+const resolveVideoModeHighlight = (options: VideoModeOptions): ResolvedVideoModeHighlight => {
+  const rawHighlight = options.highlight === undefined ? true : options.highlight;
+
+  if (rawHighlight === false) {
+    return { mode: "off" };
+  }
+
+  if (rawHighlight === true) {
+    return {
+      color: "gold",
+      durationMs: resolveNonNegativeNumber({
+        defaultValue: 1000,
+        name: "videoMode highlight.duration",
+        value: undefined,
+      }),
+      mode: "pointer",
+      thickness: 3,
+    };
+  }
+
+  if (!rawHighlight || typeof rawHighlight !== "object" || !("mode" in rawHighlight)) {
+    throw new Error("videoMode highlight must be true, false, or a highlight options object");
+  }
+
+  const durationMs = resolveNonNegativeNumber({
+    defaultValue: 1000,
+    name: "videoMode highlight.duration",
+    value: rawHighlight.duration,
+  });
+
+  if (rawHighlight.mode === "pointer") {
+    return {
+      color: "gold",
+      durationMs,
+      mode: "pointer",
+      thickness: 3,
+    };
+  }
+
+  if (rawHighlight.mode === "outline") {
+    const parsed = parseOutlineHighlightStyle(rawHighlight.style || "3px solid gold");
+
+    return {
+      color: parsed.color,
+      durationMs,
+      mode: "outline",
+      thickness: parsed.thickness,
+    };
+  }
+
+  throw new Error("videoMode highlight.mode must be 'pointer' or 'outline'");
 };
 
 const resolveVideoTimestamp = (name: string, ms: number) => {
@@ -891,6 +994,7 @@ const renderedVideoFilter = (options: {
   clickPointerInput?: PointerInput;
   cursorPointerInput?: PointerInput;
   finalHoldMs: number;
+  highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
   segments: RenderVideoSegment[];
@@ -936,7 +1040,7 @@ const renderedVideoFilter = (options: {
       operations.push(
         `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
       );
-      if (!options.cursorPointerInput) {
+      if (options.highlightMode === "outline") {
         operations.push(drawboxFilter(piece.highlight, options.video));
       }
       operations.push(
@@ -952,7 +1056,7 @@ const renderedVideoFilter = (options: {
 
     if (piece.highlight && !piece.highlight.image) {
       const sourceDuration = (piece.end - piece.start) / piece.speed;
-      if (!options.cursorPointerInput) {
+      if (options.highlightMode === "outline") {
         operations.push(drawboxFilter(piece.highlight, options.video));
       }
       operations.push(
@@ -980,7 +1084,7 @@ const renderedVideoFilter = (options: {
     );
   }
 
-  if (options.cursorPointerInput && waypoints.length > 0) {
+  if (options.highlightMode === "pointer" && options.cursorPointerInput && waypoints.length > 0) {
     const cursorOutputLabel = "renderpointer";
     const cursorEnable = clickSpanExpression
       ? `gte(t\\,${formatSeconds(waypoints[0].at)})*not(${clickSpanExpression})`
@@ -1322,12 +1426,12 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
 
 const renderVideo = async (options: {
   finalHoldMs: number;
+  highlightMode: "outline" | "pointer";
   highlights: VideoModeHighlight[];
   inputPath: string;
   outputDir: string;
   outputPath: string;
   deadAir: VideoModeSpan[];
-  pointer: boolean;
   sourceRange: VideoModeSourceRange;
   thresholdMs: number | undefined;
 }) => {
@@ -1352,7 +1456,8 @@ const renderVideo = async (options: {
       inputIndex: index + 1,
       path: join(options.outputDir, highlight.image!),
     }));
-  const cursorPointerInput: PointerInput | undefined = options.pointer
+  const shouldRenderPointer = options.highlightMode === "pointer" && options.highlights.length > 0;
+  const cursorPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_POINTER_HOTSPOT,
         inputIndex: highlightInputs.length + 1,
@@ -1361,7 +1466,7 @@ const renderVideo = async (options: {
         sourceSize: VIDEO_MODE_POINTER_SOURCE_SIZE,
       }
     : undefined;
-  const clickPointerInput: PointerInput | undefined = options.pointer
+  const clickPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_CLICK_POINTER_HOTSPOT,
         inputIndex: highlightInputs.length + 2,
@@ -1386,6 +1491,7 @@ const renderVideo = async (options: {
     clickPointerInput,
     cursorPointerInput,
     finalHoldMs: options.finalHoldMs,
+    highlightMode: options.highlightMode,
     highlightInputs,
     highlights: options.highlights,
     segments,
@@ -1463,22 +1569,15 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     };
   }
 
-  const highlightDuration = resolveNonNegativeNumber({
-    defaultValue: 1000,
-    name: "videoMode highlightDuration",
-    value: options.highlightDuration,
-  });
   const finalHold = resolveNonNegativeNumber({
     defaultValue: 3000,
     name: "videoMode finalHold",
     value: options.finalHold,
   });
-  const highlightColor = options.highlightColor || "gold";
-  const highlightThickness = options.highlightThickness || 3;
+  const highlight = resolveVideoModeHighlight(options);
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
-  const pointer = process.env.POINTER === "1";
   const state: VideoModeState = {
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -1561,22 +1660,25 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         }
       }
 
-      const highlight = await recordHighlight({
-        color: highlightColor,
-        durationMs: highlightDuration,
-        locator,
-        method,
-        state,
-        testInfo,
-        thickness: highlightThickness,
-      });
+      const recordedHighlight =
+        highlight.mode === "off"
+          ? undefined
+          : await recordHighlight({
+              color: highlight.color,
+              durationMs: highlight.durationMs,
+              locator,
+              method,
+              state,
+              testInfo,
+              thickness: highlight.thickness,
+            });
 
       try {
         return await next();
       } finally {
-        if (highlight && state.startedAt !== undefined) {
-          highlight.actionEnd = Math.max(
-            highlight.start,
+        if (recordedHighlight && state.startedAt !== undefined) {
+          recordedHighlight.actionEnd = Math.max(
+            recordedHighlight.start,
             Math.round(performance.now() - state.startedAt),
           );
         }
@@ -1635,11 +1737,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             const wroteRenderedVideo = await renderVideo({
               deadAir,
               finalHoldMs: finalHold,
+              highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights,
               inputPath: paths.raw,
               outputDir: testInfo.outputDir,
               outputPath: paths.rendered,
-              pointer,
               sourceRange,
               thresholdMs: deadAirThreshold,
             });

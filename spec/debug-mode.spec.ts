@@ -56,7 +56,7 @@ test("videoMode controls are inert when PWDEBUG is set", async ({ page }, testIn
   const plugged = await addPlugins({
     page,
     testInfo,
-    plugins: [videoMode({ finalHold: 50, highlightDuration: 20 })],
+    plugins: [videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } })],
   });
   await plugged.setContent(`<button>press</button>`);
 

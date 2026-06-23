@@ -8,7 +8,7 @@ test("records highlight metadata without mutating element styles", async ({
   await using plugged = await addPlugins({
     page,
     testInfo,
-    plugins: [videoMode({ finalHold: 50, highlightDuration: 300 })],
+    plugins: [videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 300 } })],
   });
   await plugged.setContent(`
     <button id="btn">press</button>
@@ -50,7 +50,11 @@ test("records highlight metadata without mutating element styles", async ({
 });
 
 test("skipped methods are not highlighted", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 50, highlightDuration: 5000, skipMethods: ["click"] });
+  const video = videoMode({
+    finalHold: 50,
+    highlight: { mode: "pointer", duration: 5000 },
+    skipMethods: ["click"],
+  });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -76,7 +80,7 @@ test("skipped methods are not highlighted", async ({ page }, testInfo) => {
 });
 
 test("marks pre-action waits for attachment as dead air", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 50, highlightDuration: 20 });
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -111,7 +115,7 @@ test("pre-action attached waits honor action timeout", async ({ page }, testInfo
   await using plugged = await addPlugins({
     page,
     testInfo,
-    plugins: [videoMode({ finalHold: 50, highlightDuration: 20 })],
+    plugins: [videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } })],
   });
   await plugged.setContent(`
     <script>
@@ -130,7 +134,7 @@ test("pre-action attached waits honor action timeout", async ({ page }, testInfo
 });
 
 test("marks explicit attached waitFor calls as dead air", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 50, highlightDuration: 20 });
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -150,7 +154,7 @@ test("marks explicit attached waitFor calls as dead air", async ({ page }, testI
 });
 
 test("sets video source range from current timestamps", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 50, highlightDuration: 20 });
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -181,7 +185,7 @@ test("sets video source range from current timestamps", async ({ page }, testInf
 test("deadAir runs actions without video highlighting and records metadata", async ({
   page,
 }, testInfo) => {
-  const video = videoMode({ finalHold: 50, highlightDuration: 5000 });
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 5000 } });
   {
     await using plugged = await addPlugins({
       page,

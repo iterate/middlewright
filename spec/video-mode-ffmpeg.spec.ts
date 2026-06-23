@@ -21,7 +21,7 @@ test("writes a rendered video with dead air sped up and highlights added in post
       videoMode({
         deadAirThreshold: 300,
         finalHold: 700,
-        highlightDuration: 1000,
+        highlight: { mode: "pointer", duration: 1000 },
       }),
     ],
   });
@@ -100,7 +100,7 @@ test("writes video-mode artifact files and report player", async ({ page }, test
   const video = videoMode({
     deadAirThreshold: deadAirThresholdMs,
     finalHold: finalHoldMs,
-    highlightDuration: highlightDurationMs,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
     await using plugged = await addPlugins({
@@ -177,7 +177,7 @@ test("speeds dead air up instead of cutting through it", async ({ page }, testIn
   const video = videoMode({
     deadAirThreshold: deadAirThresholdMs,
     finalHold: 0,
-    highlightDuration: 0,
+    highlight: { mode: "pointer", duration: 0 },
   });
   {
     await using plugged = await addPlugins({
@@ -248,7 +248,7 @@ test("speeds dead air up instead of cutting through it", async ({ page }, testIn
 test("renders only the selected video source range", async ({ page }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
-    highlightDuration: 0,
+    highlight: { mode: "pointer", duration: 0 },
   });
   {
     await using plugged = await addPlugins({
@@ -286,9 +286,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
   const highlightDurationMs = 900;
   const video = videoMode({
     finalHold: 0,
-    highlightColor: "yellow",
-    highlightDuration: highlightDurationMs,
-    highlightThickness: 8,
+    highlight: { mode: "outline", duration: highlightDurationMs, style: "8px solid yellow" },
   });
   {
     await using plugged = await addPlugins({
@@ -386,9 +384,7 @@ test("does not linger on the unhighlighted post-wait state before a following hi
   const video = videoMode({
     deadAirThreshold: 300,
     finalHold: 0,
-    highlightColor: "yellow",
-    highlightDuration: 600,
-    highlightThickness: 10,
+    highlight: { mode: "outline", duration: 600, style: "10px solid yellow" },
   });
   {
     await using plugged = await addPlugins({
