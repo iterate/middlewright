@@ -926,6 +926,17 @@ const clickHoldSpans = (targets: CursorTarget[]) => {
     .filter((span) => span.end > span.start);
 };
 
+const cursorActivitySpan = (targets: CursorTarget[]): VideoModeSpan | undefined => {
+  if (targets.length === 0) {
+    return undefined;
+  }
+
+  return {
+    end: Math.max(...targets.map((target) => target.piece.outputEnd)),
+    start: Math.min(...targets.map((target) => target.piece.outputStart)),
+  };
+};
+
 const cursorExpression = (waypoints: CursorWaypoint[], property: "x" | "y") => {
   let expression = formatFilterNumber(waypoints[waypoints.length - 1][property]);
 
@@ -1015,6 +1026,7 @@ const renderedVideoFilter = (options: {
   });
   const waypoints = cursorWaypoints(targets, renderedPieces);
   const clickSpans = clickHoldSpans(targets);
+  const activitySpan = cursorActivitySpan(targets);
   const clickSpanExpression = videoSpanExpression(clickSpans);
 
   if (pieces.length === 0) {
@@ -1084,11 +1096,17 @@ const renderedVideoFilter = (options: {
     );
   }
 
-  if (options.highlightMode === "pointer" && options.cursorPointerInput && waypoints.length > 0) {
+  if (
+    options.highlightMode === "pointer" &&
+    options.cursorPointerInput &&
+    waypoints.length > 0 &&
+    activitySpan
+  ) {
     const cursorOutputLabel = "renderpointer";
+    const cursorActivityExpression = `between(t\\,${formatSeconds(activitySpan.start)}\\,${formatSeconds(activitySpan.end)})`;
     const cursorEnable = clickSpanExpression
-      ? `gte(t\\,${formatSeconds(waypoints[0].at)})*not(${clickSpanExpression})`
-      : `gte(t\\,${formatSeconds(waypoints[0].at)})`;
+      ? `${cursorActivityExpression}*not(${clickSpanExpression})`
+      : cursorActivityExpression;
     filters.push(
       cursorOverlayFilters({
         enable: cursorEnable,

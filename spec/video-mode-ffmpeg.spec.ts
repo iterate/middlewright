@@ -378,6 +378,73 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
   expect(afterClickCenter.red).toBeGreaterThan(afterClickCenter.blue + 80);
 });
 
+test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    finalHold: 900,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(255, 255, 255);
+        }
+        #target {
+          position: absolute;
+          left: 180px;
+          top: 120px;
+          width: 180px;
+          height: 120px;
+          background: rgb(0, 80, 255);
+        }
+        #target.clicked {
+          background: rgb(0, 190, 0);
+        }
+      </style>
+      <div id="target" onclick="this.classList.add('clicked')"></div>
+    `);
+
+    await plugged.locator("#target").click();
+    await expect(plugged.locator("#target")).toHaveClass("clicked");
+    await page.waitForTimeout(300);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const [highlight] = metadata.highlights;
+  expect(highlight).toBeDefined();
+
+  const renderedPath = paths.rendered;
+  const clickHoldFrame = await videoFrame(
+    renderedPath,
+    highlight.start + Math.round(highlightDurationMs / 2),
+  );
+  const finalHoldFrame = await videoFrame(renderedPath, (await videoDurationMs(renderedPath)) - 100);
+  const scale = Math.min(
+    clickHoldFrame.width / highlight.viewport.width,
+    clickHoldFrame.height / highlight.viewport.height,
+  );
+  const targetBox = {
+    height: Math.round(highlight.rect.height * scale),
+    width: Math.round(highlight.rect.width * scale),
+    x: Math.round(highlight.rect.x * scale),
+    y: Math.round(highlight.rect.y * scale),
+  };
+
+  expect(cursorPixelCount(clickHoldFrame, targetBox)).toBeGreaterThan(40);
+  expect(cursorPixelCount(finalHoldFrame, targetBox)).toBeLessThan(10);
+});
+
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
   page,
 }, testInfo) => {
@@ -733,6 +800,17 @@ const hasGreen = (
   rect: { height: number; width: number; x: number; y: number },
 ) => {
   return countPixels(frame, rect, ({ blue, green, red }) => green > 120 && red < 80 && blue < 80) > 200;
+};
+
+const cursorPixelCount = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+) => {
+  return countPixels(frame, inset(rect, 12), ({ blue, green, red }) => {
+    const nearlyWhite = red > 230 && green > 230 && blue > 230;
+    const nearlyBlack = red < 35 && green < 35 && blue < 35;
+    return nearlyWhite || nearlyBlack;
+  });
 };
 
 const countPixels = (
