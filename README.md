@@ -168,7 +168,7 @@ page.videoMode.setEndTime();
 
 When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
 
-`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: it keeps that much of each dead-air span, split across the start and end of the span. Spans at or below the threshold are left intact. `highlightDuration` and `finalHold` are also applied at render time, so they do not slow down the browser test.
+`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlightDuration` and `finalHold` are also applied at render time, so they do not slow down the browser test.
 
 Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and records the action target immediately before the action.
 

@@ -10,7 +10,7 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
-test("writes a rendered video with dead air removed and highlights added in post", async ({
+test("writes a rendered video with dead air sped up and highlights added in post", async ({
   page,
 }, testInfo) => {
   await using plugged = await addPlugins({
@@ -160,7 +160,7 @@ test("writes video-mode artifact files and report player", async ({ page }, test
   const renderedDuration = await videoDurationMs(paths.rendered);
   const expectedRenderedDuration =
     rawDuration -
-    trimmedDeadAirDuration(metadata.deadAir, metadata.highlights, deadAirThresholdMs) +
+    compressedDeadAirSavings(metadata.deadAir, deadAirThresholdMs) +
     metadata.highlights.reduce(
       (duration: number, highlight: { end: number; start: number }) =>
         duration + highlight.end - highlight.start,
@@ -170,6 +170,79 @@ test("writes video-mode artifact files and report player", async ({ page }, test
 
   expect(renderedDuration).toBeLessThan(rawDuration + metadata.highlights.length * highlightDurationMs);
   expect(Math.abs(renderedDuration - expectedRenderedDuration)).toBeLessThan(1500);
+});
+
+test("speeds dead air up instead of cutting through it", async ({ page }, testInfo) => {
+  const deadAirThresholdMs = 500;
+  const video = videoMode({
+    deadAirThreshold: deadAirThresholdMs,
+    finalHold: 0,
+    highlightDuration: 0,
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 400, height: 300 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 400px;
+          height: 300px;
+          background: rgb(255, 255, 255);
+        }
+        #progress {
+          position: absolute;
+          left: 120px;
+          top: 90px;
+          width: 160px;
+          height: 120px;
+          background: rgb(255, 0, 0);
+        }
+      </style>
+      <div id="progress"></div>
+    `);
+
+    await plugged.videoMode.deadAir(async () => {
+      await plugged.evaluate(() => {
+        const box = document.querySelector("#progress") as HTMLElement;
+        const startedAt = performance.now();
+        const duration = 1600;
+        const update = () => {
+          const progress = Math.min(1, (performance.now() - startedAt) / duration);
+          const red = Math.round(255 * (1 - progress));
+          const blue = Math.round(255 * progress);
+          box.style.background = `rgb(${red}, 0, ${blue})`;
+          if (progress < 1) requestAnimationFrame(update);
+        };
+        update();
+      });
+      await plugged.waitForTimeout(1600);
+    });
+  }
+
+  const metadata = await video.metadata();
+  const paths = video.outputPaths();
+  const [span] = metadata.deadAir.filter((candidate) => candidate.end - candidate.start >= 1400);
+  expect(span).toMatchObject({
+    end: expect.any(Number),
+    start: expect.any(Number),
+  });
+
+  const sourceMidpoint = span.start + Math.round((span.end - span.start) / 2);
+  const renderedMidpoint = renderedTimestampForSourceTimestamp(
+    sourceMidpoint,
+    metadata.deadAir,
+    deadAirThresholdMs,
+  );
+  const frame = await videoFrame(paths.rendered, renderedMidpoint);
+  const middleColor = averagePixel(frame, { x: 200, y: 150 });
+
+  expect(middleColor.red).toBeGreaterThan(80);
+  expect(middleColor.blue).toBeGreaterThan(80);
 });
 
 test("renders only the selected video source range", async ({ page }, testInfo) => {
@@ -307,7 +380,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
   expect(afterClickCenter.red).toBeGreaterThan(afterClickCenter.blue + 80);
 });
 
-test("does not flash the unhighlighted post-wait state before a following highlight", async ({
+test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
   page,
 }, testInfo) => {
   const video = videoMode({
@@ -425,7 +498,10 @@ test("does not flash the unhighlighted post-wait state before a following highli
     .filter((sample) => sample.ready && !sample.highlighted)
     .map((sample) => sample.index);
 
-  expect(unhighlightedReadyFrames).toEqual([]);
+  expect(unhighlightedReadyFrames.length).toBeLessThanOrEqual(2);
+  for (const index of unhighlightedReadyFrames) {
+    expect(index).toBeGreaterThanOrEqual(highlightStartFrame - 2);
+  }
 });
 
 const videoDurationMs = async (path: string) => {
@@ -454,24 +530,31 @@ const playwrightReportAttachmentName = async (path: string) => {
   return `${createHash("sha1").update(data).digest("hex")}${extname(path)}`;
 };
 
-const trimmedDeadAirDuration = (
+const compressedDeadAirSavings = (deadAir: VideoSpan[], thresholdMs: number) => {
+  return deadAir.reduce((savedDuration, span) => {
+    const duration = span.end - span.start;
+    return savedDuration + Math.max(0, duration - thresholdMs);
+  }, 0);
+};
+
+const renderedTimestampForSourceTimestamp = (
+  sourceTimestamp: number,
   deadAir: VideoSpan[],
-  highlights: VideoSpan[],
   thresholdMs: number,
 ) => {
-  return deadAir.reduce((removedDuration, span) => {
-    if (span.end - span.start <= thresholdMs) {
-      return removedDuration;
+  return sourceTimestamp - deadAir.reduce((savedDuration, span) => {
+    if (sourceTimestamp <= span.start) {
+      return savedDuration;
     }
 
-    const followingHighlight = highlights.find((highlight) => {
-      return highlight.start >= span.end && highlight.start - span.end <= thresholdMs;
-    });
-    const padding = thresholdMs / 2;
-    const trimStart = Math.round(span.start + padding);
-    const trimEnd = Math.round(followingHighlight ? followingHighlight.start : span.end - padding);
+    const duration = span.end - span.start;
+    if (duration <= thresholdMs) {
+      return savedDuration;
+    }
 
-    return removedDuration + Math.max(0, trimEnd - trimStart);
+    const sourceDurationInSpan = Math.min(sourceTimestamp, span.end) - span.start;
+    const renderedDurationInSpan = sourceDurationInSpan * (thresholdMs / duration);
+    return savedDuration + sourceDurationInSpan - renderedDurationInSpan;
   }, 0);
 };
 

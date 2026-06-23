@@ -115,8 +115,8 @@ export type VideoModeOptions = {
    */
   skipStackFrames?: string[];
   /**
-   * Minimum amount of each dead-air span to keep in video-rendered.webm, split
-   * evenly before and after the removed middle.
+   * Maximum rendered duration for each dead-air span. Longer spans are sped up
+   * so they fit within this duration.
    */
   deadAirThreshold?: number;
 };
@@ -131,9 +131,10 @@ type VideoModeState = {
   startedAt?: number;
 };
 
-type TightVideoSegment = {
+type RenderVideoSegment = {
   start: number;
   end: number;
+  speed: number;
 };
 
 type VideoInfo = {
@@ -150,6 +151,7 @@ type VideoFilter = {
 type VideoPiece = {
   end: number;
   highlight?: VideoModeHighlight;
+  speed: number;
   start: number;
 };
 
@@ -397,6 +399,10 @@ const formatSeconds = (ms: number) => {
   return value || "0";
 };
 
+const formatFilterNumber = (value: number) => {
+  return Number(value.toFixed(6)).toString();
+};
+
 const clipVideoSpan = (span: VideoModeSpan, range: VideoModeSpan): VideoModeSpan | undefined => {
   const start = Math.max(range.start, Math.min(Math.round(span.start), range.end));
   const end = Math.max(range.start, Math.min(Math.round(span.end), range.end));
@@ -408,36 +414,22 @@ const clipVideoSpan = (span: VideoModeSpan, range: VideoModeSpan): VideoModeSpan
   return { end, start };
 };
 
-const trimDeadAirSpan = (options: {
-  highlights: VideoModeHighlight[];
-  span: VideoModeSpan;
-  thresholdMs: number;
-}): VideoModeSpan | undefined => {
-  const span = options.span;
-  const thresholdMs = options.thresholdMs;
-
-  if (span.end - span.start <= thresholdMs) {
-    return undefined;
-  }
-
-  const padding = thresholdMs / 2;
-  // A following highlight already shows the post-wait state, so don't also
-  // render an unhighlighted tail frame for the same transition.
-  const followingHighlight = options.highlights.find((highlight) => {
-    return highlight.start >= span.end && highlight.start - span.end <= thresholdMs;
-  });
-  const start = Math.round(span.start + padding);
-  const end = Math.round(followingHighlight ? followingHighlight.start : span.end - padding);
-
-  if (end <= start) {
-    return undefined;
-  }
-
-  return { end, start };
-};
-
 const videoSpansOverlap = (left: VideoModeSpan, right: VideoModeSpan) => {
   return left.start < right.end && right.start < left.end;
+};
+
+const deadAirSpeed = (span: VideoModeSpan, thresholdMs: number) => {
+  const duration = span.end - span.start;
+
+  if (duration <= thresholdMs) {
+    return 1;
+  }
+
+  if (thresholdMs === 0) {
+    return Infinity;
+  }
+
+  return duration / thresholdMs;
 };
 
 const locatorIsAttached = async (locator: Locator) => {
@@ -493,13 +485,12 @@ const recordMiddlewareWaitBeforeVideoMode = (
   recordDeadAirSpan(state, { end, start });
 };
 
-const tightVideoSegments = (options: {
+const renderVideoSegments = (options: {
   deadAir: VideoModeSpan[];
   finalEnd: number;
-  highlights: VideoModeHighlight[];
   start: number;
   thresholdMs?: number;
-}): TightVideoSegment[] => {
+}): RenderVideoSegment[] => {
   const finalEnd = Math.max(0, Math.round(options.finalEnd));
   const start = Math.max(0, Math.min(Math.round(options.start), finalEnd));
 
@@ -508,16 +499,13 @@ const tightVideoSegments = (options: {
   }
 
   if (options.thresholdMs === undefined) {
-    return [{ end: finalEnd, start }];
+    return [{ end: finalEnd, speed: 1, start }];
   }
 
   const thresholdMs = options.thresholdMs;
-  const highlights = normalizeVideoHighlights(options.highlights);
   const deadAir = mergeVideoSpans(
     options.deadAir
       .map((span) => clipVideoSpan(span, { end: finalEnd, start }))
-      .filter((span): span is VideoModeSpan => Boolean(span))
-      .map((span) => trimDeadAirSpan({ highlights, span, thresholdMs }))
       .filter((span): span is VideoModeSpan => Boolean(span)),
   );
   const boundaries = new Set([start, finalEnd]);
@@ -528,7 +516,7 @@ const tightVideoSegments = (options: {
   }
 
   const sortedBoundaries = [...boundaries].sort((left, right) => left - right);
-  const segments: TightVideoSegment[] = [];
+  const segments: RenderVideoSegment[] = [];
 
   for (let index = 0; index < sortedBoundaries.length - 1; index += 1) {
     const start = sortedBoundaries[index];
@@ -538,18 +526,21 @@ const tightVideoSegments = (options: {
       continue;
     }
 
-    if (deadAir.some((span) => videoSpansOverlap(span, { end, start }))) {
+    const deadAirSpan = deadAir.find((span) => videoSpansOverlap(span, { end, start }));
+    const speed = deadAirSpan ? deadAirSpeed(deadAirSpan, thresholdMs) : 1;
+
+    if (!Number.isFinite(speed)) {
       continue;
     }
 
     const previous = segments[segments.length - 1];
 
-    if (previous && previous.end === start) {
+    if (previous && previous.end === start && previous.speed === speed) {
       previous.end = end;
       continue;
     }
 
-    segments.push({ end, start });
+    segments.push({ end, speed, start });
   }
 
   return segments;
@@ -557,7 +548,7 @@ const tightVideoSegments = (options: {
 
 const videoPieces = (options: {
   highlights: VideoModeHighlight[];
-  segments: TightVideoSegment[];
+  segments: RenderVideoSegment[];
 }): VideoPiece[] => {
   const pieces: VideoPiece[] = [];
   const frameMs = 50;
@@ -570,7 +561,7 @@ const videoPieces = (options: {
 
     for (const highlight of highlights) {
       if (highlight.start > cursor) {
-        pieces.push({ end: highlight.start, start: cursor });
+        pieces.push({ end: highlight.start, speed: segment.speed, start: cursor });
       }
 
       let frameStart = Math.max(segment.start, highlight.start - frameMs);
@@ -582,14 +573,14 @@ const videoPieces = (options: {
       }
 
       if (frameEnd > frameStart) {
-        pieces.push({ end: frameEnd, highlight, start: frameStart });
+        pieces.push({ end: frameEnd, highlight, speed: segment.speed, start: frameStart });
       }
 
       cursor = highlight.start;
     }
 
     if (segment.end > cursor) {
-      pieces.push({ end: segment.end, start: cursor });
+      pieces.push({ end: segment.end, speed: segment.speed, start: cursor });
     }
   }
 
@@ -642,7 +633,7 @@ const renderedVideoFilter = (options: {
   finalHoldMs: number;
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
-  segments: TightVideoSegment[];
+  segments: RenderVideoSegment[];
   video: { width: number; height: number };
 }): VideoFilter | undefined => {
   const highlightInputByImage = new Map(
@@ -685,11 +676,11 @@ const renderedVideoFilter = (options: {
       operations.push(
         `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
       );
-      operations.push("setpts=PTS-STARTPTS");
+      operations.push(`setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`);
     }
 
     if (piece.highlight && !piece.highlight.image) {
-      const sourceDuration = piece.end - piece.start;
+      const sourceDuration = (piece.end - piece.start) / piece.speed;
       operations.push(drawboxFilter(piece.highlight, options.video));
       operations.push(
         `tpad=stop_mode=clone:stop_duration=${formatSeconds(
@@ -1048,10 +1039,9 @@ const renderVideo = async (options: {
       inputIndex: index + 1,
       path: join(options.outputDir, highlight.image!),
     }));
-  const segments = tightVideoSegments({
+  const segments = renderVideoSegments({
     deadAir: options.deadAir,
     finalEnd: rangeEnd,
-    highlights: options.highlights,
     start: rangeStart,
     thresholdMs: options.thresholdMs,
   });
