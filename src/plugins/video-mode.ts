@@ -201,8 +201,10 @@ type CursorWaypoint = {
 };
 
 type CursorTarget = {
-  highlight: VideoModeHighlight;
-  piece: RenderedVideoPiece;
+  actionEnd?: number;
+  method?: OverrideableMethod;
+  outputEnd: number;
+  outputStart: number;
   point: { x: number; y: number };
 };
 
@@ -864,37 +866,52 @@ const cursorTargets = (options: {
   pieces: RenderedVideoPiece[];
   video: { width: number; height: number };
 }) => {
-  return options.highlights
-    .map((highlight) => ({
-      highlight,
-      piece: options.pieces.find((piece) => piece.highlight === highlight),
+  const targets: CursorTarget[] = [];
+
+  for (const highlight of options.highlights) {
+    const piece = options.pieces.find((candidate) => candidate.highlight === highlight);
+
+    if (!piece) {
+      continue;
+    }
+
+    targets.push({
+      actionEnd:
+        highlight.actionEnd === undefined
+          ? undefined
+          : sourceTimeToRenderedTime(options.pieces, highlight.actionEnd),
+      method: highlight.method,
+      outputEnd: piece.outputEnd,
+      outputStart: piece.outputStart,
       point: highlightCursorPoint(highlight, options.video),
-    }))
-    .filter(
-      (
-        target,
-      ): target is CursorTarget => Boolean(target.piece),
-    );
+    });
+  }
+
+  return targets;
 };
 
-const cursorWaypoints = (targets: CursorTarget[], pieces: RenderedVideoPiece[]) => {
+const cursorWaypoints = (targets: CursorTarget[], video: { width: number; height: number }) => {
   const waypoints: CursorWaypoint[] = [];
+
+  if (targets.length > 0 && targets[0].outputStart > 0) {
+    pushCursorWaypoint(waypoints, {
+      at: 0,
+      x: video.width / 2,
+      y: video.height / 2,
+    });
+  }
 
   for (let index = 0; index < targets.length; index += 1) {
     const target = targets[index];
     const nextTarget = targets[index + 1];
-    const actionEnd =
-      target.highlight.actionEnd === undefined
-        ? undefined
-        : sourceTimeToRenderedTime(pieces, target.highlight.actionEnd);
     const targetHoldEnd =
-      actionEnd === undefined ? target.piece.outputEnd : Math.max(target.piece.outputEnd, actionEnd);
+      target.actionEnd === undefined ? target.outputEnd : Math.max(target.outputEnd, target.actionEnd);
     const holdEnd = nextTarget
-      ? Math.min(targetHoldEnd, nextTarget.piece.outputStart)
+      ? Math.min(targetHoldEnd, nextTarget.outputStart)
       : targetHoldEnd;
 
     pushCursorWaypoint(waypoints, {
-      at: target.piece.outputStart,
+      at: target.outputStart,
       x: target.point.x,
       y: target.point.y,
     });
@@ -904,9 +921,9 @@ const cursorWaypoints = (targets: CursorTarget[], pieces: RenderedVideoPiece[]) 
       y: target.point.y,
     });
 
-    if (nextTarget && nextTarget.piece.outputStart > holdEnd) {
+    if (nextTarget && nextTarget.outputStart > holdEnd) {
       pushCursorWaypoint(waypoints, {
-        at: nextTarget.piece.outputStart,
+        at: nextTarget.outputStart,
         x: nextTarget.point.x,
         y: nextTarget.point.y,
       });
@@ -918,22 +935,25 @@ const cursorWaypoints = (targets: CursorTarget[], pieces: RenderedVideoPiece[]) 
 
 const clickHoldSpans = (targets: CursorTarget[]) => {
   return targets
-    .filter((target) => target.highlight.method === "click")
+    .filter((target) => target.method === "click")
     .map((target) => ({
-      end: target.piece.outputEnd,
-      start: target.piece.outputStart,
+      end: target.outputEnd,
+      start: target.outputStart,
     }))
     .filter((span) => span.end > span.start);
 };
 
-const cursorActivitySpan = (targets: CursorTarget[]): VideoModeSpan | undefined => {
-  if (targets.length === 0) {
+const cursorActivitySpan = (
+  targets: CursorTarget[],
+  waypoints: CursorWaypoint[],
+): VideoModeSpan | undefined => {
+  if (targets.length === 0 || waypoints.length === 0) {
     return undefined;
   }
 
   return {
-    end: Math.max(...targets.map((target) => target.piece.outputEnd)),
-    start: Math.min(...targets.map((target) => target.piece.outputStart)),
+    end: Math.max(...targets.map((target) => target.outputEnd)),
+    start: waypoints[0].at,
   };
 };
 
@@ -1024,9 +1044,9 @@ const renderedVideoFilter = (options: {
     pieces: renderedPieces,
     video: options.video,
   });
-  const waypoints = cursorWaypoints(targets, renderedPieces);
+  const waypoints = cursorWaypoints(targets, options.video);
   const clickSpans = clickHoldSpans(targets);
-  const activitySpan = cursorActivitySpan(targets);
+  const activitySpan = cursorActivitySpan(targets, waypoints);
   const clickSpanExpression = videoSpanExpression(clickSpans);
 
   if (pieces.length === 0) {

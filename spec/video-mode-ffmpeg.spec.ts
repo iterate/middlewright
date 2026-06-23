@@ -445,6 +445,96 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
   expect(cursorPixelCount(finalHoldFrame, targetBox)).toBeLessThan(10);
 });
 
+test("moves the pointer toward the first click after a waitFor", async ({ page }, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(210, 210, 210);
+        }
+        #ready {
+          visibility: hidden;
+          position: absolute;
+          left: 80px;
+          top: 140px;
+          width: 140px;
+          height: 100px;
+          background: rgb(0, 80, 255);
+        }
+        #run {
+          position: absolute;
+          left: 560px;
+          top: 140px;
+          width: 140px;
+          height: 100px;
+          border: 0;
+          padding: 0;
+          background: rgb(0, 190, 0);
+        }
+      </style>
+      <div id="ready"></div>
+      <button id="run" onclick="document.body.dataset.clicked = 'true'"></button>
+      <script>
+        setTimeout(() => {
+          document.querySelector('#ready').style.visibility = 'visible';
+        }, 200);
+      </script>
+    `);
+
+    await plugged.locator("#ready").waitFor();
+    await plugged.waitForTimeout(900);
+    await plugged.locator("#run").click();
+    await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
+    await page.waitForTimeout(200);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const [highlight] = metadata.highlights;
+  expect(highlight).toBeDefined();
+
+  const renderedPath = paths.rendered;
+  const preClickFrame = await videoFrame(renderedPath, Math.max(100, highlight.start - 650));
+  const clickHoldFrame = await videoFrame(
+    renderedPath,
+    highlight.start + Math.round(highlightDurationMs / 2),
+  );
+  const scale = Math.min(
+    preClickFrame.width / highlight.viewport.width,
+    preClickFrame.height / highlight.viewport.height,
+  );
+  const runBox = {
+    height: Math.round(highlight.rect.height * scale),
+    width: Math.round(highlight.rect.width * scale),
+    x: Math.round(highlight.rect.x * scale),
+    y: Math.round(highlight.rect.y * scale),
+  };
+  const fullFrame = {
+    height: preClickFrame.height,
+    width: preClickFrame.width,
+    x: 0,
+    y: 0,
+  };
+
+  expect(cursorPixelCount(preClickFrame, fullFrame)).toBeGreaterThan(20);
+  expect(cursorPixelCount(preClickFrame, runBox)).toBeLessThan(10);
+  expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
+});
+
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
   page,
 }, testInfo) => {
