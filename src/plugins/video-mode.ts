@@ -20,6 +20,24 @@ const VIDEO_MODE_PLAYER_FILE = "video-mode.html";
 const VIDEO_MODE_RAW_FILE = "video-raw.webm";
 const VIDEO_MODE_RENDERED_FILE = "video-rendered.webm";
 const VIDEO_MODE_REPORT_PLAYER_FILE = "video-mode-report.html";
+const VIDEO_MODE_POINTER_FILE = "video-mode-pointer.png";
+const VIDEO_MODE_CLICK_POINTER_FILE = "video-mode-click-pointer.png";
+// Pointer asset adapted from Lucide mouse-pointer-2.
+// Source: https://lucide.dev/icons/mouse-pointer-2
+// License: ISC, Copyright (c) 2026 Lucide Icons and Contributors.
+const VIDEO_MODE_POINTER_PNG =
+  "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";
+const VIDEO_MODE_POINTER_SOURCE_SIZE = 64;
+const VIDEO_MODE_POINTER_SIZE = 32;
+const VIDEO_MODE_POINTER_HOTSPOT = { x: 11, y: 12 };
+// Click-hold asset adapted from Lucide pointer.
+// Source: https://lucide.dev/icons/pointer
+// License: ISC, Copyright (c) 2026 Lucide Icons and Contributors.
+const VIDEO_MODE_CLICK_POINTER_PNG =
+  "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";
+const VIDEO_MODE_CLICK_POINTER_SOURCE_SIZE = 64;
+const VIDEO_MODE_CLICK_POINTER_SIZE = 32;
+const VIDEO_MODE_CLICK_POINTER_HOTSPOT = { x: 21, y: 6 };
 
 export type VideoModeSpan = {
   start: number;
@@ -58,8 +76,10 @@ export type VideoModeViewport = {
 };
 
 export type VideoModeHighlight = VideoModeSpan & {
+  actionEnd?: number;
   color: string;
   image?: string;
+  method?: OverrideableMethod;
   rect: VideoModeRect;
   thickness: number;
   viewport: VideoModeViewport;
@@ -155,11 +175,36 @@ type VideoPiece = {
   start: number;
 };
 
+type RenderedVideoPiece = VideoPiece & {
+  outputEnd: number;
+  outputStart: number;
+};
+
+type CursorWaypoint = {
+  at: number;
+  x: number;
+  y: number;
+};
+
+type CursorTarget = {
+  highlight: VideoModeHighlight;
+  piece: RenderedVideoPiece;
+  point: { x: number; y: number };
+};
+
 type HighlightInput = {
   durationMs: number;
   image: string;
   inputIndex: number;
   path: string;
+};
+
+type PointerInput = {
+  hotspot: { x: number; y: number };
+  inputIndex: number;
+  path: string;
+  size: number;
+  sourceSize: number;
 };
 
 const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
@@ -254,6 +299,7 @@ const recordHighlight = async (options: {
   color: string;
   durationMs: number;
   locator: Locator;
+  method: OverrideableMethod;
   state: VideoModeState;
   testInfo: TestInfo;
   thickness: number;
@@ -299,15 +345,18 @@ const recordHighlight = async (options: {
     await options.locator.page().screenshot({ path: imagePath, scale: "css" });
 
     const start = Math.round(performance.now() - options.state.startedAt);
-    options.state.highlights.push({
+    const highlight: VideoModeHighlight = {
       color: options.color,
       end: start + Math.round(options.durationMs),
       image,
+      method: options.method,
       rect: snapshot.rect,
       start,
       thickness: options.thickness,
       viewport: snapshot.viewport,
-    });
+    };
+    options.state.highlights.push(highlight);
+    return highlight;
   } catch {
     // Element may disappear between the actionability wait and the snapshot.
   }
@@ -374,6 +423,10 @@ const normalizeVideoHighlights = (highlights: VideoModeHighlight[]) => {
   return highlights
     .map((highlight) => ({
       ...highlight,
+      actionEnd:
+        highlight.actionEnd === undefined
+          ? undefined
+          : Math.max(Math.round(highlight.actionEnd), Math.round(highlight.start)),
       end: Math.round(highlight.end),
       rect: {
         height: Math.round(highlight.rect.height),
@@ -629,7 +682,216 @@ const drawboxFilter = (highlight: VideoModeHighlight, video: { width: number; he
   ].join(":");
 };
 
+const renderedPieceDuration = (piece: VideoPiece) => {
+  const sourceDuration = (piece.end - piece.start) / piece.speed;
+
+  if (!piece.highlight) {
+    return sourceDuration;
+  }
+
+  const highlightDuration = piece.highlight.end - piece.highlight.start;
+
+  if (piece.highlight.image) {
+    return highlightDuration;
+  }
+
+  return Math.max(sourceDuration, highlightDuration);
+};
+
+const renderedVideoPieces = (pieces: VideoPiece[]) => {
+  let cursor = 0;
+  const rendered: RenderedVideoPiece[] = [];
+
+  for (const piece of pieces) {
+    const duration = renderedPieceDuration(piece);
+    rendered.push({
+      ...piece,
+      outputEnd: cursor + duration,
+      outputStart: cursor,
+    });
+    cursor += duration;
+  }
+
+  return rendered;
+};
+
+const sourceTimeToRenderedTime = (pieces: RenderedVideoPiece[], sourceTime: number) => {
+  for (const piece of pieces) {
+    if (piece.highlight?.image) {
+      continue;
+    }
+
+    if (sourceTime >= piece.start && sourceTime <= piece.end) {
+      return piece.outputStart + (sourceTime - piece.start) / piece.speed;
+    }
+  }
+
+  return undefined;
+};
+
+const highlightCursorPoint = (
+  highlight: VideoModeHighlight,
+  video: { width: number; height: number },
+) => {
+  const rect = scaleHighlight(highlight, video);
+
+  return {
+    x: Math.max(0, Math.min(video.width - 1, rect.x + rect.width / 2)),
+    y: Math.max(0, Math.min(video.height - 1, rect.y + rect.height / 2)),
+  };
+};
+
+const pushCursorWaypoint = (waypoints: CursorWaypoint[], waypoint: CursorWaypoint) => {
+  const rounded = {
+    at: Math.round(waypoint.at),
+    x: Math.round(waypoint.x),
+    y: Math.round(waypoint.y),
+  };
+  const previous = waypoints[waypoints.length - 1];
+
+  if (previous && previous.at === rounded.at) {
+    previous.x = rounded.x;
+    previous.y = rounded.y;
+    return;
+  }
+
+  waypoints.push(rounded);
+};
+
+const cursorTargets = (options: {
+  highlights: VideoModeHighlight[];
+  pieces: RenderedVideoPiece[];
+  video: { width: number; height: number };
+}) => {
+  return options.highlights
+    .map((highlight) => ({
+      highlight,
+      piece: options.pieces.find((piece) => piece.highlight === highlight),
+      point: highlightCursorPoint(highlight, options.video),
+    }))
+    .filter(
+      (
+        target,
+      ): target is CursorTarget => Boolean(target.piece),
+    );
+};
+
+const cursorWaypoints = (targets: CursorTarget[], pieces: RenderedVideoPiece[]) => {
+  const waypoints: CursorWaypoint[] = [];
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    const nextTarget = targets[index + 1];
+    const actionEnd =
+      target.highlight.actionEnd === undefined
+        ? undefined
+        : sourceTimeToRenderedTime(pieces, target.highlight.actionEnd);
+    const targetHoldEnd =
+      actionEnd === undefined ? target.piece.outputEnd : Math.max(target.piece.outputEnd, actionEnd);
+    const holdEnd = nextTarget
+      ? Math.min(targetHoldEnd, nextTarget.piece.outputStart)
+      : targetHoldEnd;
+
+    pushCursorWaypoint(waypoints, {
+      at: target.piece.outputStart,
+      x: target.point.x,
+      y: target.point.y,
+    });
+    pushCursorWaypoint(waypoints, {
+      at: holdEnd,
+      x: target.point.x,
+      y: target.point.y,
+    });
+
+    if (nextTarget && nextTarget.piece.outputStart > holdEnd) {
+      pushCursorWaypoint(waypoints, {
+        at: nextTarget.piece.outputStart,
+        x: nextTarget.point.x,
+        y: nextTarget.point.y,
+      });
+    }
+  }
+
+  return waypoints;
+};
+
+const clickHoldSpans = (targets: CursorTarget[]) => {
+  return targets
+    .filter((target) => target.highlight.method === "click")
+    .map((target) => ({
+      end: target.piece.outputEnd,
+      start: target.piece.outputStart,
+    }))
+    .filter((span) => span.end > span.start);
+};
+
+const cursorExpression = (waypoints: CursorWaypoint[], property: "x" | "y") => {
+  let expression = formatFilterNumber(waypoints[waypoints.length - 1][property]);
+
+  for (let index = waypoints.length - 2; index >= 0; index -= 1) {
+    const from = waypoints[index];
+    const to = waypoints[index + 1];
+
+    if (to.at <= from.at) {
+      continue;
+    }
+
+    const start = formatSeconds(from.at);
+    const end = formatSeconds(to.at);
+    const progress = `((t-${start})/(${end}-${start}))`;
+    const eased = `((${progress})*(${progress})*(3-2*(${progress})))`;
+    const delta = to[property] - from[property];
+    const value =
+      delta === 0
+        ? formatFilterNumber(from[property])
+        : `(${formatFilterNumber(from[property])}+(${formatFilterNumber(delta)})*${eased})`;
+
+    expression = `if(between(t\\,${start}\\,${end})\\,${value}\\,${expression})`;
+  }
+
+  return expression;
+};
+
+const cursorOverlayFilters = (options: {
+  enable: string;
+  inputLabel: string;
+  outputLabel: string;
+  pointerInput: PointerInput;
+  waypoints: CursorWaypoint[];
+}) => {
+  if (options.waypoints.length === 0) {
+    return `[${options.inputLabel}]null[${options.outputLabel}]`;
+  }
+
+  const pointerScale = options.pointerInput.size / options.pointerInput.sourceSize;
+  const x = `(${cursorExpression(options.waypoints, "x")})-${formatFilterNumber(
+    options.pointerInput.hotspot.x * pointerScale,
+  )}`;
+  const y = `(${cursorExpression(options.waypoints, "y")})-${formatFilterNumber(
+    options.pointerInput.hotspot.y * pointerScale,
+  )}`;
+
+  return [
+    `[${options.pointerInput.inputIndex}:v]scale=w=${options.pointerInput.size}:h=${options.pointerInput.size},format=rgba[pointercursor]`,
+    [
+      `[${options.inputLabel}][pointercursor]overlay=x='${x}'`,
+      `y='${y}'`,
+      "eval=frame",
+      "eof_action=pass",
+      `enable='${options.enable}'[${options.outputLabel}]`,
+    ].join(":"),
+  ].join(";");
+};
+
+const videoSpanExpression = (spans: VideoModeSpan[]) => {
+  return spans
+    .map((span) => `between(t\\,${formatSeconds(span.start)}\\,${formatSeconds(span.end)})`)
+    .join("+");
+};
+
 const renderedVideoFilter = (options: {
+  clickPointerInput?: PointerInput;
+  cursorPointerInput?: PointerInput;
   finalHoldMs: number;
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
@@ -643,6 +905,15 @@ const renderedVideoFilter = (options: {
     highlights: options.highlights,
     segments: options.segments,
   });
+  const renderedPieces = renderedVideoPieces(pieces);
+  const targets = cursorTargets({
+    highlights: options.highlights,
+    pieces: renderedPieces,
+    video: options.video,
+  });
+  const waypoints = cursorWaypoints(targets, renderedPieces);
+  const clickSpans = clickHoldSpans(targets);
+  const clickSpanExpression = videoSpanExpression(clickSpans);
 
   if (pieces.length === 0) {
     return undefined;
@@ -667,7 +938,9 @@ const renderedVideoFilter = (options: {
       operations.push(
         `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
       );
-      operations.push(drawboxFilter(piece.highlight, options.video));
+      if (!options.cursorPointerInput) {
+        operations.push(drawboxFilter(piece.highlight, options.video));
+      }
       operations.push(
         `trim=start=0:end=${formatSeconds(piece.highlight.end - piece.highlight.start)}`,
       );
@@ -681,7 +954,9 @@ const renderedVideoFilter = (options: {
 
     if (piece.highlight && !piece.highlight.image) {
       const sourceDuration = (piece.end - piece.start) / piece.speed;
-      operations.push(drawboxFilter(piece.highlight, options.video));
+      if (!options.cursorPointerInput) {
+        operations.push(drawboxFilter(piece.highlight, options.video));
+      }
       operations.push(
         `tpad=stop_mode=clone:stop_duration=${formatSeconds(
           Math.max(0, piece.highlight.end - piece.highlight.start - sourceDuration),
@@ -705,6 +980,45 @@ const renderedVideoFilter = (options: {
     filters.push(
       `[${concatLabel}]tpad=stop_mode=clone:stop_duration=${formatSeconds(finalHoldMs)}[${outputLabel}]`,
     );
+  }
+
+  if (options.cursorPointerInput && waypoints.length > 0) {
+    const cursorOutputLabel = "renderpointer";
+    const cursorEnable = clickSpanExpression
+      ? `gte(t\\,${formatSeconds(waypoints[0].at)})*not(${clickSpanExpression})`
+      : `gte(t\\,${formatSeconds(waypoints[0].at)})`;
+    filters.push(
+      cursorOverlayFilters({
+        enable: cursorEnable,
+        inputLabel: outputLabel,
+        outputLabel: cursorOutputLabel,
+        pointerInput: options.cursorPointerInput,
+        waypoints,
+      }),
+    );
+
+    if (options.clickPointerInput && clickSpanExpression) {
+      const clickPointerOutputLabel = "renderclickpointer";
+      filters.push(
+        cursorOverlayFilters({
+          enable: clickSpanExpression,
+          inputLabel: cursorOutputLabel,
+          outputLabel: clickPointerOutputLabel,
+          pointerInput: options.clickPointerInput,
+          waypoints,
+        }),
+      );
+
+      return {
+        outputLabel: clickPointerOutputLabel,
+        value: filters.join(";"),
+      };
+    }
+
+    return {
+      outputLabel: cursorOutputLabel,
+      value: filters.join(";"),
+    };
   }
 
   return {
@@ -1015,6 +1329,7 @@ const renderVideo = async (options: {
   outputDir: string;
   outputPath: string;
   deadAir: VideoModeSpan[];
+  pointer: boolean;
   sourceRange: VideoModeSourceRange;
   thresholdMs: number | undefined;
 }) => {
@@ -1039,6 +1354,30 @@ const renderVideo = async (options: {
       inputIndex: index + 1,
       path: join(options.outputDir, highlight.image!),
     }));
+  const cursorPointerInput: PointerInput | undefined = options.pointer
+    ? {
+        hotspot: VIDEO_MODE_POINTER_HOTSPOT,
+        inputIndex: highlightInputs.length + 1,
+        path: join(options.outputDir, VIDEO_MODE_POINTER_FILE),
+        size: VIDEO_MODE_POINTER_SIZE,
+        sourceSize: VIDEO_MODE_POINTER_SOURCE_SIZE,
+      }
+    : undefined;
+  const clickPointerInput: PointerInput | undefined = options.pointer
+    ? {
+        hotspot: VIDEO_MODE_CLICK_POINTER_HOTSPOT,
+        inputIndex: highlightInputs.length + 2,
+        path: join(options.outputDir, VIDEO_MODE_CLICK_POINTER_FILE),
+        size: VIDEO_MODE_CLICK_POINTER_SIZE,
+        sourceSize: VIDEO_MODE_CLICK_POINTER_SOURCE_SIZE,
+      }
+    : undefined;
+  if (cursorPointerInput) {
+    await writeFile(cursorPointerInput.path, Buffer.from(VIDEO_MODE_POINTER_PNG, "base64"));
+  }
+  if (clickPointerInput) {
+    await writeFile(clickPointerInput.path, Buffer.from(VIDEO_MODE_CLICK_POINTER_PNG, "base64"));
+  }
   const segments = renderVideoSegments({
     deadAir: options.deadAir,
     finalEnd: rangeEnd,
@@ -1046,6 +1385,8 @@ const renderVideo = async (options: {
     thresholdMs: options.thresholdMs,
   });
   const filter = renderedVideoFilter({
+    clickPointerInput,
+    cursorPointerInput,
     finalHoldMs: options.finalHoldMs,
     highlightInputs,
     highlights: options.highlights,
@@ -1071,6 +1412,8 @@ const renderVideo = async (options: {
         "-i",
         input.path,
       ]),
+      ...(cursorPointerInput ? ["-loop", "1", "-i", cursorPointerInput.path] : []),
+      ...(clickPointerInput ? ["-loop", "1", "-i", clickPointerInput.path] : []),
       "-filter_complex",
       filter.value,
       "-map",
@@ -1137,6 +1480,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
+  const pointer = process.env.POINTER === "1";
   const state: VideoModeState = {
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -1219,17 +1563,25 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         }
       }
 
+      const highlight = await recordHighlight({
+        color: highlightColor,
+        durationMs: highlightDuration,
+        locator,
+        method,
+        state,
+        testInfo,
+        thickness: highlightThickness,
+      });
+
       try {
-        await recordHighlight({
-          color: highlightColor,
-          durationMs: highlightDuration,
-          locator,
-          state,
-          testInfo,
-          thickness: highlightThickness,
-        });
         return await next();
       } finally {
+        if (highlight && state.startedAt !== undefined) {
+          highlight.actionEnd = Math.max(
+            highlight.start,
+            Math.round(performance.now() - state.startedAt),
+          );
+        }
         recordAttachedWaitFromTiming(state, timing);
       }
     },
@@ -1289,6 +1641,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               inputPath: paths.raw,
               outputDir: testInfo.outputDir,
               outputPath: paths.rendered,
+              pointer,
               sourceRange,
               thresholdMs: deadAirThreshold,
             });
