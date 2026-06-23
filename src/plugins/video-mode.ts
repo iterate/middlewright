@@ -201,12 +201,16 @@ type CursorWaypoint = {
 };
 
 type CursorTarget = {
-  actionEnd?: number;
   method?: OverrideableMethod;
   outputEnd: number;
   outputStart: number;
   point: { x: number; y: number };
 };
+
+const CURSOR_MOVEMENT_MIN_MS = 200;
+const CURSOR_MOVEMENT_IDEAL_MS = 500;
+const CURSOR_MOVEMENT_MAX_MS = 1000;
+const CURSOR_REST_BEFORE_ACTION_MS = 200;
 
 type HighlightInput = {
   durationMs: number;
@@ -818,20 +822,6 @@ const renderedVideoPieces = (pieces: VideoPiece[]) => {
   return rendered;
 };
 
-const sourceTimeToRenderedTime = (pieces: RenderedVideoPiece[], sourceTime: number) => {
-  for (const piece of pieces) {
-    if (piece.highlight?.image) {
-      continue;
-    }
-
-    if (sourceTime >= piece.start && sourceTime <= piece.end) {
-      return piece.outputStart + (sourceTime - piece.start) / piece.speed;
-    }
-  }
-
-  return undefined;
-};
-
 const highlightCursorPoint = (
   highlight: VideoModeHighlight,
   video: { width: number; height: number },
@@ -876,10 +866,6 @@ const cursorTargets = (options: {
     }
 
     targets.push({
-      actionEnd:
-        highlight.actionEnd === undefined
-          ? undefined
-          : sourceTimeToRenderedTime(options.pieces, highlight.actionEnd),
       method: highlight.method,
       outputEnd: piece.outputEnd,
       outputStart: piece.outputStart,
@@ -890,44 +876,78 @@ const cursorTargets = (options: {
   return targets;
 };
 
+const cursorArrivalDeadline = (target: CursorTarget) => {
+  return Math.max(target.outputStart, target.outputEnd - CURSOR_REST_BEFORE_ACTION_MS);
+};
+
+const cursorMovementTiming = (options: { earliestStart: number; target: CursorTarget }) => {
+  const deadline = cursorArrivalDeadline(options.target);
+  const available = Math.max(0, deadline - options.earliestStart);
+  const idealDuration = Math.min(CURSOR_MOVEMENT_IDEAL_MS, CURSOR_MOVEMENT_MAX_MS);
+  const duration =
+    available < CURSOR_MOVEMENT_MIN_MS ? available : Math.min(idealDuration, available);
+  const startAt = Math.max(options.earliestStart, deadline - duration);
+
+  return {
+    arriveAt: startAt + duration,
+    startAt,
+  };
+};
+
+/**
+ * Plan cursor motion backwards from each action's click/commit moment.
+ *
+ * The cursor starts in the center, aims to spend 500ms moving, and reaches the
+ * target at least 200ms before the rendered action hold ends. If the existing
+ * video timeline does not have enough room, movement is compressed into the
+ * available time instead of extending the UI video. This keeps cursor motion
+ * readable without slowing the product interaction unless the configured
+ * highlight duration itself already creates that time.
+ */
 const cursorWaypoints = (targets: CursorTarget[], video: { width: number; height: number }) => {
   const waypoints: CursorWaypoint[] = [];
+  let currentPoint = {
+    x: video.width / 2,
+    y: video.height / 2,
+  };
+  let earliestStart = 0;
 
-  if (targets.length > 0 && targets[0].outputStart > 0) {
-    pushCursorWaypoint(waypoints, {
-      at: 0,
-      x: video.width / 2,
-      y: video.height / 2,
-    });
+  if (targets.length === 0) {
+    return waypoints;
   }
+
+  pushCursorWaypoint(waypoints, {
+    at: 0,
+    x: currentPoint.x,
+    y: currentPoint.y,
+  });
 
   for (let index = 0; index < targets.length; index += 1) {
     const target = targets[index];
     const nextTarget = targets[index + 1];
-    const targetHoldEnd =
-      target.actionEnd === undefined ? target.outputEnd : Math.max(target.outputEnd, target.actionEnd);
+    const movement = cursorMovementTiming({ earliestStart, target });
     const holdEnd = nextTarget
-      ? Math.min(targetHoldEnd, nextTarget.outputStart)
-      : targetHoldEnd;
+      ? Math.min(target.outputEnd, nextTarget.outputStart)
+      : target.outputEnd;
 
     pushCursorWaypoint(waypoints, {
-      at: target.outputStart,
+      at: movement.startAt,
+      x: currentPoint.x,
+      y: currentPoint.y,
+    });
+    pushCursorWaypoint(waypoints, {
+      at: movement.arriveAt,
       x: target.point.x,
       y: target.point.y,
     });
     pushCursorWaypoint(waypoints, {
-      at: holdEnd,
+      at: Math.max(holdEnd, movement.arriveAt),
       x: target.point.x,
       y: target.point.y,
     });
 
-    if (nextTarget && nextTarget.outputStart > holdEnd) {
-      pushCursorWaypoint(waypoints, {
-        at: nextTarget.outputStart,
-        x: nextTarget.point.x,
-        y: nextTarget.point.y,
-      });
-    }
+    currentPoint = target.point;
+    earliestStart = Math.max(earliestStart, target.outputEnd);
   }
 
   return waypoints;

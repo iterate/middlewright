@@ -427,7 +427,7 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
   const renderedPath = paths.rendered;
   const clickHoldFrame = await videoFrame(
     renderedPath,
-    highlight.start + Math.round(highlightDurationMs / 2),
+    highlight.start + highlightDurationMs - 100,
   );
   const finalHoldFrame = await videoFrame(renderedPath, (await videoDurationMs(renderedPath)) - 100);
   const scale = Math.min(
@@ -511,7 +511,7 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
   const preClickFrame = await videoFrame(renderedPath, Math.max(100, highlight.start - 650));
   const clickHoldFrame = await videoFrame(
     renderedPath,
-    highlight.start + Math.round(highlightDurationMs / 2),
+    highlight.start + highlightDurationMs - 100,
   );
   const scale = Math.min(
     preClickFrame.width / highlight.viewport.width,
