@@ -22,8 +22,9 @@ const VIDEO_MODE_RENDERED_FILE = "video-rendered.webm";
 const VIDEO_MODE_REPORT_PLAYER_FILE = "video-mode-report.html";
 const VIDEO_MODE_POINTER_FILE = "video-mode-pointer.png";
 const VIDEO_MODE_CLICK_POINTER_FILE = "video-mode-click-pointer.png";
+const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
 // Pointer assets adapted from Pictogrammers Material Design Icons:
-// cursor-default.svg and cursor-pointer.svg.
+// cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
 // Icons are distributed under the Pictogrammers Free License / Apache 2.0.
 const VIDEO_MODE_POINTER_PNG =
@@ -36,6 +37,11 @@ const VIDEO_MODE_CLICK_POINTER_PNG =
 const VIDEO_MODE_CLICK_POINTER_SOURCE_SIZE = 64;
 const VIDEO_MODE_CLICK_POINTER_SIZE = 28;
 const VIDEO_MODE_CLICK_POINTER_HOTSPOT = { x: 28, y: 7 };
+const VIDEO_MODE_TEXT_POINTER_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAFGklEQVR4nOxbS0scWRT+Wk3PTDIOzEJm48LxgathZJwHoszoZsBNEERBFDdCIBBXLsSliIu48Se4EcFlNro0voKBCHkICcFHC+4kkMTEmLajuafqnsqt6mr7VnnLB1UfHOrR99y696tzH1R/pwQxRwlijjJEh1SBcxWn0PMv5HOWvxZSMA+qs0XYDXntjbJ3wp7K81PP8XdhPyv1qDgW9kiWPfX4hibCdARQo18Lq9UoOy3svvQZEdaj4fNS2J/CTjxGCEWCyQiguv4Q9iSAz3t5/EnfBf8Jey4spxiRECoSTEZASq2vvLwcjY2NeYU2Nzext7fHl66OV1ZWorY2P3jW19dxcHDgVC3sprDP8pneIREIpgjgSHLGe0VFBRYWFnwLT09PY2RkxCGCOj4xMYGeHv9RUFNToxJwSxo9izr9BVcoArSGVF9fH7LZLAYGBqzrsbGxgp33wY+wCaDOqsOA2xCIhMgI2N/fR1tbm6tAVVWVda+/vx/d3d04OjpCOp1GV1eX9fvU1BQWFxexu7vr8qO6FKSFfS8sC3ulKZEWuPPcaBOgekqF/QV7qToTzc3NWFlZcd1ramrC2toaNHAP9iT4ThqNjU+wCeGhoA3TO8Fnwj4WK7S6uorx8XHnenR0VLfz1NEMAgy3YohiJ/ibsL/xbbb+AXbYUrj+L+wfKrS8vOw4LC0tqf6PhT2EPbmpMzyN80153zvxXYmNEDWCGvUW9jAgAnjC+g42AR8gCdjZ2XEcM5mMWs883B3lzhIBtBs8gr0EZuHeA4SC6QjgZYkaRw0tlfd4wvrABXO5XKE6yJ87m5XHnOfeIWwSjpEfKYFgigB+OL8paiSv03Sels8qOj/IOvhN05hX3/axtM/yd7rPERIKUQwBaigvSXR+Qz4nDAGHcL9tNRKOlXuXvhNk8BAgMBnU+FLoE0D+/JY/SR/1bXst9C4QMB8BDG4YHSkaaDgQCVnNepgEKs9EMAEcaae4YqsAgRvD6/SJ5zynWc8J3DM/H71v+1ydJ0T1RUhtWEoxncaqnWMi/N68EVzEN8Ewn7D8OnnucPdDlN8EVRhttEnE/qtwQgBijoQAxBwJAYg5EgIQcyQEIOZICEDMkRCAmCMhADFHQgBijoQAxBwJAYg5EgIQcyRyeVwMolClG8FF5Auo/w47zysrKzvLr5Cx7Eb9B/lciIKAQvkCpBS7w4Xq6uoch/r6emxvb/Nlh6yDBJAkqmKJDIkkSF2p/k2uiqVDIYp8AdL01xcr2NnZ6Zx3dHRgfn6eL5ul+eGVMJKgX+98gdbW1jwleUtLi6Ug1cC/wl7guuYLNDQ0YHJy0jqfm5tDKpVCe3u7pR0eHBzExsZGno8nX4ByDIzlC5gUS5ORCtQSS1dXV2Nra6ugw8zMDHp7e63z2dlZSz1eCJQvoMwRpKtfhz0n0PxACjIWTAbWC5rcB2gLmClhYnh42LkeGhqy7mmCtMckvyXJPAsw1RUnEEzL5SkCLB28ZsqMC5opM3dhZ51RvtGBNI6CwLrhS8kXUHAojzcD+BjNFzC9DHK+wC2NsovCHsAm7zbsbLBiMJ4vYDoCaEz+Av98gVJZjt56Bv66v1/xLSGK62XQJEcy+jewN0g0BNQIuPQhQI2m3R91mPIEvPkC6mSlqstVErgePqqTNCtHabxTlPH4Zy1xqNyBi8wX4Ajgcn67OQLripkI1YfF1yyjvzb5ApzddRYBagQwCV4CVCW5kXyBrwAAAP//qVxqLgAAAAZJREFUAwCpkwfomMTHxQAAAABJRU5ErkJggg==";
+const VIDEO_MODE_TEXT_POINTER_SOURCE_SIZE = 64;
+const VIDEO_MODE_TEXT_POINTER_SIZE = 28;
+const VIDEO_MODE_TEXT_POINTER_HOTSPOT = { x: 32, y: 32 };
 
 export type VideoModeSpan = {
   start: number;
@@ -205,6 +211,15 @@ type CursorTarget = {
   outputEnd: number;
   outputStart: number;
   point: { x: number; y: number };
+};
+
+type PlannedCursorTarget = CursorTarget & {
+  arriveAt: number;
+};
+
+type CursorPlan = {
+  targets: PlannedCursorTarget[];
+  waypoints: CursorWaypoint[];
 };
 
 const CURSOR_MOVEMENT_MIN_MS = 200;
@@ -904,8 +919,12 @@ const cursorMovementTiming = (options: { earliestStart: number; target: CursorTa
  * readable without slowing the product interaction unless the configured
  * highlight duration itself already creates that time.
  */
-const cursorWaypoints = (targets: CursorTarget[], video: { width: number; height: number }) => {
+const cursorPlan = (
+  targets: CursorTarget[],
+  video: { width: number; height: number },
+): CursorPlan => {
   const waypoints: CursorWaypoint[] = [];
+  const plannedTargets: PlannedCursorTarget[] = [];
   let currentPoint = {
     x: video.width / 2,
     y: video.height / 2,
@@ -913,7 +932,7 @@ const cursorWaypoints = (targets: CursorTarget[], video: { width: number; height
   let earliestStart = 0;
 
   if (targets.length === 0) {
-    return waypoints;
+    return { targets: plannedTargets, waypoints };
   }
 
   pushCursorWaypoint(waypoints, {
@@ -945,20 +964,24 @@ const cursorWaypoints = (targets: CursorTarget[], video: { width: number; height
       x: target.point.x,
       y: target.point.y,
     });
+    plannedTargets.push({
+      ...target,
+      arriveAt: movement.arriveAt,
+    });
 
     currentPoint = target.point;
     earliestStart = Math.max(earliestStart, target.outputEnd);
   }
 
-  return waypoints;
+  return { targets: plannedTargets, waypoints };
 };
 
-const clickHoldSpans = (targets: CursorTarget[]) => {
+const methodCursorSpans = (targets: PlannedCursorTarget[], methods: OverrideableMethod[]) => {
   return targets
-    .filter((target) => target.method === "click")
+    .filter((target) => target.method !== undefined && methods.includes(target.method))
     .map((target) => ({
       end: target.outputEnd,
-      start: target.outputStart,
+      start: target.arriveAt,
     }))
     .filter((span) => span.end > span.start);
 };
@@ -1049,6 +1072,7 @@ const renderedVideoFilter = (options: {
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
   segments: RenderVideoSegment[];
+  textPointerInput?: PointerInput;
   video: { width: number; height: number };
 }): VideoFilter | undefined => {
   const highlightInputByImage = new Map(
@@ -1064,10 +1088,12 @@ const renderedVideoFilter = (options: {
     pieces: renderedPieces,
     video: options.video,
   });
-  const waypoints = cursorWaypoints(targets, options.video);
-  const clickSpans = clickHoldSpans(targets);
-  const activitySpan = cursorActivitySpan(targets, waypoints);
+  const plan = cursorPlan(targets, options.video);
+  const clickSpans = methodCursorSpans(plan.targets, ["click"]);
+  const textSpans = methodCursorSpans(plan.targets, ["fill", "type"]);
+  const activitySpan = cursorActivitySpan(targets, plan.waypoints);
   const clickSpanExpression = videoSpanExpression(clickSpans);
+  const textSpanExpression = videoSpanExpression(textSpans);
 
   if (pieces.length === 0) {
     return undefined;
@@ -1139,13 +1165,16 @@ const renderedVideoFilter = (options: {
   if (
     options.highlightMode === "pointer" &&
     options.cursorPointerInput &&
-    waypoints.length > 0 &&
+    plan.waypoints.length > 0 &&
     activitySpan
   ) {
     const cursorOutputLabel = "renderpointer";
     const cursorActivityExpression = `between(t\\,${formatSeconds(activitySpan.start)}\\,${formatSeconds(activitySpan.end)})`;
-    const cursorEnable = clickSpanExpression
-      ? `${cursorActivityExpression}*not(${clickSpanExpression})`
+    const specialCursorExpression = [clickSpanExpression, textSpanExpression]
+      .filter(Boolean)
+      .join("+");
+    const cursorEnable = specialCursorExpression
+      ? `${cursorActivityExpression}*not(${specialCursorExpression})`
       : cursorActivityExpression;
     filters.push(
       cursorOverlayFilters({
@@ -1153,19 +1182,35 @@ const renderedVideoFilter = (options: {
         inputLabel: outputLabel,
         outputLabel: cursorOutputLabel,
         pointerInput: options.cursorPointerInput,
-        waypoints,
+        waypoints: plan.waypoints,
       }),
     );
+
+    let pointerOutputLabel = cursorOutputLabel;
+
+    if (options.textPointerInput && textSpanExpression) {
+      const textPointerOutputLabel = "rendertextpointer";
+      filters.push(
+        cursorOverlayFilters({
+          enable: textSpanExpression,
+          inputLabel: pointerOutputLabel,
+          outputLabel: textPointerOutputLabel,
+          pointerInput: options.textPointerInput,
+          waypoints: plan.waypoints,
+        }),
+      );
+      pointerOutputLabel = textPointerOutputLabel;
+    }
 
     if (options.clickPointerInput && clickSpanExpression) {
       const clickPointerOutputLabel = "renderclickpointer";
       filters.push(
         cursorOverlayFilters({
           enable: clickSpanExpression,
-          inputLabel: cursorOutputLabel,
+          inputLabel: pointerOutputLabel,
           outputLabel: clickPointerOutputLabel,
           pointerInput: options.clickPointerInput,
-          waypoints,
+          waypoints: plan.waypoints,
         }),
       );
 
@@ -1176,7 +1221,7 @@ const renderedVideoFilter = (options: {
     }
 
     return {
-      outputLabel: cursorOutputLabel,
+      outputLabel: pointerOutputLabel,
       value: filters.join(";"),
     };
   }
@@ -1533,11 +1578,23 @@ const renderVideo = async (options: {
         sourceSize: VIDEO_MODE_CLICK_POINTER_SOURCE_SIZE,
       }
     : undefined;
+  const textPointerInput: PointerInput | undefined = shouldRenderPointer
+    ? {
+        hotspot: VIDEO_MODE_TEXT_POINTER_HOTSPOT,
+        inputIndex: highlightInputs.length + 3,
+        path: join(options.outputDir, VIDEO_MODE_TEXT_POINTER_FILE),
+        size: VIDEO_MODE_TEXT_POINTER_SIZE,
+        sourceSize: VIDEO_MODE_TEXT_POINTER_SOURCE_SIZE,
+      }
+    : undefined;
   if (cursorPointerInput) {
     await writeFile(cursorPointerInput.path, Buffer.from(VIDEO_MODE_POINTER_PNG, "base64"));
   }
   if (clickPointerInput) {
     await writeFile(clickPointerInput.path, Buffer.from(VIDEO_MODE_CLICK_POINTER_PNG, "base64"));
+  }
+  if (textPointerInput) {
+    await writeFile(textPointerInput.path, Buffer.from(VIDEO_MODE_TEXT_POINTER_PNG, "base64"));
   }
   const segments = renderVideoSegments({
     deadAir: options.deadAir,
@@ -1553,6 +1610,7 @@ const renderVideo = async (options: {
     highlightInputs,
     highlights: options.highlights,
     segments,
+    textPointerInput,
     video: info,
   });
 
@@ -1563,6 +1621,9 @@ const renderVideo = async (options: {
   await execFile(
     "ffmpeg",
     [
+      "-hide_banner",
+      "-loglevel",
+      "error",
       "-y",
       "-i",
       options.inputPath,
@@ -1576,6 +1637,7 @@ const renderVideo = async (options: {
       ]),
       ...(cursorPointerInput ? ["-loop", "1", "-i", cursorPointerInput.path] : []),
       ...(clickPointerInput ? ["-loop", "1", "-i", clickPointerInput.path] : []),
+      ...(textPointerInput ? ["-loop", "1", "-i", textPointerInput.path] : []),
       "-filter_complex",
       filter.value,
       "-map",

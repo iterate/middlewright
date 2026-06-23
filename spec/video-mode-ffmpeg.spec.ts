@@ -535,6 +535,104 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
   expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
 });
 
+test("uses the text cursor for fill and type after the pointer arrives", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(210, 210, 210);
+        }
+        input,
+        textarea {
+          border: 0;
+          box-sizing: border-box;
+          caret-color: transparent;
+          color: inherit;
+          font: 32px sans-serif;
+          outline: 0;
+          padding: 0;
+          position: absolute;
+          resize: none;
+        }
+        #name {
+          background: rgb(0, 80, 255);
+          color: rgb(0, 80, 255);
+          height: 120px;
+          left: 560px;
+          top: 80px;
+          width: 160px;
+        }
+        #notes {
+          background: rgb(0, 190, 0);
+          color: rgb(0, 190, 0);
+          height: 120px;
+          left: 80px;
+          top: 360px;
+          width: 180px;
+        }
+      </style>
+      <input id="name" aria-label="name" />
+      <textarea id="notes" aria-label="notes"></textarea>
+    `);
+
+    await plugged.locator("#name").fill("Ada");
+    await expect(plugged.locator("#name")).toHaveValue("Ada");
+    await plugged.locator("#notes").type("notes");
+    await expect(plugged.locator("#notes")).toHaveValue("notes");
+    await page.waitForTimeout(200);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  const typeHighlight = metadata.highlights.find((highlight) => highlight.method === "type")!;
+  expect(fillHighlight).toBeDefined();
+  expect(typeHighlight).toBeDefined();
+
+  const renderedPath = paths.rendered;
+  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
+  const typeStart = renderedHighlightStartWithoutDeadAir(typeHighlight, metadata.highlights);
+  const fillTravelFrame = await videoFrame(renderedPath, fillStart + 500);
+  const fillRestFrame = await videoFrame(renderedPath, fillStart + highlightDurationMs - 100);
+  const typeRestFrame = await videoFrame(renderedPath, typeStart + highlightDurationMs - 100);
+  const scale = Math.min(
+    fillRestFrame.width / fillHighlight.viewport.width,
+    fillRestFrame.height / fillHighlight.viewport.height,
+  );
+  const fillBox = {
+    height: Math.round(fillHighlight.rect.height * scale),
+    width: Math.round(fillHighlight.rect.width * scale),
+    x: Math.round(fillHighlight.rect.x * scale),
+    y: Math.round(fillHighlight.rect.y * scale),
+  };
+  const typeBox = {
+    height: Math.round(typeHighlight.rect.height * scale),
+    width: Math.round(typeHighlight.rect.width * scale),
+    x: Math.round(typeHighlight.rect.x * scale),
+    y: Math.round(typeHighlight.rect.y * scale),
+  };
+
+  expect(textCursorPixelCount(fillTravelFrame, fillBox)).toBeLessThan(10);
+  expect(textCursorPixelCount(fillRestFrame, fillBox)).toBeGreaterThan(35);
+  expect(textCursorPixelCount(typeRestFrame, typeBox)).toBeGreaterThan(35);
+});
+
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
   page,
 }, testInfo) => {
@@ -709,6 +807,18 @@ const renderedTimestampForSourceTimestamp = (
     const renderedDurationInSpan = sourceDurationInSpan * (thresholdMs / duration);
     return savedDuration + sourceDurationInSpan - renderedDurationInSpan;
   }, 0);
+};
+
+const renderedHighlightStartWithoutDeadAir = (
+  highlight: { start: number },
+  highlights: { end: number; start: number }[],
+) => {
+  return (
+    highlight.start +
+    highlights
+      .filter((candidate) => candidate.start < highlight.start)
+      .reduce((duration, candidate) => duration + candidate.end - candidate.start, 0)
+  );
 };
 
 const videoInfo = async (path: string) => {
@@ -901,6 +1011,28 @@ const cursorPixelCount = (
     const nearlyBlack = red < 35 && green < 35 && blue < 35;
     return nearlyWhite || nearlyBlack;
   });
+};
+
+const textCursorPixelCount = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+) => {
+  const center = centerOf(rect);
+
+  return countPixels(
+    frame,
+    {
+      height: 36,
+      width: 10,
+      x: center.x - 5,
+      y: center.y - 18,
+    },
+    ({ blue, green, red }) => {
+      const nearlyWhite = red > 230 && green > 230 && blue > 230;
+      const nearlyBlack = red < 35 && green < 35 && blue < 35;
+      return nearlyWhite || nearlyBlack;
+    },
+  );
 };
 
 const countPixels = (
