@@ -535,7 +535,7 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
   expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
 });
 
-test("uses the text cursor for fill and type after the pointer arrives", async ({
+test("holds the text cursor for fill and type after the pointer arrives", async ({
   page,
 }, testInfo) => {
   const highlightDurationMs = 1000;
@@ -608,12 +608,13 @@ test("uses the text cursor for fill and type after the pointer arrives", async (
   const renderedPath = paths.rendered;
   const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
   const typeStart = renderedHighlightStartWithoutDeadAir(typeHighlight, metadata.highlights);
-  const fillTravelFrame = await videoFrame(renderedPath, fillStart + 500);
-  const fillRestFrame = await videoFrame(renderedPath, fillStart + highlightDurationMs - 100);
-  const typeRestFrame = await videoFrame(renderedPath, typeStart + highlightDurationMs - 100);
+  const fillEarlyRestFrame = await videoFrame(renderedPath, fillStart + 300);
+  const fillLateRestFrame = await videoFrame(renderedPath, fillStart + highlightDurationMs - 100);
+  const typeEarlyRestFrame = await videoFrame(renderedPath, typeStart + 300);
+  const typeLateRestFrame = await videoFrame(renderedPath, typeStart + highlightDurationMs - 100);
   const scale = Math.min(
-    fillRestFrame.width / fillHighlight.viewport.width,
-    fillRestFrame.height / fillHighlight.viewport.height,
+    fillLateRestFrame.width / fillHighlight.viewport.width,
+    fillLateRestFrame.height / fillHighlight.viewport.height,
   );
   const fillBox = {
     height: Math.round(fillHighlight.rect.height * scale),
@@ -628,9 +629,10 @@ test("uses the text cursor for fill and type after the pointer arrives", async (
     y: Math.round(typeHighlight.rect.y * scale),
   };
 
-  expect(textCursorPixelCount(fillTravelFrame, fillBox)).toBeLessThan(10);
-  expect(textCursorPixelCount(fillRestFrame, fillBox)).toBeGreaterThan(35);
-  expect(textCursorPixelCount(typeRestFrame, typeBox)).toBeGreaterThan(35);
+  expect(textCursorPixelCount(fillEarlyRestFrame, fillBox)).toBeGreaterThan(35);
+  expect(textCursorPixelCount(fillLateRestFrame, fillBox)).toBeGreaterThan(35);
+  expect(textCursorPixelCount(typeEarlyRestFrame, typeBox)).toBeGreaterThan(35);
+  expect(textCursorPixelCount(typeLateRestFrame, typeBox)).toBeGreaterThan(35);
 });
 
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({

@@ -226,6 +226,7 @@ const CURSOR_MOVEMENT_MIN_MS = 200;
 const CURSOR_MOVEMENT_IDEAL_MS = 500;
 const CURSOR_MOVEMENT_MAX_MS = 1000;
 const CURSOR_REST_BEFORE_ACTION_MS = 200;
+const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
 
 type HighlightInput = {
   durationMs: number;
@@ -891,12 +892,26 @@ const cursorTargets = (options: {
   return targets;
 };
 
-const cursorArrivalDeadline = (target: CursorTarget) => {
-  return Math.max(target.outputStart, target.outputEnd - CURSOR_REST_BEFORE_ACTION_MS);
+const cursorArrivalDeadline = (options: { earliestStart: number; target: CursorTarget }) => {
+  const target = options.target;
+  const latestArrivalWithMinimumRest = Math.max(
+    target.outputStart,
+    target.outputEnd - CURSOR_REST_BEFORE_ACTION_MS,
+  );
+  const idealHoldArrival = Math.max(
+    target.outputStart,
+    target.outputEnd - CURSOR_TARGET_HOLD_IDEAL_MS,
+  );
+  const readableMovementArrival = options.earliestStart + CURSOR_MOVEMENT_MIN_MS;
+
+  return Math.min(
+    latestArrivalWithMinimumRest,
+    Math.max(idealHoldArrival, readableMovementArrival),
+  );
 };
 
 const cursorMovementTiming = (options: { earliestStart: number; target: CursorTarget }) => {
-  const deadline = cursorArrivalDeadline(options.target);
+  const deadline = cursorArrivalDeadline(options);
   const available = Math.max(0, deadline - options.earliestStart);
   const idealDuration = Math.min(CURSOR_MOVEMENT_IDEAL_MS, CURSOR_MOVEMENT_MAX_MS);
   const duration =
@@ -912,12 +927,12 @@ const cursorMovementTiming = (options: { earliestStart: number; target: CursorTa
 /**
  * Plan cursor motion backwards from each action's click/commit moment.
  *
- * The cursor starts in the center, aims to spend 500ms moving, and reaches the
- * target at least 200ms before the rendered action hold ends. If the existing
- * video timeline does not have enough room, movement is compressed into the
- * available time instead of extending the UI video. This keeps cursor motion
- * readable without slowing the product interaction unless the configured
- * highlight duration itself already creates that time.
+ * The cursor starts in the center, aims to spend 500ms moving, and switches to
+ * the target-specific cursor shape only after arriving. The arrival point is
+ * chosen to preserve an ideal 1s target hold when the existing timeline has
+ * room; otherwise movement compresses toward 200ms so the hand/text cursor gets
+ * most of the configured highlight hold. This keeps cursor motion readable
+ * without extending the product interaction.
  */
 const cursorPlan = (
   targets: CursorTarget[],
