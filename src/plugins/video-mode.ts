@@ -638,7 +638,7 @@ const recordAttachedWaitFromTiming = (
   recordDeadAirSpan(state, { end, start });
 };
 
-const recordWaitForDeadAirFromTiming = (
+const recordActionElapsedDeadAirFromTiming = (
   state: VideoModeState,
   timing: Pick<ActionTiming, "actionStartedAt">,
 ) => {
@@ -1894,7 +1894,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         try {
           return await next();
         } finally {
-          recordWaitForDeadAirFromTiming(state, timing);
+          recordActionElapsedDeadAirFromTiming(state, timing);
         }
       }
 
@@ -1904,6 +1904,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         try {
           return await next();
         } finally {
+          if (timing.attachedAtStart) {
+            recordActionElapsedDeadAirFromTiming(state, timing);
+          }
           recordAttachedWaitFromTiming(state, timing);
         }
       }
@@ -1929,6 +1932,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             recordedHighlight.start,
             Math.round(performance.now() - state.startedAt),
           );
+        }
+        if (!recordedHighlight && timing.attachedAtStart) {
+          recordActionElapsedDeadAirFromTiming(state, timing);
         }
         recordAttachedWaitFromTiming(state, timing);
       }

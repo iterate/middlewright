@@ -194,6 +194,32 @@ test("marks explicit visible waitFor calls as dead air", async ({ page }, testIn
   expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
+test("marks attached actionability waits as dead air", async ({ page }, testInfo) => {
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="ready" style="display: none;">ready</button>
+    <div id="result"></div>
+    <script>
+      setTimeout(() => {
+        document.querySelector('#ready').style.display = 'block';
+      }, 150);
+      document.querySelector('#ready').addEventListener('click', () => {
+        document.querySelector('#result').textContent = 'clicked';
+      });
+    </script>
+  `);
+
+  await plugged.locator("#ready").click();
+
+  await expect(plugged.locator("#result")).toContainText("clicked");
+  expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+});
+
 test("sets video source range from current timestamps", async ({ page }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
   await using plugged = await addPlugins({
