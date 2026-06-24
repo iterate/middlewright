@@ -641,6 +641,7 @@ const recordAttachedWaitFromTiming = (
 const recordActionElapsedDeadAirFromTiming = (
   state: VideoModeState,
   timing: Pick<ActionTiming, "actionStartedAt">,
+  options: { minimumMs: number },
 ) => {
   if (state.startedAt === undefined) {
     return;
@@ -648,6 +649,10 @@ const recordActionElapsedDeadAirFromTiming = (
 
   const start = Math.round(timing.actionStartedAt - state.startedAt);
   const end = Math.round(performance.now() - state.startedAt);
+
+  if (end - start < options.minimumMs) {
+    return;
+  }
 
   recordDeadAirSpan(state, { end, start });
 };
@@ -1894,7 +1899,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         try {
           return await next();
         } finally {
-          recordActionElapsedDeadAirFromTiming(state, timing);
+          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 0 });
         }
       }
 
@@ -1905,7 +1910,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           return await next();
         } finally {
           if (timing.attachedAtStart) {
-            recordActionElapsedDeadAirFromTiming(state, timing);
+            recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
           }
           recordAttachedWaitFromTiming(state, timing);
         }
@@ -1933,8 +1938,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             Math.round(performance.now() - state.startedAt),
           );
         }
-        if (!recordedHighlight && timing.attachedAtStart) {
-          recordActionElapsedDeadAirFromTiming(state, timing);
+        if (
+          !recordedHighlight &&
+          (timing.attachedAtStart || timing.attachedAt === undefined)
+        ) {
+          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
         }
         recordAttachedWaitFromTiming(state, timing);
       }
