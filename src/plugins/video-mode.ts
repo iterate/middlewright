@@ -227,6 +227,8 @@ const CURSOR_MOVEMENT_IDEAL_MS = 500;
 const CURSOR_MOVEMENT_MAX_MS = 1000;
 const CURSOR_REST_BEFORE_ACTION_MS = 200;
 const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
+const TEXT_CURSOR_HOLD_IDEAL_MS = 800;
+const TEXT_CURSOR_POINTER_TAIL_MS = 200;
 
 type HighlightInput = {
   durationMs: number;
@@ -1001,6 +1003,19 @@ const methodCursorSpans = (targets: PlannedCursorTarget[], methods: Overrideable
     .filter((span) => span.end > span.start);
 };
 
+const textCursorSpans = (targets: PlannedCursorTarget[]) => {
+  return targets
+    .filter((target) => target.method === "fill" || target.method === "type")
+    .map((target) => ({
+      end: Math.min(
+        target.arriveAt + TEXT_CURSOR_HOLD_IDEAL_MS,
+        Math.max(target.arriveAt, target.outputEnd - TEXT_CURSOR_POINTER_TAIL_MS),
+      ),
+      start: target.arriveAt,
+    }))
+    .filter((span) => span.end > span.start);
+};
+
 const cursorActivitySpan = (
   targets: CursorTarget[],
   waypoints: CursorWaypoint[],
@@ -1105,7 +1120,7 @@ const renderedVideoFilter = (options: {
   });
   const plan = cursorPlan(targets, options.video);
   const clickSpans = methodCursorSpans(plan.targets, ["click"]);
-  const textSpans = methodCursorSpans(plan.targets, ["fill", "type"]);
+  const textSpans = textCursorSpans(plan.targets);
   const activitySpan = cursorActivitySpan(targets, plan.waypoints);
   const clickSpanExpression = videoSpanExpression(clickSpans);
   const textSpanExpression = videoSpanExpression(textSpans);

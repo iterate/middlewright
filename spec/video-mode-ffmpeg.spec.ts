@@ -589,7 +589,7 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
   expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
 });
 
-test("holds the text cursor for fill and type after the pointer arrives", async ({
+test("uses a normal pointer tail after text cursor holds", async ({
   page,
 }, testInfo) => {
   const highlightDurationMs = 1000;
@@ -662,13 +662,13 @@ test("holds the text cursor for fill and type after the pointer arrives", async 
   const renderedPath = paths.rendered;
   const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
   const typeStart = renderedHighlightStartWithoutDeadAir(typeHighlight, metadata.highlights);
-  const fillEarlyRestFrame = await videoFrame(renderedPath, fillStart + 300);
-  const fillLateRestFrame = await videoFrame(renderedPath, fillStart + highlightDurationMs - 100);
-  const typeEarlyRestFrame = await videoFrame(renderedPath, typeStart + 300);
-  const typeLateRestFrame = await videoFrame(renderedPath, typeStart + highlightDurationMs - 100);
+  const fillTextFrame = await videoFrame(renderedPath, fillStart + 700);
+  const fillPointerTailFrame = await videoFrame(renderedPath, fillStart + highlightDurationMs - 100);
+  const typeTextFrame = await videoFrame(renderedPath, typeStart + 700);
+  const typePointerTailFrame = await videoFrame(renderedPath, typeStart + highlightDurationMs - 100);
   const scale = Math.min(
-    fillLateRestFrame.width / fillHighlight.viewport.width,
-    fillLateRestFrame.height / fillHighlight.viewport.height,
+    fillTextFrame.width / fillHighlight.viewport.width,
+    fillTextFrame.height / fillHighlight.viewport.height,
   );
   const fillBox = {
     height: Math.round(fillHighlight.rect.height * scale),
@@ -683,10 +683,14 @@ test("holds the text cursor for fill and type after the pointer arrives", async 
     y: Math.round(typeHighlight.rect.y * scale),
   };
 
-  expect(textCursorPixelCount(fillEarlyRestFrame, fillBox)).toBeGreaterThan(35);
-  expect(textCursorPixelCount(fillLateRestFrame, fillBox)).toBeGreaterThan(35);
-  expect(textCursorPixelCount(typeEarlyRestFrame, typeBox)).toBeGreaterThan(35);
-  expect(textCursorPixelCount(typeLateRestFrame, typeBox)).toBeGreaterThan(35);
+  expect(textCursorPixelCount(fillTextFrame, fillBox)).toBeGreaterThan(35);
+  expect(textCursorTopCapPixelCount(fillTextFrame, fillBox)).toBeGreaterThan(5);
+  expect(textCursorTopCapPixelCount(fillPointerTailFrame, fillBox)).toBeLessThan(3);
+  expect(pointerTailPixelCount(fillPointerTailFrame, fillBox)).toBeGreaterThan(20);
+  expect(textCursorPixelCount(typeTextFrame, typeBox)).toBeGreaterThan(35);
+  expect(textCursorTopCapPixelCount(typeTextFrame, typeBox)).toBeGreaterThan(5);
+  expect(textCursorTopCapPixelCount(typePointerTailFrame, typeBox)).toBeLessThan(3);
+  expect(pointerTailPixelCount(typePointerTailFrame, typeBox)).toBeGreaterThan(20);
 });
 
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
@@ -1089,6 +1093,45 @@ const textCursorPixelCount = (
       return nearlyWhite || nearlyBlack;
     },
   );
+};
+
+const textCursorTopCapPixelCount = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+) => {
+  const center = centerOf(rect);
+
+  return blackOrWhitePixelCount(frame, {
+    height: 6,
+    width: 20,
+    x: center.x - 10,
+    y: center.y - 14,
+  });
+};
+
+const pointerTailPixelCount = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+) => {
+  const center = centerOf(rect);
+
+  return blackOrWhitePixelCount(frame, {
+    height: 36,
+    width: 6,
+    x: center.x + 8,
+    y: center.y - 18,
+  });
+};
+
+const blackOrWhitePixelCount = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+) => {
+  return countPixels(frame, rect, ({ blue, green, red }) => {
+    const nearlyWhite = red > 230 && green > 230 && blue > 230;
+    const nearlyBlack = red < 35 && green < 35 && blue < 35;
+    return nearlyWhite || nearlyBlack;
+  });
 };
 
 const countPixels = (
