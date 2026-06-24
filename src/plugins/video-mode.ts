@@ -223,8 +223,10 @@ type CursorPlan = {
 };
 
 const CURSOR_MOVEMENT_MIN_MS = 200;
-const CURSOR_MOVEMENT_IDEAL_MS = 500;
 const CURSOR_MOVEMENT_MAX_MS = 1000;
+const CURSOR_MOVEMENT_MIN_IDEAL_MS = 300;
+const CURSOR_MOVEMENT_MAX_IDEAL_MS = 700;
+const CURSOR_MOVEMENT_SPEED_PX_PER_SECOND = 600;
 const CURSOR_REST_BEFORE_ACTION_MS = 200;
 const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
 const TEXT_CURSOR_HOLD_IDEAL_MS = 800;
@@ -894,7 +896,27 @@ const cursorTargets = (options: {
   return targets;
 };
 
-const cursorArrivalDeadline = (options: { earliestStart: number; target: CursorTarget }) => {
+const cursorMovementIdealDuration = (options: {
+  currentPoint: { x: number; y: number };
+  target: CursorTarget;
+}) => {
+  const distance = Math.hypot(
+    options.target.point.x - options.currentPoint.x,
+    options.target.point.y - options.currentPoint.y,
+  );
+  const duration = (distance / CURSOR_MOVEMENT_SPEED_PX_PER_SECOND) * 1000;
+
+  return Math.max(
+    CURSOR_MOVEMENT_MIN_IDEAL_MS,
+    Math.min(CURSOR_MOVEMENT_MAX_IDEAL_MS, duration),
+  );
+};
+
+const cursorArrivalDeadline = (options: {
+  currentPoint: { x: number; y: number };
+  earliestStart: number;
+  target: CursorTarget;
+}) => {
   const target = options.target;
   const latestArrivalWithMinimumRest = Math.max(
     target.outputStart,
@@ -904,7 +926,8 @@ const cursorArrivalDeadline = (options: { earliestStart: number; target: CursorT
     target.outputStart,
     target.outputEnd - CURSOR_TARGET_HOLD_IDEAL_MS,
   );
-  const readableMovementArrival = options.earliestStart + CURSOR_MOVEMENT_MIN_MS;
+  const readableMovementArrival =
+    options.earliestStart + cursorMovementIdealDuration(options);
 
   return Math.min(
     latestArrivalWithMinimumRest,
@@ -912,10 +935,14 @@ const cursorArrivalDeadline = (options: { earliestStart: number; target: CursorT
   );
 };
 
-const cursorMovementTiming = (options: { earliestStart: number; target: CursorTarget }) => {
+const cursorMovementTiming = (options: {
+  currentPoint: { x: number; y: number };
+  earliestStart: number;
+  target: CursorTarget;
+}) => {
   const deadline = cursorArrivalDeadline(options);
   const available = Math.max(0, deadline - options.earliestStart);
-  const idealDuration = Math.min(CURSOR_MOVEMENT_IDEAL_MS, CURSOR_MOVEMENT_MAX_MS);
+  const idealDuration = Math.min(cursorMovementIdealDuration(options), CURSOR_MOVEMENT_MAX_MS);
   const duration =
     available < CURSOR_MOVEMENT_MIN_MS ? available : Math.min(idealDuration, available);
   const startAt = Math.max(options.earliestStart, deadline - duration);
@@ -929,12 +956,12 @@ const cursorMovementTiming = (options: { earliestStart: number; target: CursorTa
 /**
  * Plan cursor motion backwards from each action's click/commit moment.
  *
- * The cursor starts in the center, aims to spend 500ms moving, and switches to
- * the target-specific cursor shape only after arriving. The arrival point is
- * chosen to preserve an ideal 1s target hold when the existing timeline has
- * room; otherwise movement compresses toward 200ms so the hand/text cursor gets
- * most of the configured highlight hold. This keeps cursor motion readable
- * without extending the product interaction.
+ * The cursor starts in the center and switches to a target-specific shape only
+ * after arriving. Movement aims for a readable distance-based speed, clamped to
+ * a short 300-700ms range, while still compressing toward 200ms when the
+ * existing video timeline has no room. The arrival point preserves an ideal 1s
+ * target hold when possible and otherwise gives the hand/text cursor most of
+ * the configured highlight hold without extending product interaction time.
  */
 const cursorPlan = (
   targets: CursorTarget[],
@@ -961,7 +988,7 @@ const cursorPlan = (
   for (let index = 0; index < targets.length; index += 1) {
     const target = targets[index];
     const nextTarget = targets[index + 1];
-    const movement = cursorMovementTiming({ earliestStart, target });
+    const movement = cursorMovementTiming({ currentPoint, earliestStart, target });
     const holdEnd = nextTarget
       ? Math.min(target.outputEnd, nextTarget.outputStart)
       : target.outputEnd;
@@ -1326,14 +1353,19 @@ const escapeHtml = (value: string) => {
   return value.replace(/[&"'<>]/g, (character) => entities[character]);
 };
 
-const videoElementHtml = (options: { label: string; source: string }) => {
+const videoElementHtml = (options: {
+  activeKey: "raw" | "rendered";
+  label: string;
+  source: string;
+}) => {
+  const activeKey = escapeHtml(options.activeKey);
   const label = escapeHtml(options.label);
   const source = escapeHtml(options.source);
 
   return `
-      <section class="video-section">
+      <section class="video-section" data-active-key="${activeKey}">
         <div class="section-title">${label}</div>
-        <video controls preload="metadata" tabindex="0">
+        <video controls preload="metadata" tabindex="0" data-active-key="${activeKey}">
           <source src="${source}" type="video/webm" />
         </video>
       </section>`;
@@ -1347,11 +1379,12 @@ const playwrightReportAttachmentName = async (path: string) => {
 const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
   const primary = options.rendered || options.raw;
   const primaryLabel = options.rendered ? "Rendered video" : "Raw video";
+  const primaryActiveKey = options.rendered ? "rendered" : "raw";
   const rawDetails = options.rendered
     ? `
       <details>
         <summary>Raw video</summary>
-        ${videoElementHtml({ label: "Raw video", source: options.raw })}
+        ${videoElementHtml({ activeKey: "raw", label: "Raw video", source: options.raw })}
       </details>`
     : "";
 
@@ -1478,7 +1511,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
   </header>
   <main>
     <div>
-      ${videoElementHtml({ label: primaryLabel, source: primary })}
+      ${videoElementHtml({ activeKey: primaryActiveKey, label: primaryLabel, source: primary })}
       ${rawDetails}
     </div>
     <aside>
@@ -1497,60 +1530,104 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
     const time = document.querySelector("#time");
     const frame = document.querySelector("#frame");
     const duration = document.querySelector("#duration");
+    const videoByActiveKey = new Map(videos.map((video) => [video.dataset.activeKey, video]));
     let activeVideo = videos[0];
 
-    const setActiveVideo = (video) => {
-      activeVideo = video;
-      update();
+    const rate = () => Number(fps.value) || 25;
+    const currentFrame = () => Math.round(activeVideo.currentTime * rate());
+    const activeKeyFor = (video) => video.dataset.activeKey || "rendered";
+    const revealVideo = (video) => {
+      const details = video.closest("details");
+      if (details) details.open = true;
+    };
+    const writeStateToUrl = () => {
+      const next = new URL(location.href);
+      next.searchParams.set("active", activeKeyFor(activeVideo));
+      next.searchParams.set("frame", String(currentFrame()));
+      history.replaceState(null, "", next.href);
     };
 
-    const update = () => {
-      const rate = Number(fps.value) || 25;
+    const setActiveVideo = (video, writeUrl) => {
+      activeVideo = video;
+      revealVideo(video);
+      update(writeUrl);
+    };
+
+    const update = (writeUrl) => {
       const title = activeVideo.closest(".video-section").querySelector(".section-title").textContent;
       active.textContent = title;
       time.textContent = activeVideo.currentTime.toFixed(3);
-      frame.textContent = String(Math.round(activeVideo.currentTime * rate));
+      frame.textContent = String(currentFrame());
       duration.textContent = Number.isFinite(activeVideo.duration) ? activeVideo.duration.toFixed(3) : "?";
+      if (writeUrl) writeStateToUrl();
     };
 
-    const stepFrames = (count) => {
-      const rate = Number(fps.value) || 25;
+    const seekToFrame = (frameNumber, writeUrl) => {
+      if (!Number.isFinite(frameNumber)) return;
+      if (!Number.isFinite(activeVideo.duration)) {
+        activeVideo.addEventListener("loadedmetadata", () => seekToFrame(frameNumber, writeUrl), {
+          once: true,
+        });
+        return;
+      }
+
       activeVideo.pause();
       activeVideo.currentTime = Math.max(
         0,
-        Math.min(activeVideo.duration || Infinity, activeVideo.currentTime + count / rate),
+        Math.min(activeVideo.duration, Math.round(frameNumber) / rate()),
       );
+      update(writeUrl);
+    };
+
+    const stepFrames = (count) => {
+      seekToFrame(currentFrame() + count, true);
     };
 
     for (const video of videos) {
-      video.addEventListener("focus", () => setActiveVideo(video));
-      video.addEventListener("pointerdown", () => setActiveVideo(video));
-      video.addEventListener("mouseenter", () => setActiveVideo(video));
-      video.addEventListener("loadedmetadata", update);
-      video.addEventListener("seeked", update);
-      video.addEventListener("timeupdate", update);
+      video.addEventListener("focus", () => setActiveVideo(video, true));
+      video.addEventListener("pointerdown", () => setActiveVideo(video, true));
+      video.addEventListener("mouseenter", () => setActiveVideo(video, true));
+      video.addEventListener("loadedmetadata", () => update(false));
+      video.addEventListener("seeked", () => update(true));
+      video.addEventListener("timeupdate", () => update(true));
     }
 
     document.querySelector("#back").addEventListener("click", () => stepFrames(-1));
     document.querySelector("#forward").addEventListener("click", () => stepFrames(1));
-    document.addEventListener("keydown", (event) => {
+    fps.addEventListener("input", () => update(true));
+    window.addEventListener("keydown", (event) => {
       if (event.target instanceof HTMLInputElement) return;
+      let handled = true;
       if (event.key === "ArrowRight") {
-        event.preventDefault();
         stepFrames(event.shiftKey ? 10 : 1);
-      }
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
+      } else if (event.key === "ArrowLeft") {
         stepFrames(event.shiftKey ? -10 : -1);
-      }
-      if (event.key === " ") {
-        event.preventDefault();
+      } else if (event.key === " ") {
         if (activeVideo.paused) activeVideo.play();
         else activeVideo.pause();
+      } else {
+        handled = false;
       }
-    });
+      if (!handled) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }, { capture: true });
 
-    update();
+    const applyUrlState = () => {
+      const params = new URL(location.href).searchParams;
+      const requestedVideo = videoByActiveKey.get(params.get("active"));
+      setActiveVideo(requestedVideo || activeVideo, false);
+      const requestedFrame = Number(params.get("frame"));
+      if (Number.isFinite(requestedFrame)) {
+        seekToFrame(requestedFrame, false);
+        return;
+      }
+      update(false);
+    };
+
+    document.body.tabIndex = -1;
+    document.body.focus();
+    applyUrlState();
   </script>
 </body>
 </html>

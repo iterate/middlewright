@@ -166,7 +166,7 @@ await page.locator("#important-flow").click();
 page.videoMode.setEndTime();
 ```
 
-When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
+When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. The frame-stepper stores its active video and frame in the URL, so links like `video-mode.html?active=rendered&frame=28` reopen the same frame. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
 
 `video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
 

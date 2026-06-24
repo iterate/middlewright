@@ -2,6 +2,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
 import { addPlugins, spinnerWaiter, videoMode } from "../src/index.ts";
@@ -149,6 +150,10 @@ test("writes video-mode artifact files and report player", async ({ page }, test
   await expect(readFile(paths.player, "utf8")).resolves.toContain('src="video-rendered.webm"');
   await expect(readFile(paths.player, "utf8")).resolves.toContain('src="video-raw.webm"');
   await expect(readFile(paths.player, "utf8")).resolves.toContain("<details>");
+  await expect(readFile(paths.player, "utf8")).resolves.toContain(
+    'data-active-key="rendered"',
+  );
+  await expect(readFile(paths.player, "utf8")).resolves.toContain('data-active-key="raw"');
   await expect(readFile(paths.reportPlayer, "utf8")).resolves.toContain(
     `src="${await playwrightReportAttachmentName(paths.rendered)}"`,
   );
@@ -170,6 +175,19 @@ test("writes video-mode artifact files and report player", async ({ page }, test
 
   expect(renderedDuration).toBeLessThan(rawDuration + metadata.highlights.length * highlightDurationMs);
   expect(Math.abs(renderedDuration - expectedRenderedDuration)).toBeLessThan(1500);
+
+  const playerUrl = new URL(pathToFileURL(paths.player).href);
+  playerUrl.searchParams.set("active", "rendered");
+  playerUrl.searchParams.set("frame", "2");
+  const playerPage = await page.context().newPage();
+  await playerPage.goto(playerUrl.href);
+  await expect(playerPage.locator("#active")).toHaveText("Rendered video");
+  await expect(playerPage.locator("#frame")).toHaveText("2");
+  await playerPage.keyboard.press("ArrowRight");
+  await expect(playerPage.locator("#frame")).toHaveText("3");
+  expect(new URL(playerPage.url()).searchParams.get("active")).toBe("rendered");
+  expect(new URL(playerPage.url()).searchParams.get("frame")).toBe("3");
+  await playerPage.close();
 });
 
 test("speeds dead air up instead of cutting through it", async ({ page }, testInfo) => {
