@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
 import { addPlugins, spinnerWaiter, videoMode } from "../src/index.ts";
+import type { Plugin } from "../src/index.ts";
 
 const execFile = promisify(execFileCallback);
 
@@ -188,6 +189,34 @@ test("writes video-mode artifact files and report player", async ({ page }, test
   expect(new URL(playerPage.url()).searchParams.get("active")).toBe("rendered");
   expect(new URL(playerPage.url()).searchParams.get("frame")).toBe("3");
   await playerPage.close();
+});
+
+test("keeps the page open for later afterTest hooks", async ({ page }, testInfo) => {
+  const afterTestEvents: string[] = [];
+  const afterVideoMode = {
+    name: "after-video-mode",
+    testLifecycle: (emitter) => {
+      return emitter.on("afterTest", async ({ page }) => {
+        afterTestEvents.push(page.isClosed() ? "closed" : "open");
+        await expect(page.locator("#after-test-hook-target")).toContainText("ready");
+      });
+    },
+  } satisfies Plugin;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: false,
+  });
+
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video, afterVideoMode],
+    });
+    await plugged.setContent(`<main id="after-test-hook-target">ready</main>`);
+  }
+
+  expect(afterTestEvents).toEqual(["open"]);
 });
 
 test("speeds dead air up instead of cutting through it", async ({ page }, testInfo) => {

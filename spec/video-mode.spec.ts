@@ -153,6 +153,47 @@ test("marks explicit attached waitFor calls as dead air", async ({ page }, testI
   expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
+test("marks default visible waitFor calls as dead air", async ({ page }, testInfo) => {
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <div id="ready" style="display: none;">ready</div>
+    <script>
+      setTimeout(() => {
+        document.querySelector('#ready').style.display = 'block';
+      }, 150);
+    </script>
+  `);
+
+  await plugged.locator("#ready").waitFor();
+
+  expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+});
+
+test("marks explicit visible waitFor calls as dead air", async ({ page }, testInfo) => {
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <script>
+      setTimeout(() => {
+        document.body.insertAdjacentHTML('beforeend', '<div id="late">visible</div>');
+      }, 150);
+    </script>
+  `);
+
+  await plugged.locator("#late").waitFor({ state: "visible" });
+
+  expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+});
+
 test("sets video source range from current timestamps", async ({ page }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
   await using plugged = await addPlugins({

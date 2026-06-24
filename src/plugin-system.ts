@@ -96,6 +96,7 @@ export type ActionMiddleware = (ctx: ActionContext, next: NextFn) => Promise<unk
 export type TestLifecycleEvents = {
   beforeTest: { page: Page; testInfo: TestInfo };
   afterTest: { page: Page; testInfo: TestInfo };
+  afterTestFinalize: { page: Page; testInfo: TestInfo };
 };
 
 export type PageExtensionContext = {
@@ -230,6 +231,7 @@ export const addPlugins = async <const Plugins extends readonly MaybePlugin[]>(p
   // Add async dispose
   pageWithPlugins[Symbol.asyncDispose] = async () => {
     await state.lifecycleEmitter.emitSerial("afterTest", { page, testInfo });
+    await state.lifecycleEmitter.emitSerial("afterTestFinalize", { page, testInfo });
     state.lifecycleCleanups.forEach((cleanup) => cleanup());
   };
 

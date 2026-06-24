@@ -620,11 +620,6 @@ const locatorIsAttached = async (locator: Locator) => {
   }
 };
 
-const waitForTargetsAttached = (args: unknown[]) => {
-  const targetState = (args[0] as { state?: string } | undefined)?.state;
-  return !targetState || targetState === "attached";
-};
-
 const recordAttachedWaitFromTiming = (
   state: VideoModeState,
   timing: { actionStartedAt: number; attachedAt?: number; attachedAtStart: boolean },
@@ -639,6 +634,20 @@ const recordAttachedWaitFromTiming = (
 
   const start = Math.round(timing.actionStartedAt - state.startedAt);
   const end = Math.round(timing.attachedAt - state.startedAt);
+
+  recordDeadAirSpan(state, { end, start });
+};
+
+const recordWaitForDeadAirFromTiming = (
+  state: VideoModeState,
+  timing: Pick<ActionTiming, "actionStartedAt">,
+) => {
+  if (state.startedAt === undefined) {
+    return;
+  }
+
+  const start = Math.round(timing.actionStartedAt - state.startedAt);
+  const end = Math.round(performance.now() - state.startedAt);
 
   recordDeadAirSpan(state, { end, start });
 };
@@ -1872,7 +1881,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       return { videoMode: controls };
     },
 
-    middleware: async ({ args, locator, method, testInfo, timing }, next) => {
+    middleware: async ({ locator, method, testInfo, timing }, next) => {
       if (state.deadAirDepth > 0) return next();
 
       // Skip if called from internal helpers (navigation, login flows etc)
@@ -1882,14 +1891,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       }
 
       if (method === "waitFor") {
-        if (!waitForTargetsAttached(args)) {
-          return next();
-        }
-        recordMiddlewareWaitBeforeVideoMode(state, timing);
         try {
           return await next();
         } finally {
-          recordAttachedWaitFromTiming(state, timing);
+          recordWaitForDeadAirFromTiming(state, timing);
         }
       }
 
@@ -1947,7 +1952,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         }
       });
 
-      const offAfterTest = emitter.on("afterTest", async ({ page, testInfo }) => {
+      const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
@@ -2044,7 +2049,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
       return () => {
         offBeforeTest();
-        offAfterTest();
+        offAfterTestFinalize();
       };
     },
   };
