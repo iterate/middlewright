@@ -497,9 +497,14 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
   expect(highlight).toBeDefined();
 
   const renderedPath = paths.rendered;
+  const highlightStart = renderedHighlightStartWithoutDeadAir(highlight, metadata.highlights);
   const clickHoldFrame = await videoFrame(
     renderedPath,
-    highlight.start + highlightDurationMs - 100,
+    highlightStart + highlightDurationMs - 100,
+  );
+  const pointerTailFrame = await videoFrame(
+    renderedPath,
+    highlightStart + highlightDurationMs + 100,
   );
   const finalHoldFrame = await videoFrame(renderedPath, (await videoDurationMs(renderedPath)) - 100);
   const scale = Math.min(
@@ -514,6 +519,7 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
   };
 
   expect(cursorPixelCount(clickHoldFrame, targetBox)).toBeGreaterThan(40);
+  expect(cursorPixelCount(pointerTailFrame, targetBox)).toBeGreaterThan(40);
   expect(cursorPixelCount(finalHoldFrame, targetBox)).toBeLessThan(10);
 });
 

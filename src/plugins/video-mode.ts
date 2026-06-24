@@ -1060,8 +1060,11 @@ const cursorActivitySpan = (
     return undefined;
   }
 
+  const lastTarget = targets[targets.length - 1];
+  const tailDuration = Math.max(0, lastTarget.outputEnd - lastTarget.outputStart);
+
   return {
-    end: Math.max(...targets.map((target) => target.outputEnd)),
+    end: lastTarget.outputEnd + tailDuration,
     start: waypoints[0].at,
   };
 };
