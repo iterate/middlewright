@@ -25,6 +25,10 @@ export type HydrationWaiterOptions = {
  * only runs client-side.
  */
 export const hydrationWaiter = (options: HydrationWaiterOptions = {}): Plugin => {
+  if (process.env.PWDEBUG) {
+    return { name: "hydration-waiter" };
+  }
+
   const selector = options.selector || '[data-hydrated="false"]';
   const timeout = options.timeout || 10_000;
 

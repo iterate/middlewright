@@ -19,8 +19,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm exec publint
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pnpm exec playwright install chromium --with-deps
       - run: pnpm test
+      - run: pnpm exec pkg-pr-new publish --packageManager=pnpm
+        if: github.event_name == 'pull_request'
       - uses: actions/upload-artifact@v5
         if: failure()
         with:

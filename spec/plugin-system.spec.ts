@@ -31,6 +31,33 @@ test("middleware wraps actions in registration order", async ({ page }, testInfo
   ]);
 });
 
+test("middleware can pass adjusted action args to later middleware", async ({ page }, testInfo) => {
+  let innerArgs: unknown[] = [];
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [
+      {
+        name: "rewrite-fill",
+        middleware: async (_ctx, next) => next(["rewritten"]),
+      },
+      {
+        name: "inner-spy",
+        middleware: async (ctx, next) => {
+          innerArgs = ctx.args;
+          return next();
+        },
+      },
+    ],
+  });
+  await plugged.setContent(`<input id="name">`);
+
+  await plugged.locator("#name").fill("original");
+
+  expect(innerArgs).toEqual(["rewritten"]);
+  expect(await plugged.locator("#name").inputValue()).toBe("rewritten");
+});
+
 test("falsy entries in the plugins array are skipped", async ({ page }, testInfo) => {
   const calls: string[] = [];
   await using plugged = await addPlugins({
@@ -70,6 +97,69 @@ test("middleware receives testInfo", async ({ page }, testInfo) => {
   await plugged.locator("button").click();
 
   expect(seenTitle).toBe("middleware receives testInfo");
+});
+
+test("middleware receives action timing", async ({ page }, testInfo) => {
+  let seenTiming: any;
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [
+      {
+        name: "timing-spy",
+        middleware: async (ctx, next) => {
+          seenTiming = ctx.timing;
+          return next();
+        },
+      },
+    ],
+  });
+  await plugged.setContent(`<button>hi</button>`);
+
+  await plugged.locator("button").click();
+
+  expect(seenTiming).toMatchObject({
+    actionStartedAt: expect.any(Number),
+    attachedAt: expect.any(Number),
+    attachedAtStart: true,
+    middlewares: [
+      expect.objectContaining({
+        endedAt: expect.any(Number),
+        name: "timing-spy",
+        startedAt: expect.any(Number),
+      }),
+    ],
+  });
+});
+
+test("plugins can expose typed controls on the plugged page", async ({ page }, testInfo) => {
+  const helper = {
+    name: "page-helper",
+    pageExtension: ({ page, testInfo }) => ({
+      pageHelper: {
+        renderMessage: async (message: string) => {
+          await page.setContent(`<main>${message}</main>`);
+        },
+        title: () => testInfo.title,
+      },
+    }),
+  } satisfies Plugin<{
+    pageHelper: {
+      renderMessage(message: string): Promise<void>;
+      title(): string;
+    };
+  }>;
+
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [helper],
+  });
+
+  await plugged.pageHelper.renderMessage("hello from a page extension");
+
+  await expect(plugged.locator("main")).toContainText("hello from a page extension");
+  expect(plugged.pageHelper.title()).toBe("plugins can expose typed controls on the plugged page");
 });
 
 test("pages without plugins fall through to the original behavior", async ({

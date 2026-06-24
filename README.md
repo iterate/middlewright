@@ -52,8 +52,10 @@ Ships with five plugins:
 | [`spinnerWaiter`](#spinnerwaiter) | If the app is visibly loading, wait longer for elements. If it isn't, fail fast. | [source](./src/plugins/spinner-waiter.ts) |
 | [`hydrationWaiter`](#hydrationwaiter) | Don't interact with the app until it's hydrated. | [source](./src/plugins/hydration-waiter.ts) |
 | [`uiErrorReporter`](#uierrorreporter) | When an action fails, append any visible error toasts to the error message. | [source](./src/plugins/ui-error-reporter.ts) |
-| [`videoMode`](#videomode) | Highlight elements and pause before actions, so recorded videos are watchable. | [source](./src/plugins/video-mode.ts) |
+| [`videoMode`](#videomode) | Record action/dead-air facts and render watchable annotated videos after the run. | [source](./src/plugins/video-mode.ts) |
 | [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. | [source](./src/plugins/llm-recover.ts) |
+
+When Playwright is launched with `--debug`, it sets `PWDEBUG=1`; the bundled plugins treat that as a hard debug-mode no-op. They still return plugin objects so your fixture can stay unchanged, but they do not wrap locator actions, wait for app state, recover failures, or write video artifacts.
 
 `spinnerWaiter` is the best one. It makes your test pass fast, fail fast, and it incentivises agents to *improve* the product when tests fail, instead of bumping timeouts which makes tests worse and lets your product get away with bad UX.
 
@@ -130,17 +132,51 @@ uiErrorReporter({ selector: '[data-type="error"]' });
 
 ### videoMode
 
-For producing demo/debugging videos people can actually follow: outlines the element in gold, pauses before each action, and pauses after the test so the video doesn't cut off abruptly. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
+For producing demo/debugging videos people can actually follow: marks pre-action waiting as dead air, records action bounding boxes, and renders highlights/final holds into the video after the test run. Enable it conditionally (e.g. `!!process.env.VIDEO_MODE && videoMode()`) together with Playwright's `video: "on"` and a generous `actionTimeout`.
+
+```ts
+await using page = await addPlugins({
+  page: basePage,
+  testInfo,
+  plugins: [
+    videoMode({
+      highlight: { mode: "pointer", duration: 1000 },
+      finalHold: 3000,
+      deadAirThreshold: 300,
+      skipMethods: ["waitFor"],
+      skipStackFrames: ["test-helpers.ts"], // don't annotate internal login/setup helpers
+    }),
+  ],
+});
+
+// Use page.videoMode for invisible setup/bookkeeping that should be marked as
+// dead air instead of highlighted in video mode.
+await page.videoMode.deadAir(async () => {
+  await page.goto("/login");
+  await page.locator("#email").fill("demo@example.com");
+});
+
+const videoPaths = page.videoMode.outputPaths();
+const videoMetadata = await page.videoMode.metadata();
+console.log(videoPaths.rendered);
+console.log(videoMetadata.highlights.length);
+
+page.videoMode.setStartTime();
+await page.locator("#important-flow").click();
+page.videoMode.setEndTime();
+```
+
+When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. The frame-stepper stores its active video and frame in the URL, so links like `video-mode.html?active=rendered&frame=28` reopen the same frame. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
+
+`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
 
 ```ts
 videoMode({
-  pauseBefore: 1000,
-  pauseAfterTest: 3000,
-  highlightStyle: "3px solid gold",
-  skipMethods: ["waitFor"],
-  skipStackFrames: ["test-helpers.ts"], // don't slow down internal login/setup helpers
+  highlight: { mode: "outline", style: "1px solid yellow" },
 });
 ```
+
+Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and records the action target immediately before the action.
 
 ### llmRecover
 
@@ -216,9 +252,9 @@ export default defineConfig({
 
 ## Writing your own plugin
 
-**Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (page mutation around actions + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.
+**Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (video annotations/artifacts + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.
 
-A plugin is a name plus optional `middleware` and `testLifecycle` hooks:
+A plugin is a name plus optional `middleware`, `testLifecycle`, and `pageExtension` hooks:
 
 ```ts
 import type { Plugin } from "middlewright";
@@ -249,9 +285,35 @@ export const slowActionLogger = (thresholdMs = 2000): Plugin => ({
 });
 ```
 
+Use `pageExtension` for explicit controls tests can call through the page returned from `addPlugins`:
+
+```ts
+export const debugTools = (): Plugin<{
+  debugTools: {
+    title(): string;
+  };
+}> => ({
+  name: "debug-tools",
+  pageExtension: ({ testInfo }) => ({
+    debugTools: {
+      title: () => testInfo.title,
+    },
+  }),
+});
+
+await using page = await addPlugins({
+  page: basePage,
+  testInfo,
+  plugins: [debugTools()],
+});
+
+expect(page.debugTools.title()).toBe(testInfo.title);
+```
+
 Notes for plugin authors:
 
 - Middleware runs in registration order; the first plugin in the array is outermost. Error-enriching plugins (like `uiErrorReporter`) should generally be registered *before* the plugins whose errors they enrich, and recovery plugins (like `llmRecover`) first of all, so they see fully-enriched errors.
+- Keep page extensions namespaced (`page.videoMode`, `page.debugTools`) so plugin controls do not collide with Playwright's own `Page` methods or other plugins.
 - Inside middleware, use the `_original` methods (`locator.waitFor_original(...)` etc. — see the `LocatorWithOriginal` type) when you need to perform locator actions *without* re-entering the middleware chain.
 - `adjustError(error, infoLines, filterFile?)` appends colored info lines to an error message and optionally scrubs your plugin's frames from the stack trace.
 

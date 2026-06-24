@@ -71,10 +71,24 @@ export type ActionContext = {
   args: unknown[];
   page: Page;
   testInfo: TestInfo;
+  timing: ActionTiming;
+};
+
+export type ActionMiddlewareTiming = {
+  name: string;
+  startedAt: number;
+  endedAt?: number;
+};
+
+export type ActionTiming = {
+  actionStartedAt: number;
+  attachedAt?: number;
+  attachedAtStart: boolean;
+  middlewares: ActionMiddlewareTiming[];
 };
 
 /** Function that calls the next middleware or the original action */
-export type NextFn = () => Promise<unknown>;
+export type NextFn = (args?: unknown[]) => Promise<unknown>;
 
 /** Middleware function - wraps an action, must call next() */
 export type ActionMiddleware = (ctx: ActionContext, next: NextFn) => Promise<unknown>;
@@ -82,26 +96,62 @@ export type ActionMiddleware = (ctx: ActionContext, next: NextFn) => Promise<unk
 export type TestLifecycleEvents = {
   beforeTest: { page: Page; testInfo: TestInfo };
   afterTest: { page: Page; testInfo: TestInfo };
+  afterTestFinalize: { page: Page; testInfo: TestInfo };
 };
 
-export type Plugin = {
+export type PageExtensionContext = {
+  page: Page;
+  testInfo: TestInfo;
+};
+
+export type Plugin<PageExtension extends object = {}> = {
   name: string;
   /** Middleware to wrap locator actions. Called in registration order. */
   middleware?: ActionMiddleware;
   /** Subscribe to test lifecycle events */
   testLifecycle?: (emitter: Emittery<TestLifecycleEvents>) => void | (() => void);
+  /** Add explicit test controls to the page returned from addPlugins. */
+  pageExtension?: (ctx: PageExtensionContext) => PageExtension;
 };
 
 const PLUGIN_STATE = Symbol("playwrightPluginState");
 
 type PluginState = {
-  actionMiddlewares: ActionMiddleware[];
+  actionMiddlewares: RegisteredActionMiddleware[];
   lifecycleEmitter: Emittery<TestLifecycleEvents>;
   lifecycleCleanups: (() => void)[];
   testInfo: TestInfo;
 };
 
-type PageWithPlugins = Page & {
+type RegisteredActionMiddleware = {
+  name: string;
+  middleware: ActionMiddleware;
+};
+
+type MaybePlugin = Plugin<object> | false | null | undefined;
+
+type PluginPageExtension<T> = T extends Plugin<infer PageExtension> ? PageExtension : {};
+
+type PluginPageExtensionForEntry<T> = [Extract<T, Plugin<object>>] extends [never]
+  ? {}
+  : [Exclude<T, Plugin<object>>] extends [never]
+    ? PluginPageExtension<T>
+    : Partial<PluginPageExtension<T>>;
+
+type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (
+  value: infer Intersection,
+) => void
+  ? Intersection
+  : never;
+
+type PageExtensions<T extends readonly MaybePlugin[]> = UnionToIntersection<
+  {
+    [Index in keyof T]: PluginPageExtensionForEntry<T[Index]>;
+  }[number]
+> &
+  object;
+
+type PageWithPlugins<PageExtension extends object = {}> = Page & PageExtension & {
   [PLUGIN_STATE]: PluginState;
   [Symbol.asyncDispose]: () => Promise<void>;
 };
@@ -130,12 +180,12 @@ const getPluginState = (page: Page): PluginState | undefined => {
  * });
  * ```
  */
-export const addPlugins = async (params: {
+export const addPlugins = async <const Plugins extends readonly MaybePlugin[]>(params: {
   page: Page;
   testInfo: TestInfo;
-  plugins: (Plugin | false | null | undefined)[];
+  plugins: Plugins;
   boxedStackPrefixes?: (defaults: string[]) => string[];
-}): Promise<PageWithPlugins> => {
+}): Promise<PageWithPlugins<PageExtensions<Plugins>>> => {
   const { page, testInfo, plugins, boxedStackPrefixes } = params;
   // Patch Locator prototype once globally
   patchLocatorPrototype(page, boxedStackPrefixes);
@@ -153,7 +203,10 @@ export const addPlugins = async (params: {
     if (!plugin) continue;
 
     if (plugin.middleware) {
-      state.actionMiddlewares.push(plugin.middleware);
+      state.actionMiddlewares.push({
+        middleware: plugin.middleware,
+        name: plugin.name,
+      });
     }
 
     if (plugin.testLifecycle) {
@@ -162,8 +215,15 @@ export const addPlugins = async (params: {
     }
   }
 
-  const pageWithPlugins = page as PageWithPlugins;
+  const pageWithPlugins = page as PageWithPlugins<PageExtensions<Plugins>>;
   pageWithPlugins[PLUGIN_STATE] = state;
+
+  for (const plugin of plugins) {
+    if (!plugin) continue;
+    if (!plugin.pageExtension) continue;
+
+    Object.assign(pageWithPlugins, plugin.pageExtension({ page, testInfo }));
+  }
 
   // Emit beforeTest
   await state.lifecycleEmitter.emitSerial("beforeTest", { page, testInfo });
@@ -171,6 +231,7 @@ export const addPlugins = async (params: {
   // Add async dispose
   pageWithPlugins[Symbol.asyncDispose] = async () => {
     await state.lifecycleEmitter.emitSerial("afterTest", { page, testInfo });
+    await state.lifecycleEmitter.emitSerial("afterTestFinalize", { page, testInfo });
     state.lifecycleCleanups.forEach((cleanup) => cleanup());
   };
 
@@ -214,6 +275,52 @@ const loadSetBoxedStackPrefixes = (corePkg: string): ((prefixes: string[]) => vo
   return null;
 };
 
+const locatorIsAttached = async (locator: Locator) => {
+  try {
+    return (await locator.count()) > 0;
+  } catch {
+    return false;
+  }
+};
+
+const observeAttachedAt = (
+  locator: Locator,
+  timing: ActionTiming,
+  pollIntervalMs = 50,
+) => {
+  let stopped = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const poll = async () => {
+    if (stopped || timing.attachedAt !== undefined) {
+      return;
+    }
+
+    const attached = await locatorIsAttached(locator);
+    if (stopped || timing.attachedAt !== undefined) {
+      return;
+    }
+
+    if (attached) {
+      timing.attachedAt = performance.now();
+      return;
+    }
+
+    timeout = setTimeout(() => {
+      void poll();
+    }, pollIntervalMs);
+  };
+
+  void poll();
+
+  return () => {
+    stopped = true;
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  };
+};
+
 /** Patch Locator prototype to run middleware. Safe to call multiple times. */
 const patchLocatorPrototype = (
   page: Page,
@@ -254,13 +361,25 @@ const patchLocatorPrototype = (
       this: LocatorWithOriginal,
       ...args: unknown[]
     ): Promise<unknown> {
-      const callOriginal = () => (this[`${method}_original`] as Function)(...args);
+      let currentArgs = args;
+      const callOriginal = () => (this[`${method}_original`] as Function)(...currentArgs);
 
       // Pages that never had plugins added (e.g. a second page in the same
       // worker) fall through to the original implementation.
       const state = getPluginState(this.page());
       if (!state) return callOriginal();
       const actionMiddlewares = state.actionMiddlewares;
+      const actionStartedAt = performance.now();
+      const attachedAtStart = await locatorIsAttached(this);
+      const timing: ActionTiming = {
+        actionStartedAt,
+        attachedAt: attachedAtStart ? actionStartedAt : undefined,
+        attachedAtStart,
+        middlewares: [],
+      };
+      const stopObservingAttached = attachedAtStart
+        ? () => {}
+        : observeAttachedAt(this, timing);
 
       const ctx: ActionContext = {
         locator: this,
@@ -268,19 +387,38 @@ const patchLocatorPrototype = (
         args,
         page: this.page(),
         testInfo: state.testInfo,
+        timing,
       };
 
       // Build middleware chain - each middleware calls next() to continue
       let index = 0;
-      const next: NextFn = async () => {
+      const next: NextFn = async (nextArgs) => {
+        if (nextArgs) {
+          currentArgs = nextArgs;
+          ctx.args = nextArgs;
+        }
+
         if (index < actionMiddlewares.length) {
-          const middleware = actionMiddlewares[index++];
-          return middleware(ctx, next);
+          const { middleware, name } = actionMiddlewares[index++];
+          const middlewareTiming: ActionMiddlewareTiming = {
+            name,
+            startedAt: performance.now(),
+          };
+          timing.middlewares.push(middlewareTiming);
+          try {
+            return await middleware(ctx, next);
+          } finally {
+            middlewareTiming.endedAt = performance.now();
+          }
         }
         return callOriginal();
       };
 
-      return next();
+      try {
+        return await next();
+      } finally {
+        stopObservingAttached();
+      }
     };
 
     Object.defineProperty(locatorPrototype, method, { value });
