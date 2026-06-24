@@ -737,11 +737,11 @@ test("uses a normal pointer tail after text cursor holds", async ({
   };
 
   expect(textCursorPixelCount(fillTextFrame, fillBox)).toBeGreaterThan(35);
-  expect(textCursorTopCapPixelCount(fillTextFrame, fillBox)).toBeGreaterThan(5);
+  expect(pointerTailPixelCount(fillTextFrame, fillBox)).toBeLessThan(10);
   expect(textCursorTopCapPixelCount(fillPointerTailFrame, fillBox)).toBeLessThan(3);
   expect(pointerTailPixelCount(fillPointerTailFrame, fillBox)).toBeGreaterThan(20);
   expect(textCursorPixelCount(typeTextFrame, typeBox)).toBeGreaterThan(35);
-  expect(textCursorTopCapPixelCount(typeTextFrame, typeBox)).toBeGreaterThan(5);
+  expect(pointerTailPixelCount(typeTextFrame, typeBox)).toBeLessThan(10);
   expect(textCursorTopCapPixelCount(typePointerTailFrame, typeBox)).toBeLessThan(3);
   expect(pointerTailPixelCount(typePointerTailFrame, typeBox)).toBeGreaterThan(20);
 });
