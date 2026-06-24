@@ -711,6 +711,105 @@ test("uses a normal pointer tail after text cursor holds", async ({
   expect(pointerTailPixelCount(typePointerTailFrame, typeBox)).toBeGreaterThan(20);
 });
 
+test("does not replay action frames when a hold overlaps the next highlight", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html,
+        body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+        }
+        body {
+          background: rgb(0, 180, 0);
+        }
+        body[data-phase="transient"] {
+          background: rgb(220, 0, 0);
+        }
+        input,
+        button {
+          border: 0;
+          box-sizing: border-box;
+          font: 24px sans-serif;
+          height: 70px;
+          position: absolute;
+          top: 60px;
+          width: 180px;
+        }
+        input {
+          left: 80px;
+        }
+        button {
+          background: rgb(0, 80, 255);
+          color: white;
+          left: 560px;
+        }
+      </style>
+      <input id="name" aria-label="name" />
+      <button id="run">run</button>
+      <script>
+        document.body.dataset.phase = "stable";
+        document.querySelector("#name").addEventListener("input", () => {
+          document.body.dataset.phase = "transient";
+          document.body.dataset.transientSeen = "true";
+          setTimeout(() => {
+            document.body.dataset.phase = "stable";
+          }, 260);
+        });
+        document.querySelector("#run").addEventListener("click", () => {
+          document.body.dataset.clicked = "true";
+        });
+      </script>
+    `);
+
+    await plugged.locator("#name").fill("Ada");
+    await expect(plugged.locator("body")).toHaveAttribute("data-transient-seen", "true");
+    await expect(plugged.locator("body")).toHaveAttribute("data-phase", "stable");
+    await plugged.locator("#run").click();
+    await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
+    await plugged.waitForTimeout(100);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  const clickHighlight = metadata.highlights.find((highlight) => highlight.method === "click")!;
+  expect(fillHighlight).toBeDefined();
+  expect(clickHighlight).toBeDefined();
+  expect(fillHighlight.end).toBeGreaterThan(clickHighlight.start);
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
+  const afterFillHoldFrame = await videoFrame(
+    paths.rendered,
+    fillStart + highlightDurationMs + 80,
+  );
+  const center = averagePixel(afterFillHoldFrame, {
+    x: Math.round(afterFillHoldFrame.width / 2),
+    y: Math.round(afterFillHoldFrame.height / 2),
+  });
+
+  expect(center).toMatchObject({
+    blue: expect.any(Number),
+    green: expect.any(Number),
+    red: expect.any(Number),
+  });
+  expect(center.green).toBeGreaterThan(center.red + 80);
+});
+
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
   page,
 }, testInfo) => {

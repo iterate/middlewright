@@ -739,7 +739,10 @@ const videoPieces = (options: {
       (highlight) => highlight.start >= segment.start && highlight.start < segment.end,
     );
 
-    for (const highlight of highlights) {
+    for (let index = 0; index < highlights.length; index += 1) {
+      const highlight = highlights[index];
+      const nextHighlight = highlights[index + 1];
+
       if (highlight.start > cursor) {
         pieces.push({ end: highlight.start, speed: segment.speed, start: cursor });
       }
@@ -756,7 +759,13 @@ const videoPieces = (options: {
         pieces.push({ end: frameEnd, highlight, speed: segment.speed, start: frameStart });
       }
 
-      cursor = highlight.start;
+      let nextCursor = Math.max(highlight.start, highlight.actionEnd || highlight.start);
+
+      if (nextHighlight && highlight.end > nextHighlight.start) {
+        nextCursor = Math.max(nextCursor, nextHighlight.start);
+      }
+
+      cursor = Math.min(segment.end, nextCursor);
     }
 
     if (segment.end > cursor) {
