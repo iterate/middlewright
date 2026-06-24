@@ -282,6 +282,60 @@ test("renders only the selected video source range", async ({ page }, testInfo) 
   expect(Math.abs(renderedDuration - expectedRenderedDuration)).toBeLessThan(700);
 });
 
+test("skips rendering an empty selected video source range", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: false,
+  });
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  console.warn = (...args) => {
+    warnings.push(args.map(String).join(" "));
+    originalWarn(...args);
+  };
+
+  try {
+    {
+      await using plugged = await addPlugins({
+        page,
+        testInfo,
+        plugins: [video],
+      });
+      await plugged.setContent(`
+        <main style="font: 24px sans-serif">empty source range</main>
+      `);
+
+      plugged.videoMode.setStartTime(0);
+      plugged.videoMode.setEndTime(0);
+      await plugged.waitForTimeout(100);
+    }
+
+    const metadata = await video.metadata();
+    const paths = video.outputPaths();
+
+    expect(metadata).toMatchObject({
+      outputs: {
+        player: "video-mode.html",
+        raw: "video-raw.webm",
+      },
+      sourceRange: {
+        end: 0,
+        start: 0,
+      },
+    });
+    expect(metadata.outputs.rendered).toBeUndefined();
+    expect(warnings).toEqual([
+      expect.stringContaining("videoMode source range is empty: start 0ms must be before end 0ms"),
+    ]);
+    await expect(stat(paths.raw)).resolves.toMatchObject({ size: expect.any(Number) });
+    await expect(stat(paths.rendered)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(paths.player, "utf8")).resolves.toContain('src="video-raw.webm"');
+    await expect(readFile(paths.player, "utf8")).resolves.not.toContain('src="video-rendered.webm"');
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test("renders calibrated highlight boxes on a paused pre-click frame", async ({ page }, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({

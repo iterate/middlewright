@@ -1554,16 +1554,20 @@ const renderVideo = async (options: {
   thresholdMs: number | undefined;
 }) => {
   const info = await videoInfo(options.inputPath);
-  const rangeStart = Math.max(0, Math.min(Math.round(options.sourceRange.start || 0), info.durationMs));
+  const sourceRangeStart = options.sourceRange.start === undefined ? 0 : options.sourceRange.start;
+  const sourceRangeEnd =
+    options.sourceRange.end === undefined ? info.durationMs : options.sourceRange.end;
+  const rangeStart = Math.max(0, Math.min(Math.round(sourceRangeStart), info.durationMs));
   const rangeEnd = Math.max(
     0,
-    Math.min(Math.round(options.sourceRange.end || info.durationMs), info.durationMs),
+    Math.min(Math.round(sourceRangeEnd), info.durationMs),
   );
 
   if (rangeEnd <= rangeStart) {
-    throw new Error(
+    console.warn(
       `videoMode source range is empty: start ${rangeStart}ms must be before end ${rangeEnd}ms`,
     );
+    return false;
   }
 
   const highlightInputs = options.highlights
