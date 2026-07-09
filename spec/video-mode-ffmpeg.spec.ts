@@ -1025,12 +1025,30 @@ const renderedHighlightStartWithoutDeadAir = (
   highlight: { start: number },
   highlights: { end: number; start: number }[],
 ) => {
-  return (
-    highlight.start +
-    highlights
-      .filter((candidate) => candidate.start < highlight.start)
-      .reduce((duration, candidate) => duration + candidate.end - candidate.start, 0)
-  );
+  const ordered = [...highlights].sort((a, b) => a.start - b.start);
+  let renderedStart = 0;
+  let previous: { end: number; start: number } | undefined;
+
+  for (const candidate of ordered) {
+    if (!previous) {
+      renderedStart = candidate.start;
+    } else if (previous.end > candidate.start) {
+      // the previous highlight's hold overlaps this one's source start, so the
+      // renderer starts this hold the moment the previous hold ends and drops
+      // the source gap between the actions (videoPieces overlap rule)
+      renderedStart += previous.end - previous.start;
+    } else {
+      renderedStart += previous.end - previous.start + candidate.start - previous.start;
+    }
+
+    if (candidate === highlight) {
+      return renderedStart;
+    }
+
+    previous = candidate;
+  }
+
+  throw new Error("highlight not present in highlights");
 };
 
 const videoInfo = async (path: string) => {
