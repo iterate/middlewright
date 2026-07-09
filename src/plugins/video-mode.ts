@@ -159,6 +159,46 @@ export type VideoModeOptions = {
    * so they fit within this duration.
    */
   deadAirThreshold?: number;
+  /**
+   * Trim the blank "startup" lead-in (about:blank, the loading shell, the
+   * pre-hydration app frame) so the video opens on real content instead of a
+   * white screen. Applies only when the start time hasn't been set explicitly —
+   * an explicit `setStartTime()` always wins.
+   *
+   * Two layered strategies, in precedence order:
+   * 1. `selector` (opt-in): wait for that element to become visible *once* and
+   *    start the video from that moment. Deterministic when the app has a known
+   *    "ready" marker.
+   * 2. Pixel fallback (on by default): detect where the leading blank frames end
+   *    in the recorded video itself — no app cooperation needed — and start
+   *    there, but only when the blank lead-in is at least `minLeadInMs`.
+   *
+   * Opt-in (default off) so it never silently shifts the timeline of a video
+   * whose frames you assert on. `true` enables the pixel fallback with default
+   * tuning; pass an object to add a `selector` or tune the fallback.
+   */
+  autoStart?: boolean | VideoModeAutoStartOptions;
+};
+
+export type VideoModeAutoStartOptions = {
+  /**
+   * CSS selector for the app's first meaningful element. When set, the video
+   * starts the moment it first becomes visible (waited for live, once). Falls
+   * back to the pixel detector if it never appears within `selectorTimeoutMs`.
+   */
+  selector?: string;
+  /** How long to wait for `selector` before giving up on it (ms). Default: 30000 */
+  selectorTimeoutMs?: number;
+  /**
+   * Detect and trim the leading blank period from the recorded pixels when no
+   * `selector` (or explicit start) applies. Default: true.
+   */
+  pixelFallback?: boolean;
+  /**
+   * Only trim when the detected blank lead-in is at least this long (ms). Guards
+   * against nudging the start of videos that were never really blank. Default: 1000
+   */
+  minLeadInMs?: number;
 };
 
 type VideoModeState = {
@@ -274,6 +314,125 @@ const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
   }
 
   return thresholdMs;
+};
+
+type ResolvedAutoStart = {
+  selector?: string;
+  selectorTimeoutMs: number;
+  pixelFallback: boolean;
+  minLeadInMs: number;
+};
+
+const resolveAutoStart = (autoStart: VideoModeOptions["autoStart"]): ResolvedAutoStart => {
+  const raw = autoStart === undefined ? false : autoStart;
+
+  if (raw === false) {
+    return { selectorTimeoutMs: 30_000, pixelFallback: false, minLeadInMs: 1000 };
+  }
+
+  const options = raw === true ? {} : raw;
+
+  if (options.selector !== undefined && options.selector.length === 0) {
+    throw new Error("videoMode autoStart.selector must be a non-empty string");
+  }
+
+  return {
+    selector: options.selector,
+    selectorTimeoutMs: resolveNonNegativeNumber({
+      defaultValue: 30_000,
+      name: "videoMode autoStart.selectorTimeoutMs",
+      value: options.selectorTimeoutMs,
+    }),
+    // A `selector` alone still leaves the pixel detector as a fallback for when
+    // it never appears, unless the caller explicitly opts out.
+    pixelFallback: options.pixelFallback === undefined ? true : options.pixelFallback,
+    minLeadInMs: resolveNonNegativeNumber({
+      defaultValue: 1000,
+      name: "videoMode autoStart.minLeadInMs",
+      value: options.minLeadInMs,
+    }),
+  };
+};
+
+// Blank-lead-in detection tuning. The recorded startup is a run of *identical*
+// frames — the browser paints nothing new (about:blank, then a static loading
+// shell) until content arrives. So the signal isn't how "busy" a frame is (a
+// letterbox bar or a solid-but-dark shell would fool that); it's the first frame
+// that *differs* from the opening frame. We decode a coarse, tiny greyscale strip
+// of the opening seconds and find where it first changes and stays changed.
+const AUTO_START_SAMPLE_FPS = 5;
+const AUTO_START_SAMPLE_SIZE = 48;
+const AUTO_START_MAX_SCAN_MS = 30_000;
+// Mean per-pixel greyscale delta (0-255) above which a frame counts as "changed"
+// from the opening frame. Comfortably above VP8 quantisation noise on a static
+// scene (which stays ~0) and below the jump when real content paints.
+const AUTO_START_DIFF_THRESHOLD = 1.5;
+
+const frameMeanAbsDiff = (frame: Buffer, reference: Buffer) => {
+  let sum = 0;
+  for (let index = 0; index < frame.length; index += 1) {
+    sum += Math.abs(frame[index] - reference[index]);
+  }
+  return sum / frame.length;
+};
+
+/**
+ * Return the timestamp (ms) where the leading blank frames end and the screen
+ * first changes (content paints), or undefined when the video never opens with a
+ * static lead-in (nothing to trim).
+ */
+const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undefined> => {
+  const size = AUTO_START_SAMPLE_SIZE;
+  const frameSize = size * size;
+  let stdout: Buffer;
+  try {
+    const result = await execFile(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        inputPath,
+        "-vf",
+        `fps=${AUTO_START_SAMPLE_FPS},scale=${size}:${size},format=gray`,
+        "-t",
+        formatSeconds(AUTO_START_MAX_SCAN_MS),
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "gray",
+        "pipe:1",
+      ],
+      { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+    );
+    stdout = result.stdout as Buffer;
+  } catch {
+    // Detection is best-effort; a decode failure just means "don't trim".
+    return undefined;
+  }
+
+  const frameCount = Math.floor(stdout.length / frameSize);
+  if (frameCount < 2) {
+    return undefined;
+  }
+
+  const firstFrame = stdout.subarray(0, frameSize);
+  const hasChanged = (index: number) =>
+    frameMeanAbsDiff(
+      stdout.subarray(index * frameSize, (index + 1) * frameSize),
+      firstFrame,
+    ) > AUTO_START_DIFF_THRESHOLD;
+
+  // First frame that differs from the opening frame *and* stays changed (two
+  // consecutive samples), so a single decode blip can't trip it.
+  for (let index = 1; index < frameCount - 1; index += 1) {
+    if (hasChanged(index) && hasChanged(index + 1)) {
+      return Math.round((index / AUTO_START_SAMPLE_FPS) * 1000);
+    }
+  }
+
+  return undefined;
 };
 
 const resolveNonNegativeNumber = (options: {
@@ -1835,6 +1994,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
+  const autoStart = resolveAutoStart(options.autoStart);
   const state: VideoModeState = {
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -1949,7 +2109,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
 
     testLifecycle: (emitter) => {
-      const offBeforeTest = emitter.on("beforeTest", () => {
+      const offBeforeTest = emitter.on("beforeTest", ({ page }) => {
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
@@ -1964,13 +2124,28 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         } else {
           state.startedAt = performance.now();
         }
+
+        // Start the video from the moment the app's "ready" element first shows.
+        // Kicked off now (before the test navigates), it resolves whenever the
+        // element appears; a timeout or a page close just leaves the pixel
+        // fallback to handle it. Never let it reject the test.
+        if (autoStart.selector) {
+          page
+            .locator(autoStart.selector)
+            .first()
+            .waitFor({ state: "visible", timeout: autoStart.selectorTimeoutMs })
+            .then(() => {
+              if (state.sourceRange.start === undefined) controls.setStartTime();
+            })
+            .catch(() => {});
+        }
       });
 
       const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
-        const sourceRange = metadataBeforeVideo.sourceRange;
+        let sourceRange = metadataBeforeVideo.sourceRange;
         const video = page.video();
 
         if (video) {
@@ -1989,6 +2164,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             contentType: "video/webm",
             path: paths.raw,
           });
+
+          // No explicit or selector-driven start: fall back to detecting where
+          // the blank startup ends in the recorded pixels, and trim to there
+          // when the lead-in is long enough to be worth removing.
+          if (autoStart.pixelFallback && state.sourceRange.start === undefined) {
+            const detectedStart = await detectBlankLeadInEndMs(paths.raw);
+            if (detectedStart !== undefined && detectedStart >= autoStart.minLeadInMs) {
+              state.sourceRange.start = detectedStart;
+              sourceRange = metadataFor(state).sourceRange;
+            }
+          }
 
           if (
             highlights.length > 0 ||

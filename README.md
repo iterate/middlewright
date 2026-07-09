@@ -168,6 +168,23 @@ page.videoMode.setEndTime();
 
 When Playwright video recording is enabled, `videoMode` saves `video-raw.webm`, uses `ffmpeg` to write `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. The frame-stepper stores its active video and frame in the URL, so links like `video-mode.html?active=rendered&frame=28` reopen the same frame. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
 
+#### Trimming the blank startup lead-in (`autoStart`)
+
+Recording begins at browser-context creation, so a video usually opens with a few seconds of `about:blank` + loading shell before the app paints. Rather than calling `setStartTime()` by hand in every test, `autoStart` finds where that lead-in ends and starts the video on real content:
+
+```ts
+videoMode({
+  // start when a known "ready" element first becomes visible; otherwise fall
+  // back to detecting where the blank frames end in the recording itself
+  autoStart: { selector: '[data-app-ready]' },
+});
+
+// …or just the zero-config pixel detector:
+videoMode({ autoStart: true });
+```
+
+Two strategies apply in precedence order: (1) if you pass a `selector`, the video starts the moment it first becomes visible (waited for once, live); (2) otherwise — or if that selector never appears — a pixel fallback decodes a coarse strip of the opening seconds and finds the first frame that *differs* from the opening frame (the moment the static blank lead-in ends), starting there only when the lead-in is at least `minLeadInMs` (default `1000`). An explicit `setStartTime()` always wins over both. `autoStart` is **off by default** because it can shift the timeline of a video whose frames you assert on; opt in with `true` or an options object (`{ selector, selectorTimeoutMs, pixelFallback, minLeadInMs }`).
+
 `video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
 
 ```ts
