@@ -2149,6 +2149,15 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           // when the lead-in is long enough to be worth removing. The second
           // `undefined` check guards the window across the ffmpeg await: if a
           // selector start landed meanwhile, it wins.
+          //
+          // This start is in the raw recording's timebase (t=0 = context
+          // creation), which is exactly what the ffmpeg trim wants. Highlights
+          // and dead-air are in videoMode time (from `startedAt` at plugin
+          // construction); the two origins differ only by the fixture-setup gap
+          // between context creation and construction — sub-frame in practice and
+          // independent of how long the app takes to paint — so annotations stay
+          // aligned with the trimmed video. (`setStartTime` instead shares the
+          // videoMode timebase, so its trim and annotations shift together.)
           if (trimStart.detectBlank && state.sourceRange.start === undefined) {
             const detectedStart = await detectBlankLeadInEndMs(paths.raw);
             if (
