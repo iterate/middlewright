@@ -159,7 +159,26 @@ export type VideoModeOptions = {
    * so they fit within this duration.
    */
   deadAirThreshold?: number;
+  /**
+   * Where the rendered video starts, trimming the blank "startup" lead-in
+   * (about:blank, the loading shell, the pre-hydration app frame) so it opens on
+   * real content instead of a white screen. An explicit `setStartTime()` always
+   * wins over this.
+   *
+   * - `"auto"` (default): pick a sensible strategy — currently the blank
+   *   detector below. Chosen so consumers get lead-in trimming just by upgrading.
+   * - `"detect-blank"`: find where the leading blank frames end in the recorded
+   *   pixels (the first frame that differs from the opening frame) and start
+   *   there, when that lead-in is long enough to be worth trimming.
+   * - `["selector", css]`: start the moment `css` first becomes visible (waited
+   *   for live, once); falls back to blank detection if it never appears.
+   * - `"never"`: don't trim. Use this for a video whose exact frames you assert
+   *   on, since trimming shifts the timeline.
+   */
+  trimStart?: VideoModeTrimStart;
 };
+
+export type VideoModeTrimStart = "auto" | "detect-blank" | "never" | ["selector", string];
 
 type VideoModeState = {
   deadAirDepth: number;
@@ -274,6 +293,123 @@ const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
   }
 
   return thresholdMs;
+};
+
+type ResolvedTrimStart = {
+  selector?: string;
+  detectBlank: boolean;
+};
+
+// A `selector` falls back to blank detection if it never shows, so a bad
+// selector can't leave the video opening on the blank lead-in.
+const TRIM_START_SELECTOR_TIMEOUT_MS = 30_000;
+// Only trim when the detected blank lead-in is at least this long, so a video
+// that was never really blank isn't nudged.
+const TRIM_START_MIN_LEAD_IN_MS = 1000;
+
+const resolveTrimStart = (trimStart: VideoModeOptions["trimStart"]): ResolvedTrimStart => {
+  const value = trimStart === undefined ? "auto" : trimStart;
+
+  if (Array.isArray(value)) {
+    const [kind, selector] = value;
+    if (kind !== "selector" || typeof selector !== "string" || selector.length === 0) {
+      throw new Error('videoMode trimStart tuple must be ["selector", "<css>"]');
+    }
+    return { selector, detectBlank: true };
+  }
+
+  switch (value) {
+    case "never":
+      return { detectBlank: false };
+    case "auto":
+    case "detect-blank":
+      return { detectBlank: true };
+    default:
+      throw new Error(
+        'videoMode trimStart must be "auto", "detect-blank", "never", or ["selector", "<css>"]',
+      );
+  }
+};
+
+// Blank-lead-in detection tuning. The recorded startup is a run of *identical*
+// frames — the browser paints nothing new (about:blank, then a static loading
+// shell) until content arrives. So the signal isn't how "busy" a frame is (a
+// letterbox bar or a solid-but-dark shell would fool that); it's the first frame
+// that *differs* from the opening frame. We decode a coarse, tiny greyscale strip
+// of the opening seconds and find where it first changes and stays changed.
+const AUTO_START_SAMPLE_FPS = 5;
+const AUTO_START_SAMPLE_SIZE = 48;
+const AUTO_START_MAX_SCAN_MS = 30_000;
+// Mean per-pixel greyscale delta (0-255) above which a frame counts as "changed"
+// from the opening frame. Comfortably above VP8 quantisation noise on a static
+// scene (which stays ~0) and below the jump when real content paints.
+const AUTO_START_DIFF_THRESHOLD = 1.5;
+
+const frameMeanAbsDiff = (frame: Buffer, reference: Buffer) => {
+  let sum = 0;
+  for (let index = 0; index < frame.length; index += 1) {
+    sum += Math.abs(frame[index] - reference[index]);
+  }
+  return sum / frame.length;
+};
+
+/**
+ * Return the timestamp (ms) where the leading blank frames end and the screen
+ * first changes (content paints), or undefined when the video never opens with a
+ * static lead-in (nothing to trim).
+ */
+const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undefined> => {
+  const size = AUTO_START_SAMPLE_SIZE;
+  const frameSize = size * size;
+  let stdout: Buffer;
+  try {
+    const result = await execFile(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        inputPath,
+        "-vf",
+        `fps=${AUTO_START_SAMPLE_FPS},scale=${size}:${size},format=gray`,
+        "-t",
+        formatSeconds(AUTO_START_MAX_SCAN_MS),
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "gray",
+        "pipe:1",
+      ],
+      { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+    );
+    stdout = result.stdout as Buffer;
+  } catch {
+    // Detection is best-effort; a decode failure just means "don't trim".
+    return undefined;
+  }
+
+  const frameCount = Math.floor(stdout.length / frameSize);
+  if (frameCount < 2) {
+    return undefined;
+  }
+
+  const firstFrame = stdout.subarray(0, frameSize);
+  const hasChanged = (index: number) =>
+    frameMeanAbsDiff(
+      stdout.subarray(index * frameSize, (index + 1) * frameSize),
+      firstFrame,
+    ) > AUTO_START_DIFF_THRESHOLD;
+
+  // First frame that differs from the opening frame *and* stays changed (two
+  // consecutive samples), so a single decode blip can't trip it.
+  for (let index = 1; index < frameCount - 1; index += 1) {
+    if (hasChanged(index) && hasChanged(index + 1)) {
+      return Math.round((index / AUTO_START_SAMPLE_FPS) * 1000);
+    }
+  }
+
+  return undefined;
 };
 
 const resolveNonNegativeNumber = (options: {
@@ -1835,6 +1971,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
+  const trimStart = resolveTrimStart(options.trimStart);
   const state: VideoModeState = {
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -1949,7 +2086,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
 
     testLifecycle: (emitter) => {
-      const offBeforeTest = emitter.on("beforeTest", () => {
+      const offBeforeTest = emitter.on("beforeTest", ({ page }) => {
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
@@ -1964,13 +2101,30 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         } else {
           state.startedAt = performance.now();
         }
+
+        // Start the video from the moment the app's "ready" element first shows.
+        // Kicked off now (before the test navigates), it resolves whenever the
+        // element appears; a timeout or a page close just leaves the blank
+        // detector to handle it. Never let it reject the test.
+        if (trimStart.selector) {
+          page
+            .locator(trimStart.selector)
+            .first()
+            .waitFor({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
+            .then(() => {
+              if (state.sourceRange.start === undefined) controls.setStartTime();
+            })
+            .catch(() => {});
+        }
       });
 
       const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
-        const sourceRange = metadataBeforeVideo.sourceRange;
+        // Note: sourceRange is read fresh from state below, not snapshotted here —
+        // a selector `waitFor` can still resolve during the awaits in this handler
+        // and call setStartTime(), and the render must see that.
         const video = page.video();
 
         if (video) {
@@ -1989,6 +2143,34 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             contentType: "video/webm",
             path: paths.raw,
           });
+
+          // No explicit or selector-driven start: fall back to detecting where
+          // the blank startup ends in the recorded pixels, and trim to there
+          // when the lead-in is long enough to be worth removing. The second
+          // `undefined` check guards the window across the ffmpeg await: if a
+          // selector start landed meanwhile, it wins.
+          //
+          // This start is in the raw recording's timebase (t=0 = context
+          // creation), which is exactly what the ffmpeg trim wants. Highlights
+          // and dead-air are in videoMode time (from `startedAt` at plugin
+          // construction); the two origins differ only by the fixture-setup gap
+          // between context creation and construction — sub-frame in practice and
+          // independent of how long the app takes to paint — so annotations stay
+          // aligned with the trimmed video. (`setStartTime` instead shares the
+          // videoMode timebase, so its trim and annotations shift together.)
+          if (trimStart.detectBlank && state.sourceRange.start === undefined) {
+            const detectedStart = await detectBlankLeadInEndMs(paths.raw);
+            if (
+              detectedStart !== undefined &&
+              detectedStart >= TRIM_START_MIN_LEAD_IN_MS &&
+              state.sourceRange.start === undefined
+            ) {
+              state.sourceRange.start = detectedStart;
+            }
+          }
+
+          // Read fresh, so an explicit, selector, or pixel-detected start all show.
+          const sourceRange = metadataFor(state).sourceRange;
 
           if (
             highlights.length > 0 ||
