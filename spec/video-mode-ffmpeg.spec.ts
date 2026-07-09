@@ -20,7 +20,7 @@ test("writes a rendered video with dead air sped up and highlights added in post
     testInfo,
     plugins: [
       spinnerWaiter(),
-      videoMode({
+      videoMode({ trimStart: "never",
         deadAirThreshold: 300,
         finalHold: 700,
         highlight: { mode: "pointer", duration: 1000 },
@@ -99,7 +99,7 @@ test("writes video-mode artifact files and report player", async ({ page }, test
   const deadAirThresholdMs = 300;
   const finalHoldMs = 500;
   const highlightDurationMs = 600;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     deadAirThreshold: deadAirThresholdMs,
     finalHold: finalHoldMs,
     highlight: { mode: "pointer", duration: highlightDurationMs },
@@ -202,7 +202,7 @@ test("keeps the page open for later afterTest hooks", async ({ page }, testInfo)
       });
     },
   } satisfies Plugin;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: false,
   });
@@ -221,7 +221,7 @@ test("keeps the page open for later afterTest hooks", async ({ page }, testInfo)
 
 test("speeds dead air up instead of cutting through it", async ({ page }, testInfo) => {
   const deadAirThresholdMs = 500;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     deadAirThreshold: deadAirThresholdMs,
     finalHold: 0,
     highlight: { mode: "pointer", duration: 0 },
@@ -293,7 +293,7 @@ test("speeds dead air up instead of cutting through it", async ({ page }, testIn
 });
 
 test("renders only the selected video source range", async ({ page }, testInfo) => {
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: { mode: "pointer", duration: 0 },
   });
@@ -330,7 +330,7 @@ test("renders only the selected video source range", async ({ page }, testInfo) 
 });
 
 test("skips rendering an empty selected video source range", async ({ page }, testInfo) => {
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: false,
   });
@@ -385,7 +385,7 @@ test("skips rendering an empty selected video source range", async ({ page }, te
 
 test("renders calibrated highlight boxes on a paused pre-click frame", async ({ page }, testInfo) => {
   const highlightDurationMs = 900;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: { mode: "outline", duration: highlightDurationMs, style: "8px solid yellow" },
   });
@@ -481,7 +481,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
 
 test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
   const highlightDurationMs = 700;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 900,
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
@@ -554,7 +554,7 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
 
 test("moves the pointer toward the first click after a waitFor", async ({ page }, testInfo) => {
   const highlightDurationMs = 700;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
@@ -646,7 +646,7 @@ test("uses a normal pointer tail after text cursor holds", async ({
   page,
 }, testInfo) => {
   const highlightDurationMs = 1000;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
@@ -750,7 +750,7 @@ test("does not replay action frames when a hold overlaps the next highlight", as
   page,
 }, testInfo) => {
   const highlightDurationMs = 1000;
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
@@ -848,7 +848,7 @@ test("does not replay action frames when a hold overlaps the next highlight", as
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
   page,
 }, testInfo) => {
-  const video = videoMode({
+  const video = videoMode({ trimStart: "never",
     deadAirThreshold: 300,
     finalHold: 0,
     highlight: { mode: "outline", duration: 600, style: "10px solid yellow" },

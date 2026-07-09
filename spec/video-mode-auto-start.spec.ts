@@ -38,7 +38,8 @@ const blankThenContent = (options: { blankMs: number; markerAtMs?: number }) => 
 
 test("trims the blank startup lead-in so the video opens on content", async ({ page }, testInfo) => {
   const blankMs = 2000;
-  const video = videoMode({ finalHold: 0, highlight: false, autoStart: true });
+  // default trimStart is "auto" — no option needed
+  const video = videoMode({ finalHold: 0, highlight: false });
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
     await plugged.setViewportSize({ width: 800, height: 600 });
@@ -70,7 +71,7 @@ test("starts from a selector the moment it becomes visible", async ({ page }, te
   const video = videoMode({
     finalHold: 0,
     highlight: false,
-    autoStart: { selector: "#marker" },
+    trimStart: ["selector", "#marker"],
   });
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
@@ -88,7 +89,7 @@ test("starts from a selector the moment it becomes visible", async ({ page }, te
 });
 
 test("leaves a video that was never blank untrimmed", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 0, highlight: false, autoStart: true });
+  const video = videoMode({ finalHold: 0, highlight: false });
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
     await plugged.setViewportSize({ width: 800, height: 600 });
@@ -102,10 +103,10 @@ test("leaves a video that was never blank untrimmed", async ({ page }, testInfo)
   expect(metadata.sourceRange.start).toBeUndefined();
 });
 
-test("autoStart: false disables trimming even with a long blank lead-in", async ({
+test('trimStart: "never" disables trimming even with a long blank lead-in', async ({
   page,
 }, testInfo) => {
-  const video = videoMode({ finalHold: 0, highlight: false, autoStart: false });
+  const video = videoMode({ finalHold: 0, highlight: false, trimStart: "never" });
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
     await plugged.setViewportSize({ width: 800, height: 600 });

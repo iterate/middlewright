@@ -160,46 +160,25 @@ export type VideoModeOptions = {
    */
   deadAirThreshold?: number;
   /**
-   * Trim the blank "startup" lead-in (about:blank, the loading shell, the
-   * pre-hydration app frame) so the video opens on real content instead of a
-   * white screen. Applies only when the start time hasn't been set explicitly —
-   * an explicit `setStartTime()` always wins.
+   * Where the rendered video starts, trimming the blank "startup" lead-in
+   * (about:blank, the loading shell, the pre-hydration app frame) so it opens on
+   * real content instead of a white screen. An explicit `setStartTime()` always
+   * wins over this.
    *
-   * Two layered strategies, in precedence order:
-   * 1. `selector` (opt-in): wait for that element to become visible *once* and
-   *    start the video from that moment. Deterministic when the app has a known
-   *    "ready" marker.
-   * 2. Pixel fallback (on by default): detect where the leading blank frames end
-   *    in the recorded video itself — no app cooperation needed — and start
-   *    there, but only when the blank lead-in is at least `minLeadInMs`.
-   *
-   * Opt-in (default off) so it never silently shifts the timeline of a video
-   * whose frames you assert on. `true` enables the pixel fallback with default
-   * tuning; pass an object to add a `selector` or tune the fallback.
+   * - `"auto"` (default): pick a sensible strategy — currently the blank
+   *   detector below. Chosen so consumers get lead-in trimming just by upgrading.
+   * - `"detect-blank"`: find where the leading blank frames end in the recorded
+   *   pixels (the first frame that differs from the opening frame) and start
+   *   there, when that lead-in is long enough to be worth trimming.
+   * - `["selector", css]`: start the moment `css` first becomes visible (waited
+   *   for live, once); falls back to blank detection if it never appears.
+   * - `"never"`: don't trim. Use this for a video whose exact frames you assert
+   *   on, since trimming shifts the timeline.
    */
-  autoStart?: boolean | VideoModeAutoStartOptions;
+  trimStart?: VideoModeTrimStart;
 };
 
-export type VideoModeAutoStartOptions = {
-  /**
-   * CSS selector for the app's first meaningful element. When set, the video
-   * starts the moment it first becomes visible (waited for live, once). Falls
-   * back to the pixel detector if it never appears within `selectorTimeoutMs`.
-   */
-  selector?: string;
-  /** How long to wait for `selector` before giving up on it (ms). Default: 30000 */
-  selectorTimeoutMs?: number;
-  /**
-   * Detect and trim the leading blank period from the recorded pixels when no
-   * `selector` (or explicit start) applies. Default: true.
-   */
-  pixelFallback?: boolean;
-  /**
-   * Only trim when the detected blank lead-in is at least this long (ms). Guards
-   * against nudging the start of videos that were never really blank. Default: 1000
-   */
-  minLeadInMs?: number;
-};
+export type VideoModeTrimStart = "auto" | "detect-blank" | "never" | ["selector", string];
 
 type VideoModeState = {
   deadAirDepth: number;
@@ -316,42 +295,40 @@ const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
   return thresholdMs;
 };
 
-type ResolvedAutoStart = {
+type ResolvedTrimStart = {
   selector?: string;
-  selectorTimeoutMs: number;
-  pixelFallback: boolean;
-  minLeadInMs: number;
+  detectBlank: boolean;
 };
 
-const resolveAutoStart = (autoStart: VideoModeOptions["autoStart"]): ResolvedAutoStart => {
-  const raw = autoStart === undefined ? false : autoStart;
+// A `selector` falls back to blank detection if it never shows, so a bad
+// selector can't leave the video opening on the blank lead-in.
+const TRIM_START_SELECTOR_TIMEOUT_MS = 30_000;
+// Only trim when the detected blank lead-in is at least this long, so a video
+// that was never really blank isn't nudged.
+const TRIM_START_MIN_LEAD_IN_MS = 1000;
 
-  if (raw === false) {
-    return { selectorTimeoutMs: 30_000, pixelFallback: false, minLeadInMs: 1000 };
+const resolveTrimStart = (trimStart: VideoModeOptions["trimStart"]): ResolvedTrimStart => {
+  const value = trimStart === undefined ? "auto" : trimStart;
+
+  if (Array.isArray(value)) {
+    const [kind, selector] = value;
+    if (kind !== "selector" || typeof selector !== "string" || selector.length === 0) {
+      throw new Error('videoMode trimStart tuple must be ["selector", "<css>"]');
+    }
+    return { selector, detectBlank: true };
   }
 
-  const options = raw === true ? {} : raw;
-
-  if (options.selector !== undefined && options.selector.length === 0) {
-    throw new Error("videoMode autoStart.selector must be a non-empty string");
+  switch (value) {
+    case "never":
+      return { detectBlank: false };
+    case "auto":
+    case "detect-blank":
+      return { detectBlank: true };
+    default:
+      throw new Error(
+        'videoMode trimStart must be "auto", "detect-blank", "never", or ["selector", "<css>"]',
+      );
   }
-
-  return {
-    selector: options.selector,
-    selectorTimeoutMs: resolveNonNegativeNumber({
-      defaultValue: 30_000,
-      name: "videoMode autoStart.selectorTimeoutMs",
-      value: options.selectorTimeoutMs,
-    }),
-    // A `selector` alone still leaves the pixel detector as a fallback for when
-    // it never appears, unless the caller explicitly opts out.
-    pixelFallback: options.pixelFallback === undefined ? true : options.pixelFallback,
-    minLeadInMs: resolveNonNegativeNumber({
-      defaultValue: 1000,
-      name: "videoMode autoStart.minLeadInMs",
-      value: options.minLeadInMs,
-    }),
-  };
 };
 
 // Blank-lead-in detection tuning. The recorded startup is a run of *identical*
@@ -1994,7 +1971,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
-  const autoStart = resolveAutoStart(options.autoStart);
+  const trimStart = resolveTrimStart(options.trimStart);
   const state: VideoModeState = {
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -2127,13 +2104,13 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
         // Start the video from the moment the app's "ready" element first shows.
         // Kicked off now (before the test navigates), it resolves whenever the
-        // element appears; a timeout or a page close just leaves the pixel
-        // fallback to handle it. Never let it reject the test.
-        if (autoStart.selector) {
+        // element appears; a timeout or a page close just leaves the blank
+        // detector to handle it. Never let it reject the test.
+        if (trimStart.selector) {
           page
-            .locator(autoStart.selector)
+            .locator(trimStart.selector)
             .first()
-            .waitFor({ state: "visible", timeout: autoStart.selectorTimeoutMs })
+            .waitFor({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
             .then(() => {
               if (state.sourceRange.start === undefined) controls.setStartTime();
             })
@@ -2168,9 +2145,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           // No explicit or selector-driven start: fall back to detecting where
           // the blank startup ends in the recorded pixels, and trim to there
           // when the lead-in is long enough to be worth removing.
-          if (autoStart.pixelFallback && state.sourceRange.start === undefined) {
+          if (trimStart.detectBlank && state.sourceRange.start === undefined) {
             const detectedStart = await detectBlankLeadInEndMs(paths.raw);
-            if (detectedStart !== undefined && detectedStart >= autoStart.minLeadInMs) {
+            if (detectedStart !== undefined && detectedStart >= TRIM_START_MIN_LEAD_IN_MS) {
               state.sourceRange.start = detectedStart;
               sourceRange = metadataFor(state).sourceRange;
             }
