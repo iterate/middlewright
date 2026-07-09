@@ -86,6 +86,13 @@ test("starts from a selector the moment it becomes visible", async ({ page }, te
   const metadata = await video.metadata();
   expect(metadata.sourceRange.start).toBeGreaterThan(300);
   expect(metadata.sourceRange.start).toBeLessThan(2200);
+
+  // The selector-driven start must reach renderVideo, not just the metadata:
+  // the rendered clip is meaningfully shorter than the raw recording.
+  const paths = video.outputPaths();
+  const rawDuration = await videoDurationMs(paths.raw);
+  const renderedDuration = await videoDurationMs(paths.rendered);
+  expect(renderedDuration).toBeLessThan(rawDuration - 500);
 });
 
 test("leaves a video that was never blank untrimmed", async ({ page }, testInfo) => {
@@ -118,6 +125,14 @@ test('trimStart: "never" disables trimming even with a long blank lead-in', asyn
   const metadata = await video.metadata();
   expect(metadata.sourceRange.start).toBeUndefined();
 });
+
+const videoDurationMs = async (path: string) => {
+  const { stdout } = await execFile("ffprobe", [
+    "-v", "error", "-show_entries", "format=duration",
+    "-of", "default=nokey=1:noprint_wrappers=1", path,
+  ]);
+  return Math.round(Number(stdout.trim()) * 1000);
+};
 
 const videoInfo = async (path: string) => {
   const { stdout } = await execFile("ffprobe", [

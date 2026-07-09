@@ -2122,7 +2122,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
-        let sourceRange = metadataBeforeVideo.sourceRange;
+        // Note: sourceRange is read fresh from state below, not snapshotted here —
+        // a selector `waitFor` can still resolve during the awaits in this handler
+        // and call setStartTime(), and the render must see that.
         const video = page.video();
 
         if (video) {
@@ -2144,14 +2146,22 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
           // No explicit or selector-driven start: fall back to detecting where
           // the blank startup ends in the recorded pixels, and trim to there
-          // when the lead-in is long enough to be worth removing.
+          // when the lead-in is long enough to be worth removing. The second
+          // `undefined` check guards the window across the ffmpeg await: if a
+          // selector start landed meanwhile, it wins.
           if (trimStart.detectBlank && state.sourceRange.start === undefined) {
             const detectedStart = await detectBlankLeadInEndMs(paths.raw);
-            if (detectedStart !== undefined && detectedStart >= TRIM_START_MIN_LEAD_IN_MS) {
+            if (
+              detectedStart !== undefined &&
+              detectedStart >= TRIM_START_MIN_LEAD_IN_MS &&
+              state.sourceRange.start === undefined
+            ) {
               state.sourceRange.start = detectedStart;
-              sourceRange = metadataFor(state).sourceRange;
             }
           }
+
+          // Read fresh, so an explicit, selector, or pixel-detected start all show.
+          const sourceRange = metadataFor(state).sourceRange;
 
           if (
             highlights.length > 0 ||
