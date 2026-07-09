@@ -101,7 +101,7 @@ export const spinnerWaiter = Object.assign(
         // Check for spinner
         const spinnerSelector = settings.spinnerSelectors.join(",");
         const spinnerLocator = page.locator(spinnerSelector) as LocatorWithOriginal;
-        const spinnerVisible = await spinnerLocator.isVisible();
+        const spinnerVisible = await anySpinnerVisible(spinnerLocator);
 
         if (!spinnerVisible) {
           // No spinner - call action, suggest adding one if it fails
@@ -211,10 +211,20 @@ async function waitForReadyWhileSpinning(
   while (Date.now() - start < timeout) {
     if (await locatorIsReady(target, method)) return "appeared";
     const elapsed = Date.now() - start;
-    if (elapsed > spinnerGracePeriodMs && !(await spinner.isVisible())) return "spinner-gone";
+    if (elapsed > spinnerGracePeriodMs && !(await anySpinnerVisible(spinner))) return "spinner-gone";
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return "timeout";
+}
+
+/**
+ * Multi-element-safe "is any spinner visible": the spinner selector union can
+ * legitimately match several loading indicators at once (e.g. two panels each
+ * showing a pending fallback), where a bare `locator.isVisible()` throws a
+ * strict-mode violation. `filter({ visible: true })` needs no strictness.
+ */
+async function anySpinnerVisible(spinnerLocator: Locator): Promise<boolean> {
+  return (await spinnerLocator.filter({ visible: true }).count()) > 0;
 }
 
 export { defaultSelectors };
