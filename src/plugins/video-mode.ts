@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
-import type { Locator, TestInfo } from "@playwright/test";
+import type { Dialog, Locator, Page, TestInfo } from "@playwright/test";
 import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
@@ -23,6 +23,7 @@ const VIDEO_MODE_REPORT_PLAYER_FILE = "video-mode-report.html";
 const VIDEO_MODE_POINTER_FILE = "video-mode-pointer.png";
 const VIDEO_MODE_CLICK_POINTER_FILE = "video-mode-click-pointer.png";
 const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
+const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -82,11 +83,19 @@ export type VideoModeViewport = {
 export type VideoModeHighlight = VideoModeSpan & {
   actionEnd?: number;
   color: string;
+  dialog?: VideoModeDialogAnnotation;
   image?: string;
   method?: OverrideableMethod;
   rect: VideoModeRect;
   thickness: number;
   viewport: VideoModeViewport;
+};
+
+export type VideoModeDialogAnnotation = {
+  action: "accept" | "dismiss";
+  message: string;
+  promptText?: string;
+  type: "alert" | "confirm" | "prompt";
 };
 
 export type VideoModeMetadata = {
@@ -188,6 +197,12 @@ type VideoModeState = {
   outputs: VideoModeOutputs;
   sourceRange: VideoModeSourceRange;
   startedAt?: number;
+};
+
+type VideoModeDialogOverlaySnapshot = {
+  buttonRect: VideoModeRect;
+  inputRect?: VideoModeRect;
+  viewport: VideoModeViewport;
 };
 
 type RenderVideoSegment = {
@@ -555,6 +570,301 @@ const readVideoModeMetadata = async (
     }
 
     throw error;
+  }
+};
+
+const installVideoModeDialogOverlay = () => {
+  const videoWindow = window as Window & {
+    __middlewrightVideoModeDialogsInstalled?: boolean;
+  };
+
+  if (videoWindow.__middlewrightVideoModeDialogsInstalled) {
+    return;
+  }
+
+  videoWindow.__middlewrightVideoModeDialogsInstalled = true;
+  const originalAlert = window.alert.bind(window);
+  const originalConfirm = window.confirm.bind(window);
+  const originalPrompt = window.prompt.bind(window);
+
+  const messageText = (message: unknown, argumentCount: number) => {
+    return argumentCount === 0 ? "" : String(message);
+  };
+
+  const showOverlay = (
+    type: "alert" | "confirm" | "prompt",
+    message: string,
+    defaultValue: string,
+  ) => {
+    document.querySelector(`[${"data-middlewright-video-mode-dialog"}]`)?.remove();
+
+    const host = document.createElement("div");
+    host.setAttribute("data-middlewright-video-mode-dialog", "");
+    host.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:2147483647",
+      "display:grid",
+      "place-items:center",
+      "background:rgba(15,23,42,.42)",
+      "pointer-events:none",
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+    ].join(";");
+
+    const panel = document.createElement("section");
+    panel.setAttribute("role", "dialog");
+    panel.style.cssText = [
+      "box-sizing:border-box",
+      "width:min(480px,calc(100vw - 48px))",
+      "border:1px solid #d1d5db",
+      "border-radius:12px",
+      "background:#fff",
+      "box-shadow:0 24px 70px rgba(0,0,0,.32)",
+      "color:#111827",
+      "padding:24px",
+    ].join(";");
+
+    const title = document.createElement("strong");
+    title.textContent = type === "alert" ? "Alert" : type === "confirm" ? "Confirm" : "Prompt";
+    title.style.cssText = "display:block;font-size:17px;line-height:24px;margin:0 0 10px";
+    panel.append(title);
+
+    const copy = document.createElement("div");
+    copy.setAttribute("data-dialog-message", "");
+    copy.textContent = message;
+    copy.style.cssText = "font-size:15px;line-height:22px;overflow-wrap:anywhere;white-space:pre-wrap";
+    panel.append(copy);
+
+    if (type === "prompt") {
+      const input = document.createElement("input");
+      input.setAttribute("data-dialog-input", "");
+      input.value = defaultValue;
+      input.style.cssText = [
+        "box-sizing:border-box",
+        "width:100%",
+        "height:38px",
+        "margin-top:18px",
+        "border:1px solid #9ca3af",
+        "border-radius:7px",
+        "background:#fff",
+        "color:#111827",
+        "font:15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "padding:7px 10px",
+      ].join(";");
+      panel.append(input);
+    }
+
+    const actions = document.createElement("footer");
+    actions.style.cssText = "display:flex;justify-content:flex-end;gap:10px;margin-top:22px";
+    const button = (action: "accept" | "dismiss", label: string) => {
+      const element = document.createElement("button");
+      element.setAttribute("data-dialog-action", action);
+      element.textContent = label;
+      element.style.cssText = [
+        "box-sizing:border-box",
+        "min-width:78px",
+        "height:36px",
+        "border:1px solid #9ca3af",
+        "border-radius:7px",
+        "background:#fff",
+        "color:#111827",
+        "font:600 14px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "padding:7px 14px",
+      ].join(";");
+      actions.append(element);
+      return element;
+    };
+
+    if (type !== "alert") {
+      button("dismiss", "Cancel");
+    }
+    button("accept", "OK");
+    panel.append(actions);
+    host.append(panel);
+    document.documentElement.append(host);
+
+    return {
+      complete: (action: "accept" | "dismiss", promptText?: string) => {
+        host.setAttribute("data-dialog-resolved", "");
+        host.setAttribute("data-dialog-result", action);
+        if (promptText !== undefined) {
+          const input = host.querySelector<HTMLInputElement>("[data-dialog-input]");
+          if (input) input.value = promptText;
+        }
+        const selected = host.querySelector<HTMLButtonElement>(`[data-dialog-action="${action}"]`);
+        if (selected) {
+          selected.style.background = "#2563eb";
+          selected.style.borderColor = "#2563eb";
+          selected.style.color = "#fff";
+        }
+      },
+    };
+  };
+
+  window.alert = function (message?: unknown) {
+    const overlay = showOverlay("alert", messageText(message, arguments.length), "");
+    const result = originalAlert(messageText(message, arguments.length));
+    overlay.complete("accept");
+    return result;
+  };
+
+  window.confirm = function (message?: string) {
+    const text = messageText(message, arguments.length);
+    const overlay = showOverlay("confirm", text, "");
+    const result = originalConfirm(text);
+    overlay.complete(result ? "accept" : "dismiss");
+    return result;
+  };
+
+  window.prompt = function (message?: string, defaultValue?: string) {
+    const text = messageText(message, arguments.length);
+    const initialValue = arguments.length < 2 ? "" : String(defaultValue);
+    const overlay = showOverlay("prompt", text, initialValue);
+    const result = originalPrompt(text, initialValue);
+    overlay.complete(result === null ? "dismiss" : "accept", result === null ? undefined : result);
+    return result;
+  };
+};
+
+const videoModeDialogOverlaySnapshot = async (
+  page: Page,
+  action: "accept" | "dismiss",
+): Promise<VideoModeDialogOverlaySnapshot> => {
+  await page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}][data-dialog-resolved]`).waitFor({
+    state: "attached",
+    timeout: 1000,
+  });
+
+  return await page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}]`).evaluate((host, selectedAction) => {
+    const rectFor = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        height: rect.height,
+        width: rect.width,
+        x: rect.left,
+        y: rect.top,
+      };
+    };
+    const selected = host.querySelector(`[data-dialog-action="${selectedAction}"]`);
+    const input = host.querySelector("[data-dialog-input]");
+
+    if (!selected) {
+      throw new Error(`videoMode dialog overlay has no ${selectedAction} button`);
+    }
+
+    return {
+      buttonRect: rectFor(selected),
+      inputRect: input ? rectFor(input) : undefined,
+      viewport: {
+        height: window.innerHeight,
+        width: window.innerWidth,
+      },
+    };
+  }, action);
+};
+
+const removeVideoModeDialogOverlay = async (page: Page) => {
+  await page
+    .locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}]`)
+    .evaluateAll((hosts) => hosts.forEach((host) => host.remove()))
+    .catch(() => {});
+};
+
+const setVideoModeDialogOverlayState = async (
+  page: Page,
+  options: { action?: "accept" | "dismiss"; promptText?: string },
+) => {
+  await page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}]`).evaluate((host, state) => {
+    const input = host.querySelector<HTMLInputElement>("[data-dialog-input]");
+    if (input && state.promptText !== undefined) {
+      input.value = state.promptText;
+    }
+
+    for (const button of host.querySelectorAll<HTMLButtonElement>("[data-dialog-action]")) {
+      button.style.background = "#fff";
+      button.style.borderColor = "#9ca3af";
+      button.style.color = "#111827";
+    }
+
+    if (state.action) {
+      const selected = host.querySelector<HTMLButtonElement>(
+        `[data-dialog-action="${state.action}"]`,
+      );
+      if (selected) {
+        selected.style.background = "#2563eb";
+        selected.style.borderColor = "#2563eb";
+        selected.style.color = "#fff";
+      }
+    }
+  }, options);
+};
+
+const recordDialogHighlights = async (options: {
+  action: "accept" | "dismiss";
+  color: string;
+  dialog: Dialog;
+  durationMs: number;
+  page: Page;
+  promptText?: string;
+  state: VideoModeState;
+  testInfo: TestInfo;
+  thickness: number;
+}) => {
+  if (options.state.startedAt === undefined || options.durationMs <= 0) {
+    await removeVideoModeDialogOverlay(options.page);
+    return;
+  }
+
+  try {
+    const snapshot = await videoModeDialogOverlaySnapshot(options.page, options.action);
+    await mkdir(options.testInfo.outputDir, { recursive: true });
+    const dialog: VideoModeDialogAnnotation = {
+      action: options.action,
+      message: options.dialog.message(),
+      ...(options.promptText === undefined ? {} : { promptText: options.promptText }),
+      type: options.dialog.type() as VideoModeDialogAnnotation["type"],
+    };
+    const record = async (method: OverrideableMethod, rect: VideoModeRect) => {
+      const image = `video-mode-highlight-${options.state.highlightImageIndex}.png`;
+      options.state.highlightImageIndex += 1;
+      await options.page.screenshot({
+        path: join(options.testInfo.outputDir, image),
+        scale: "css",
+      });
+      const start = Math.round(performance.now() - options.state.startedAt!);
+      options.state.highlights.push({
+        actionEnd: start,
+        color: options.color,
+        dialog,
+        end: start + Math.round(options.durationMs),
+        image,
+        method,
+        rect,
+        start,
+        thickness: options.thickness,
+        viewport: snapshot.viewport,
+      });
+    };
+
+    if (
+      dialog.type === "prompt" &&
+      options.action === "accept" &&
+      options.promptText !== undefined &&
+      snapshot.inputRect
+    ) {
+      await setVideoModeDialogOverlayState(options.page, {
+        promptText: options.dialog.defaultValue(),
+      });
+      await record("fill", snapshot.inputRect);
+    }
+
+    await setVideoModeDialogOverlayState(options.page, {
+      action: options.action,
+      promptText: options.promptText,
+    });
+    await record("click", snapshot.buttonRect);
+  } finally {
+    await removeVideoModeDialogOverlay(options.page);
   }
 };
 
@@ -1981,6 +2291,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     sourceRange: {},
     startedAt: performance.now(),
   };
+  const pendingDialogHighlights = new Set<Promise<void>>();
   let testInfoForOutputPaths: TestInfo | undefined;
   const getVideoTimestamp = () => {
     const now = performance.now();
@@ -1992,6 +2303,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
     getVideoTimestamp,
     metadata: async () => {
+      await Promise.all(pendingDialogHighlights);
       if (!testInfoForOutputPaths) {
         return metadataFor(state);
       }
@@ -2086,7 +2398,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
 
     testLifecycle: (emitter) => {
-      const offBeforeTest = emitter.on("beforeTest", ({ page }) => {
+      let dialogPage: Page | undefined;
+      let onDialog: ((dialog: Dialog) => void) | undefined;
+      const offBeforeTest = emitter.on("beforeTest", async ({ page, testInfo }) => {
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
@@ -2100,6 +2414,68 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
         } else {
           state.startedAt = performance.now();
+        }
+
+        if (highlight.mode !== "off") {
+          await page.addInitScript(installVideoModeDialogOverlay);
+          await page.evaluate(installVideoModeDialogOverlay);
+          dialogPage = page;
+          onDialog = (dialog) => {
+            const dialogListenerCount = (
+              page as Page & { listenerCount(event: "dialog"): number }
+            ).listenerCount("dialog");
+
+            if (dialog.type() === "beforeunload") {
+              if (dialogListenerCount === 1) {
+                void dialog.dismiss();
+              }
+              return;
+            }
+
+            const originalAccept = dialog.accept.bind(dialog);
+            const originalDismiss = dialog.dismiss.bind(dialog);
+            const recordResolution = async (
+              action: "accept" | "dismiss",
+              promptText?: string,
+            ) => {
+              const recording = recordDialogHighlights({
+                action,
+                color: highlight.color,
+                dialog,
+                durationMs: highlight.durationMs,
+                page,
+                promptText,
+                state,
+                testInfo,
+                thickness: highlight.thickness,
+              });
+              pendingDialogHighlights.add(recording);
+              try {
+                await recording;
+              } finally {
+                pendingDialogHighlights.delete(recording);
+              }
+            };
+
+            Object.assign(dialog, {
+              accept: async (promptText?: string) => {
+                await originalAccept(promptText);
+                await recordResolution("accept", promptText);
+              },
+              dismiss: async () => {
+                await originalDismiss();
+                await recordResolution("dismiss");
+              },
+            });
+
+            // Playwright auto-dismisses dialogs only when there are no dialog
+            // listeners. videoMode must preserve that behavior even though its
+            // observer necessarily counts as a listener.
+            if (dialogListenerCount === 1) {
+              void dialog.dismiss();
+            }
+          };
+          page.on("dialog", onDialog);
         }
 
         // Start the video from the moment the app's "ready" element first shows.
@@ -2119,6 +2495,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       });
 
       const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
+        await Promise.all(pendingDialogHighlights);
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
@@ -2246,6 +2623,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       return () => {
         offBeforeTest();
         offAfterTestFinalize();
+        if (dialogPage && onDialog) {
+          dialogPage.off("dialog", onDialog);
+        }
       };
     },
   };

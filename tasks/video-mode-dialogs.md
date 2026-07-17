@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Just started. The native-dialog omission is understood, but the repro, synthetic dialog rendering, tests, documentation, and before/after media are still outstanding.
+Implementation and verification are complete. Alert, confirm, and prompt interactions now render as synthetic paused frames with the real outcome; only PR media/upload and consumer verification remain.
 
 ## Goal
 
@@ -22,16 +22,18 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 
 ## Checklist
 
-- [ ] Capture a deterministic baseline recording proving native dialogs are absent from the raw/rendered video.
-- [ ] Add a failing public-behavior spec for dialog metadata and rendered-video visibility.
-- [ ] Observe Playwright dialog resolution without changing whether the test accepts, dismisses, or supplies prompt text.
-- [ ] Render a synthetic alert/confirm/prompt frame with a readable message and prompt value.
-- [ ] Pause on the synthetic dialog and animate the video-mode cursor to the chosen button; show prompt entry before confirmation.
-- [ ] Cover alert acceptance, confirm acceptance/dismissal, and prompt text in tests.
-- [ ] Document video-mode dialog behavior and any limitations.
-- [ ] Run build, typecheck, and focused/full tests.
+- [x] Capture a deterministic baseline recording proving native dialogs are absent from the raw/rendered video. *Saved matching 960×540 before/after WebM artifacts from the discard-confirm fixture under the ignored media workspace.*
+- [x] Add a failing public-behavior spec for dialog metadata and rendered-video visibility. *The first confirm spec failed on the missing dialog annotation; the ffmpeg spec verifies a visible paused panel and pointer target.*
+- [x] Observe Playwright dialog resolution without changing whether the test accepts, dismisses, or supplies prompt text. *The plugin wraps each emitted Dialog's real accept/dismiss methods and preserves Playwright's no-listener auto-dismiss behavior.*
+- [x] Render a synthetic alert/confirm/prompt frame with a readable message and prompt value. *An init-script overlay is captured only for post-processing, then removed immediately.*
+- [x] Pause on the synthetic dialog and animate the video-mode cursor to the chosen button; show prompt entry before confirmation. *Prompt acceptance records a fill-target frame followed by a filled-value/button-target frame.*
+- [x] Cover alert acceptance, confirm acceptance/dismissal, and prompt text in tests. *Coverage lives in `spec/video-mode.spec.ts`.*
+- [x] Document video-mode dialog behavior and any limitations. *README documents artifact-only synthesis and the unsupported beforeunload case.*
+- [x] Run build, typecheck, and focused/full tests. *Typecheck, build, publint, and 61 passing tests completed locally (3 provider-gated tests skipped).*
 - [ ] Attach matching before/after videos to the pull request and update its reviewer-oriented body.
 
 ## Implementation log
 
 - 2026-07-17: Worktree created from `origin/main` at `fix/video-mode-dialogs`. Initial investigation found that video mode only observes locator middleware and Chromium page videos do not include browser-native dialogs.
+- 2026-07-17: Confirmed the baseline rendered video jumps from the highlighted discard action directly to its result. Implemented an in-page dialog bridge that leaves the native Playwright interaction authoritative while capturing a synthetic post-processing frame.
+- 2026-07-17: Prompt recording now emits a text-input phase with the default value and a decision phase with the supplied value. The existing cursor planner supplies the text and click pointers without adding real-time holds to the test.

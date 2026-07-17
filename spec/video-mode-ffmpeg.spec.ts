@@ -479,6 +479,97 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
   expect(afterClickCenter.red).toBeGreaterThan(afterClickCenter.blue + 80);
 });
 
+test("renders an accepted confirm with a paused dialog and pointer click", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 900;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(17, 24, 39);
+        }
+        button {
+          margin: 80px;
+          padding: 14px 20px;
+        }
+      </style>
+      <button id="discard">Discard file</button>
+      <script>
+        document.querySelector("#discard").addEventListener("click", () => {
+          document.body.dataset.result = confirm("Discard unsaved changes?") ? "discarded" : "kept";
+        });
+      </script>
+    `);
+    plugged.once("dialog", (dialog) => dialog.accept());
+
+    await plugged.locator("#discard").click();
+
+    await expect(plugged.locator("body")).toHaveAttribute("data-result", "discarded");
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const dialogHighlight = metadata.highlights.find(
+    (highlight) => highlight.dialog?.type === "confirm",
+  )!;
+  expect(dialogHighlight).toMatchObject({
+    dialog: {
+      action: "accept",
+      message: "Discard unsaved changes?",
+      type: "confirm",
+    },
+    method: "click",
+  });
+
+  const renderedStart = renderedHighlightStartWithoutDeadAir(
+    dialogHighlight,
+    metadata.highlights,
+  );
+  const dialogFrame = await videoFrame(
+    paths.rendered,
+    renderedStart + highlightDurationMs - 100,
+  );
+  const scale = Math.min(
+    dialogFrame.width / dialogHighlight.viewport.width,
+    dialogFrame.height / dialogHighlight.viewport.height,
+  );
+  const buttonBox = {
+    height: Math.round(dialogHighlight.rect.height * scale),
+    width: Math.round(dialogHighlight.rect.width * scale),
+    x: Math.round(dialogHighlight.rect.x * scale),
+    y: Math.round(dialogHighlight.rect.y * scale),
+  };
+  const panelCenter = averagePixel(dialogFrame, {
+    x: Math.round(dialogFrame.width / 2),
+    y: Math.round(dialogFrame.height / 2),
+  });
+
+  expect(panelCenter).toMatchObject({
+    blue: expect.any(Number),
+    green: expect.any(Number),
+    red: expect.any(Number),
+  });
+  expect(panelCenter.red).toBeGreaterThan(220);
+  expect(panelCenter.green).toBeGreaterThan(220);
+  expect(panelCenter.blue).toBeGreaterThan(220);
+  expect(pointerTailPixelCount(dialogFrame, buttonBox)).toBeGreaterThan(20);
+});
+
 test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
   const highlightDurationMs = 700;
   const video = videoMode({ trimStart: "never",

@@ -49,6 +49,180 @@ test("records highlight metadata without mutating element styles", async ({
   });
 });
 
+test("records an accepted confirm as a synthetic dialog annotation", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="discard">Discard file</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#discard").addEventListener("click", () => {
+        document.querySelector("#result").textContent = confirm(
+          "Discard unsaved changes to release-notes.md?",
+        ) ? "discarded" : "kept";
+      });
+    </script>
+  `);
+  plugged.once("dialog", (dialog) => dialog.accept());
+
+  await plugged.locator("#discard").click();
+
+  await expect(plugged.locator("#result")).toHaveText("discarded");
+  await expect(video.metadata()).resolves.toMatchObject({
+    highlights: expect.arrayContaining([
+      expect.objectContaining({
+        dialog: {
+          action: "accept",
+          message: "Discard unsaved changes to release-notes.md?",
+          type: "confirm",
+        },
+        image: expect.stringMatching(/\.png$/),
+        method: "click",
+      }),
+    ]),
+  });
+});
+
+test("records prompt entry before the accepted prompt decision", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="rename">Rename file</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#rename").addEventListener("click", () => {
+        document.querySelector("#result").textContent = prompt("New file name", "draft.md") || "cancelled";
+      });
+    </script>
+  `);
+  plugged.once("dialog", (dialog) => dialog.accept("release-notes.md"));
+
+  await plugged.locator("#rename").click();
+
+  await expect(plugged.locator("#result")).toHaveText("release-notes.md");
+  const dialogHighlights = (await video.metadata()).highlights.filter(
+    (candidate) => candidate.dialog?.type === "prompt",
+  );
+  expect(dialogHighlights).toMatchObject([
+    {
+      dialog: {
+        action: "accept",
+        message: "New file name",
+        promptText: "release-notes.md",
+        type: "prompt",
+      },
+      image: expect.stringMatching(/\.png$/),
+      method: "fill",
+    },
+    {
+      dialog: {
+        action: "accept",
+        message: "New file name",
+        promptText: "release-notes.md",
+        type: "prompt",
+      },
+      image: expect.stringMatching(/\.png$/),
+      method: "click",
+    },
+  ]);
+});
+
+test("preserves Playwright's automatic dialog dismissal", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="discard">Discard file</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#discard").addEventListener("click", () => {
+        document.querySelector("#result").textContent = confirm("Discard changes?") ? "discarded" : "kept";
+      });
+    </script>
+  `);
+
+  await plugged.locator("#discard").click();
+
+  await expect(plugged.locator("#result")).toHaveText("kept");
+  await expect(video.metadata()).resolves.toMatchObject({
+    highlights: expect.arrayContaining([
+      expect.objectContaining({
+        dialog: {
+          action: "dismiss",
+          message: "Discard changes?",
+          type: "confirm",
+        },
+        method: "click",
+      }),
+    ]),
+  });
+});
+
+test("records an alert acknowledgement", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="publish">Publish</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#publish").addEventListener("click", () => {
+        alert("Release published");
+        document.querySelector("#result").textContent = "done";
+      });
+    </script>
+  `);
+  plugged.once("dialog", (dialog) => dialog.accept());
+
+  await plugged.locator("#publish").click();
+
+  await expect(plugged.locator("#result")).toHaveText("done");
+  await expect(video.metadata()).resolves.toMatchObject({
+    highlights: expect.arrayContaining([
+      expect.objectContaining({
+        dialog: {
+          action: "accept",
+          message: "Release published",
+          type: "alert",
+        },
+        method: "click",
+      }),
+    ]),
+  });
+});
+
 test("skipped methods are not highlighted", async ({ page }, testInfo) => {
   const video = videoMode({
     finalHold: 50,
