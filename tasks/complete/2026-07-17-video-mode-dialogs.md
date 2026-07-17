@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The dialog rendering implementation is complete and green. A review follow-up is in progress to make the middlewright confirm proof finish on a visible “Discarded!” state, wait for that state, and refresh both PR videos.
+Complete. The dialog rendering implementation and review follow-up are green: the confirm proof waits for and finishes on a visible “Discarded!” state, and both refreshed PR videos show the same final outcome.
 
 ## Goal
 
@@ -31,7 +31,7 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - [x] Document video-mode dialog behavior and any limitations. *README documents artifact-only synthesis and the unsupported beforeunload case.*
 - [x] Run build, typecheck, and focused/full tests. *Typecheck, build, publint, and 61 passing tests completed locally (3 provider-gated tests skipped).*
 - [x] Attach matching before/after videos to the pull request and update its reviewer-oriented body. *Uploaded both WebM clips through GitHub's authenticated attachment flow; the PR body renders two inline video players.*
-- [ ] Make the confirm rendering spec visibly finish on “Discarded!”, wait for it, and replace both middlewright PR videos.
+- [x] Make the confirm rendering spec visibly finish on “Discarded!”, wait for it, and replace both middlewright PR videos. *The fixture renders the accepted result, waits for the exact visible text, holds the final frame, and the refreshed inline before/after clips both end there.*
 
 ## Implementation log
 
@@ -42,3 +42,4 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - 2026-07-17: Added coverage for synchronous dialog handlers registered before `addPlugins`; video mode now prepends its observer so registration order cannot skip annotation or trigger a second automatic dismissal.
 - 2026-07-17: Uploaded matching before/after recordings to PR #4, verified GitHub rendered both as inline `<video>` players, and completed the reviewer-oriented PR body.
 - 2026-07-17: Review follow-up requested a visible post-dialog “Discarded!” state in the confirm proof and refreshed matching videos.
+- 2026-07-17: Added the visible result and exact `waitFor()`, regenerated the baseline and dialog-aware recordings from the matching fixture, visually checked the dialog and final frames, and replaced both inline PR videos through Playwriter.
