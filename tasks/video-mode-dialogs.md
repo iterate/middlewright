@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation and verification are complete. Alert, confirm, and prompt interactions now render as synthetic paused frames with the real outcome; only PR media/upload and consumer verification remain.
+Implementation and verification are complete. Alert, confirm, and prompt interactions render as synthetic paused frames with the real outcome; middlewright CI and the Iterate consumer proof are green, leaving only authenticated PR media upload and final review monitoring.
 
 ## Goal
 
@@ -37,3 +37,4 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - 2026-07-17: Worktree created from `origin/main` at `fix/video-mode-dialogs`. Initial investigation found that video mode only observes locator middleware and Chromium page videos do not include browser-native dialogs.
 - 2026-07-17: Confirmed the baseline rendered video jumps from the highlighted discard action directly to its result. Implemented an in-page dialog bridge that leaves the native Playwright interaction authoritative while capturing a synthetic post-processing frame.
 - 2026-07-17: Prompt recording now emits a text-input phase with the default value and a decision phase with the supplied value. The existing cursor planner supplies the text and click pointers without adding real-time holds to the test.
+- 2026-07-17: Middlewright CI passed and published `https://pkg.pr.new/middlewright@4` at commit `2cb2a4e`. Iterate PR #2098 consumed that artifact and its unchanged IDE discard spec produced visible Cancel and OK dialog phases.
