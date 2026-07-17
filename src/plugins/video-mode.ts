@@ -596,8 +596,6 @@ const installVideoModeDialogOverlay = () => {
     message: string,
     defaultValue: string,
   ) => {
-    document.querySelector(`[${"data-middlewright-video-mode-dialog"}]`)?.remove();
-
     const host = document.createElement("div");
     host.setAttribute("data-middlewright-video-mode-dialog", "");
     host.style.cssText = [
@@ -727,15 +725,10 @@ const installVideoModeDialogOverlay = () => {
 };
 
 const videoModeDialogOverlaySnapshot = async (
-  page: Page,
+  host: Locator,
   action: "accept" | "dismiss",
 ): Promise<VideoModeDialogOverlaySnapshot> => {
-  await page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}][data-dialog-resolved]`).waitFor({
-    state: "attached",
-    timeout: 1000,
-  });
-
-  return await page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}]`).evaluate((host, selectedAction) => {
+  return await host.evaluate((host, selectedAction) => {
     const rectFor = (element: Element) => {
       const rect = element.getBoundingClientRect();
       return {
@@ -763,18 +756,30 @@ const videoModeDialogOverlaySnapshot = async (
   }, action);
 };
 
-const removeVideoModeDialogOverlay = async (page: Page) => {
+const isolateNextVideoModeDialogOverlay = async (page: Page) => {
+  const host = page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}][data-dialog-resolved]`).first();
+  await host.waitFor({ state: "attached", timeout: 1000 });
+  await host.evaluate((selected, attribute) => {
+    for (const candidate of document.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
+      candidate.style.display = candidate === selected ? "grid" : "none";
+    }
+  }, VIDEO_MODE_DIALOG_ATTRIBUTE);
+  return host;
+};
+
+const removeVideoModeDialogOverlay = async (page: Page, host: Locator) => {
+  await host.evaluate((element) => element.remove()).catch(() => {});
   await page
     .locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}]`)
-    .evaluateAll((hosts) => hosts.forEach((host) => host.remove()))
+    .evaluateAll((hosts) => hosts.forEach((candidate) => candidate.style.removeProperty("display")))
     .catch(() => {});
 };
 
 const setVideoModeDialogOverlayState = async (
-  page: Page,
+  host: Locator,
   options: { action?: "accept" | "dismiss"; promptText?: string },
 ) => {
-  await page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}]`).evaluate((host, state) => {
+  await host.evaluate((host, state) => {
     const input = host.querySelector<HTMLInputElement>("[data-dialog-input]");
     if (input && state.promptText !== undefined) {
       input.value = state.promptText;
@@ -810,13 +815,14 @@ const recordDialogHighlights = async (options: {
   testInfo: TestInfo;
   thickness: number;
 }) => {
+  const host = await isolateNextVideoModeDialogOverlay(options.page);
   if (options.state.startedAt === undefined || options.durationMs <= 0) {
-    await removeVideoModeDialogOverlay(options.page);
+    await removeVideoModeDialogOverlay(options.page, host);
     return;
   }
 
   try {
-    const snapshot = await videoModeDialogOverlaySnapshot(options.page, options.action);
+    const snapshot = await videoModeDialogOverlaySnapshot(host, options.action);
     await mkdir(options.testInfo.outputDir, { recursive: true });
     const dialog: VideoModeDialogAnnotation = {
       action: options.action,
@@ -852,19 +858,19 @@ const recordDialogHighlights = async (options: {
       options.promptText !== undefined &&
       snapshot.inputRect
     ) {
-      await setVideoModeDialogOverlayState(options.page, {
+      await setVideoModeDialogOverlayState(host, {
         promptText: options.dialog.defaultValue(),
       });
       await record("fill", snapshot.inputRect);
     }
 
-    await setVideoModeDialogOverlayState(options.page, {
+    await setVideoModeDialogOverlayState(host, {
       action: options.action,
       promptText: options.promptText,
     });
     await record("click", snapshot.buttonRect);
   } finally {
-    await removeVideoModeDialogOverlay(options.page);
+    await removeVideoModeDialogOverlay(options.page, host);
   }
 };
 
@@ -2292,6 +2298,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     startedAt: performance.now(),
   };
   const pendingDialogHighlights = new Set<Promise<void>>();
+  let dialogHighlightQueue = Promise.resolve();
+  const queueDialogHighlight = (capture: () => Promise<void>) => {
+    const recording = dialogHighlightQueue.then(capture);
+    dialogHighlightQueue = recording.catch(() => {});
+    pendingDialogHighlights.add(recording);
+    void recording.then(
+      () => pendingDialogHighlights.delete(recording),
+      () => pendingDialogHighlights.delete(recording),
+    );
+    return recording;
+  };
   let testInfoForOutputPaths: TestInfo | undefined;
   const getVideoTimestamp = () => {
     const now = performance.now();
@@ -2401,6 +2418,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       let dialogPage: Page | undefined;
       let onDialog: ((dialog: Dialog) => void) | undefined;
       const offBeforeTest = emitter.on("beforeTest", async ({ page, testInfo }) => {
+        dialogHighlightQueue = Promise.resolve();
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
@@ -2438,35 +2456,48 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             const originalDismiss = dialog.dismiss.bind(dialog);
             const recordResolution = async (
               action: "accept" | "dismiss",
-              promptText?: string,
+              promptText: string | undefined,
+              resolveDialog: () => Promise<void>,
             ) => {
-              const recording = recordDialogHighlights({
-                action,
-                color: highlight.color,
-                dialog,
-                durationMs: highlight.durationMs,
-                page,
-                promptText,
-                state,
-                testInfo,
-                thickness: highlight.thickness,
+              let resolveRecording!: () => void;
+              let rejectRecording!: (reason: unknown) => void;
+              const dialogResolved = new Promise<void>((resolve, reject) => {
+                resolveRecording = resolve;
+                rejectRecording = reject;
               });
-              pendingDialogHighlights.add(recording);
+              const recording = queueDialogHighlight(async () => {
+                await dialogResolved;
+                await recordDialogHighlights({
+                  action,
+                  color: highlight.color,
+                  dialog,
+                  durationMs: highlight.durationMs,
+                  page,
+                  promptText,
+                  state,
+                  testInfo,
+                  thickness: highlight.thickness,
+                });
+              });
+
               try {
-                await recording;
-              } finally {
-                pendingDialogHighlights.delete(recording);
+                await resolveDialog();
+                resolveRecording();
+              } catch (error) {
+                rejectRecording(error);
+                await recording.catch(() => {});
+                throw error;
               }
+
+              await recording;
             };
 
             Object.assign(dialog, {
               accept: async (promptText?: string) => {
-                await originalAccept(promptText);
-                await recordResolution("accept", promptText);
+                await recordResolution("accept", promptText, () => originalAccept(promptText));
               },
               dismiss: async () => {
-                await originalDismiss();
-                await recordResolution("dismiss");
+                await recordResolution("dismiss", undefined, originalDismiss);
               },
             });
 

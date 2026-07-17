@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
@@ -257,6 +258,48 @@ test("records dialogs handled by a listener registered before video mode", async
       }),
     ]),
   );
+});
+
+test("records back-to-back dialogs in order", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="discard">Discard file</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#discard").addEventListener("click", () => {
+        const discarded = confirm("Discard unsaved changes?");
+        const confirmed = confirm("Really discard this file?");
+        document.querySelector("#result").textContent = discarded && confirmed
+          ? "discarded"
+          : "kept";
+      });
+    </script>
+  `);
+  plugged.on("dialog", (dialog) => void dialog.accept());
+
+  await plugged.locator("#discard").click();
+
+  await expect(plugged.locator("#result")).toHaveText("discarded");
+  const dialogHighlights = (await video.metadata()).highlights.filter(
+    (highlight) => highlight.dialog,
+  );
+  expect(dialogHighlights).toMatchObject([
+    { dialog: { action: "accept", message: "Discard unsaved changes?", type: "confirm" } },
+    { dialog: { action: "accept", message: "Really discard this file?", type: "confirm" } },
+  ]);
+  const imageSizes = await Promise.all(
+    dialogHighlights.map((highlight) => stat(join(testInfo.outputDir, highlight.image!))),
+  );
+  expect(Math.min(...imageSizes.map((image) => image.size))).toBeGreaterThan(10_000);
 });
 
 test("skipped methods are not highlighted", async ({ page }, testInfo) => {
