@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
@@ -484,7 +484,7 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
 }, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({
-    finalHold: 1_000,
+    finalHold: 0,
     highlight: { mode: "pointer", duration: highlightDurationMs },
     trimStart: "never",
   });
@@ -518,12 +518,9 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
       <output id="result"></output>
       <script>
         document.querySelector("#discard").addEventListener("click", () => {
-          const result = confirm("Discard unsaved changes?")
+          document.querySelector("#result").textContent = confirm("Discard unsaved changes?")
             ? "Discarded!"
             : "Kept";
-          setTimeout(() => {
-            document.querySelector("#result").textContent = result;
-          }, 200);
         });
       </script>
     `);
@@ -580,6 +577,55 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
   expect(panelCenter.green).toBeGreaterThan(220);
   expect(panelCenter.blue).toBeGreaterThan(220);
   expect(pointerTailPixelCount(dialogFrame, buttonBox)).toBeGreaterThan(20);
+
+  const renderedDuration = await videoDurationMs(paths.rendered);
+  expect(renderedDuration - (renderedStart + highlightDurationMs)).toBeGreaterThanOrEqual(1_000);
+  const finalFrame = await videoFrame(paths.rendered, renderedDuration - 100);
+  const finalCenter = averagePixel(finalFrame, {
+    x: Math.round(finalFrame.width / 2),
+    y: Math.round(finalFrame.height / 2),
+  });
+  expect(finalCenter.red).toBeLessThan(80);
+  expect(finalCenter.green).toBeLessThan(80);
+  expect(finalCenter.blue).toBeLessThan(80);
+});
+
+test("uses natural post-dialog footage without adding a synthetic hold", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setContent(`
+      <button id="continue">Continue</button>
+      <output id="result"></output>
+      <script>
+        document.querySelector("#continue").addEventListener("click", () => {
+          document.querySelector("#result").textContent = confirm("Continue processing?")
+            ? "Processing"
+            : "Stopped";
+        });
+      </script>
+    `);
+    plugged.once("dialog", (dialog) => dialog.accept());
+
+    await plugged.locator("#continue").click();
+    await plugged.getByText("Processing", { exact: true }).waitFor();
+    await plugged.waitForTimeout(1_100);
+  }
+
+  await video.metadata();
+  await expect(
+    stat(join(testInfo.outputDir, "video-mode-dialog-post-frame.png")),
+  ).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {

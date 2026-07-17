@@ -23,6 +23,7 @@ const VIDEO_MODE_REPORT_PLAYER_FILE = "video-mode-report.html";
 const VIDEO_MODE_POINTER_FILE = "video-mode-pointer.png";
 const VIDEO_MODE_CLICK_POINTER_FILE = "video-mode-click-pointer.png";
 const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
+const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
 const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
@@ -194,6 +195,7 @@ type VideoModeState = {
   deadAirSpans: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   highlightImageIndex: number;
+  lastDialogEndedAt?: number;
   outputs: VideoModeOutputs;
   sourceRange: VideoModeSourceRange;
   startedAt?: number;
@@ -265,12 +267,19 @@ const CURSOR_REST_BEFORE_ACTION_MS = 200;
 const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
 const TEXT_CURSOR_HOLD_IDEAL_MS = 800;
 const TEXT_CURSOR_POINTER_TAIL_MS = 200;
+const DIALOG_POST_ROLL_MS = 1000;
 
 type HighlightInput = {
   durationMs: number;
   image: string;
   inputIndex: number;
   path: string;
+};
+
+type DialogPostFrameInput = {
+  inputIndex: number;
+  path: string;
+  viewport: VideoModeViewport;
 };
 
 type PointerInput = {
@@ -872,6 +881,11 @@ const recordDialogHighlights = async (options: {
     await record("click", snapshot.buttonRect);
   } finally {
     await removeVideoModeDialogOverlay(options.page, host);
+    if (options.state.startedAt !== undefined) {
+      options.state.lastDialogEndedAt = Math.round(
+        performance.now() - options.state.startedAt,
+      );
+    }
   }
 };
 
@@ -1603,6 +1617,8 @@ const videoSpanExpression = (spans: VideoModeSpan[]) => {
 const renderedVideoFilter = (options: {
   clickPointerInput?: PointerInput;
   cursorPointerInput?: PointerInput;
+  dialogPostFrameInput: DialogPostFrameInput | undefined;
+  dialogPostHoldMs: number;
   finalHoldMs: number;
   highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
@@ -1683,18 +1699,40 @@ const renderedVideoFilter = (options: {
     filters.push(`${operations.join(",")}[${label}]`);
   }
 
-  const concatLabel = labels.length === 1 ? labels[0].slice(1, -1) : "renderconcat";
+  let concatLabel = labels.length === 1 ? labels[0].slice(1, -1) : "renderconcat";
 
   if (labels.length > 1) {
     filters.push(`${labels.join("")}concat=n=${labels.length}:v=1:a=0[${concatLabel}]`);
   }
 
+  const dialogPostHoldMs = Math.max(0, Math.round(options.dialogPostHoldMs));
   const finalHoldMs = Math.max(0, Math.round(options.finalHoldMs));
-  const outputLabel = finalHoldMs > 0 ? "renderout" : concatLabel;
+  let remainingFinalHoldMs = Math.max(finalHoldMs, dialogPostHoldMs);
 
-  if (finalHoldMs > 0) {
+  if (dialogPostHoldMs > 0 && options.dialogPostFrameInput) {
+    const scaledViewport = scaledViewportSize(
+      options.dialogPostFrameInput.viewport,
+      options.video,
+    );
+    const cleanPostHoldMs = Math.max(dialogPostHoldMs, finalHoldMs);
     filters.push(
-      `[${concatLabel}]tpad=stop_mode=clone:stop_duration=${formatSeconds(finalHoldMs)}[${outputLabel}]`,
+      [
+        `[${options.dialogPostFrameInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+        `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+        `trim=start=0:end=${formatSeconds(cleanPostHoldMs)}`,
+        "setpts=PTS-STARTPTS[dialogpost]",
+      ].join(","),
+    );
+    filters.push(`[${concatLabel}][dialogpost]concat=n=2:v=1:a=0[renderdialogpost]`);
+    concatLabel = "renderdialogpost";
+    remainingFinalHoldMs = 0;
+  }
+
+  const outputLabel = remainingFinalHoldMs > 0 ? "renderout" : concatLabel;
+
+  if (remainingFinalHoldMs > 0) {
+    filters.push(
+      `[${concatLabel}]tpad=stop_mode=clone:stop_duration=${formatSeconds(remainingFinalHoldMs)}[${outputLabel}]`,
     );
   }
 
@@ -2114,6 +2152,8 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
 };
 
 const renderVideo = async (options: {
+  dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
+  dialogPostHoldMs: number;
   finalHoldMs: number;
   highlightMode: "outline" | "pointer";
   highlights: VideoModeHighlight[];
@@ -2149,11 +2189,19 @@ const renderVideo = async (options: {
       inputIndex: index + 1,
       path: join(options.outputDir, highlight.image!),
     }));
+  const dialogPostFrameInput: DialogPostFrameInput | undefined = options.dialogPostFrame
+    ? {
+        inputIndex: highlightInputs.length + 1,
+        path: options.dialogPostFrame.path,
+        viewport: options.dialogPostFrame.viewport,
+      }
+    : undefined;
+  const pointerInputOffset = highlightInputs.length + (dialogPostFrameInput ? 1 : 0);
   const shouldRenderPointer = options.highlightMode === "pointer" && options.highlights.length > 0;
   const cursorPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_POINTER_HOTSPOT,
-        inputIndex: highlightInputs.length + 1,
+        inputIndex: pointerInputOffset + 1,
         path: join(options.outputDir, VIDEO_MODE_POINTER_FILE),
         size: VIDEO_MODE_POINTER_SIZE,
         sourceSize: VIDEO_MODE_POINTER_SOURCE_SIZE,
@@ -2162,7 +2210,7 @@ const renderVideo = async (options: {
   const clickPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_CLICK_POINTER_HOTSPOT,
-        inputIndex: highlightInputs.length + 2,
+        inputIndex: pointerInputOffset + 2,
         path: join(options.outputDir, VIDEO_MODE_CLICK_POINTER_FILE),
         size: VIDEO_MODE_CLICK_POINTER_SIZE,
         sourceSize: VIDEO_MODE_CLICK_POINTER_SOURCE_SIZE,
@@ -2171,7 +2219,7 @@ const renderVideo = async (options: {
   const textPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_TEXT_POINTER_HOTSPOT,
-        inputIndex: highlightInputs.length + 3,
+        inputIndex: pointerInputOffset + 3,
         path: join(options.outputDir, VIDEO_MODE_TEXT_POINTER_FILE),
         size: VIDEO_MODE_TEXT_POINTER_SIZE,
         sourceSize: VIDEO_MODE_TEXT_POINTER_SOURCE_SIZE,
@@ -2195,6 +2243,8 @@ const renderVideo = async (options: {
   const filter = renderedVideoFilter({
     clickPointerInput,
     cursorPointerInput,
+    dialogPostFrameInput,
+    dialogPostHoldMs: options.dialogPostHoldMs,
     finalHoldMs: options.finalHoldMs,
     highlightMode: options.highlightMode,
     highlightInputs,
@@ -2225,6 +2275,9 @@ const renderVideo = async (options: {
         "-i",
         input.path,
       ]),
+      ...(dialogPostFrameInput
+        ? ["-loop", "1", "-i", dialogPostFrameInput.path]
+        : []),
       ...(cursorPointerInput ? ["-loop", "1", "-i", cursorPointerInput.path] : []),
       ...(clickPointerInput ? ["-loop", "1", "-i", clickPointerInput.path] : []),
       ...(textPointerInput ? ["-loop", "1", "-i", textPointerInput.path] : []),
@@ -2424,6 +2477,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
         state.highlights = [];
+        state.lastDialogEndedAt = undefined;
         state.outputs = {};
         state.sourceRange = {};
         if (state.startedAt) {
@@ -2533,6 +2587,19 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
+        const naturalPostDialogMs =
+          state.lastDialogEndedAt === undefined
+            ? 0
+            : renderVideoSegments({
+                deadAir,
+                finalEnd: getVideoTimestamp(),
+                start: state.lastDialogEndedAt,
+                thresholdMs: deadAirThreshold,
+              }).reduce((total, segment) => total + (segment.end - segment.start) / segment.speed, 0);
+        const dialogPostHoldMs =
+          state.lastDialogEndedAt === undefined
+            ? 0
+            : Math.max(0, DIALOG_POST_ROLL_MS - naturalPostDialogMs);
         // Note: sourceRange is read fresh from state below, not snapshotted here —
         // a selector `waitFor` can still resolve during the awaits in this handler
         // and call setStartTime(), and the render must see that.
@@ -2541,6 +2608,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         if (video) {
           const paths = videoModeOutputPaths(testInfo);
           await mkdir(testInfo.outputDir, { recursive: true });
+          let dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
+
+          if (dialogPostHoldMs > 0 && !page.isClosed()) {
+            const viewport = page.viewportSize();
+            if (!viewport) {
+              throw new Error("videoMode cannot capture a post-dialog frame without a viewport");
+            }
+            const path = join(testInfo.outputDir, VIDEO_MODE_DIALOG_POST_FRAME_FILE);
+            await page.screenshot({ path, scale: "css" });
+            dialogPostFrame = { path, viewport };
+          }
 
           if (!page.isClosed()) {
             await page.close({ runBeforeUnload: false });
@@ -2591,6 +2669,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           ) {
             const wroteRenderedVideo = await renderVideo({
               deadAir,
+              dialogPostFrame,
+              dialogPostHoldMs,
               finalHoldMs: finalHold,
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights,
