@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. Alert, confirm, and prompt interactions render as synthetic paused frames with the real outcome; middlewright and Iterate consumer tests are green, and matching before/after videos render inline on the pull request.
+The dialog rendering implementation is complete and green. A review follow-up is in progress to make the middlewright confirm proof finish on a visible “Discarded!” state, wait for that state, and refresh both PR videos.
 
 ## Goal
 
@@ -31,6 +31,7 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - [x] Document video-mode dialog behavior and any limitations. *README documents artifact-only synthesis and the unsupported beforeunload case.*
 - [x] Run build, typecheck, and focused/full tests. *Typecheck, build, publint, and 61 passing tests completed locally (3 provider-gated tests skipped).*
 - [x] Attach matching before/after videos to the pull request and update its reviewer-oriented body. *Uploaded both WebM clips through GitHub's authenticated attachment flow; the PR body renders two inline video players.*
+- [ ] Make the confirm rendering spec visibly finish on “Discarded!”, wait for it, and replace both middlewright PR videos.
 
 ## Implementation log
 
@@ -40,3 +41,4 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - 2026-07-17: Middlewright CI passed and published `https://pkg.pr.new/middlewright@4` at commit `2cb2a4e`. Iterate PR #2098 consumed that artifact and its unchanged IDE discard spec produced visible Cancel and OK dialog phases.
 - 2026-07-17: Added coverage for synchronous dialog handlers registered before `addPlugins`; video mode now prepends its observer so registration order cannot skip annotation or trigger a second automatic dismissal.
 - 2026-07-17: Uploaded matching before/after recordings to PR #4, verified GitHub rendered both as inline `<video>` players, and completed the reviewer-oriented PR body.
+- 2026-07-17: Review follow-up requested a visible post-dialog “Discarded!” state in the confirm proof and refreshed matching videos.
