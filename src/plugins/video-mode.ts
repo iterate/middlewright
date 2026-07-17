@@ -2420,10 +2420,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           await page.addInitScript(installVideoModeDialogOverlay);
           await page.evaluate(installVideoModeDialogOverlay);
           dialogPage = page;
+          const dialogEmitter = page as Page & {
+            listenerCount(event: "dialog"): number;
+            prependListener(event: "dialog", listener: (dialog: Dialog) => void): Page;
+          };
           onDialog = (dialog) => {
-            const dialogListenerCount = (
-              page as Page & { listenerCount(event: "dialog"): number }
-            ).listenerCount("dialog");
+            const dialogListenerCount = dialogEmitter.listenerCount("dialog");
 
             if (dialog.type() === "beforeunload") {
               if (dialogListenerCount === 1) {
@@ -2475,7 +2477,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               void dialog.dismiss();
             }
           };
-          page.on("dialog", onDialog);
+          dialogEmitter.prependListener("dialog", onDialog);
         }
 
         // Start the video from the moment the app's "ready" element first shows.

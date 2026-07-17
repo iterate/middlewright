@@ -223,6 +223,42 @@ test("records an alert acknowledgement", async ({ page }, testInfo) => {
   });
 });
 
+test("records dialogs handled by a listener registered before video mode", async ({
+  page,
+}, testInfo) => {
+  page.once("dialog", (dialog) => dialog.accept());
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="continue">Continue</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#continue").addEventListener("click", () => {
+        document.querySelector("#result").textContent = confirm("Continue?") ? "yes" : "no";
+      });
+    </script>
+  `);
+
+  await plugged.locator("#continue").click();
+
+  await expect(plugged.locator("#result")).toHaveText("yes");
+  expect((await video.metadata()).highlights).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        dialog: expect.objectContaining({ message: "Continue?" }),
+      }),
+    ]),
+  );
+});
+
 test("skipped methods are not highlighted", async ({ page }, testInfo) => {
   const video = videoMode({
     finalHold: 50,
