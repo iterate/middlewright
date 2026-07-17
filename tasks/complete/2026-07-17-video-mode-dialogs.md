@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The requested visible-result follow-up is complete and green. Final review found a nested-dialog recording race; focused regression coverage and serialization are now in progress before the PR returns to complete.
+Complete. The visible-result follow-up and final review fix are green: the confirm proof ends on “Discarded!”, refreshed videos are inline, and back-to-back dialog captures are serialized without delaying native resolution.
 
 ## Goal
 
@@ -32,7 +32,7 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - [x] Run build, typecheck, and focused/full tests. *Typecheck, build, publint, and 61 passing tests completed locally (3 provider-gated tests skipped).*
 - [x] Attach matching before/after videos to the pull request and update its reviewer-oriented body. *Uploaded both WebM clips through GitHub's authenticated attachment flow; the PR body renders two inline video players.*
 - [x] Make the confirm rendering spec visibly finish on “Discarded!”, wait for it, and replace both middlewright PR videos. *The fixture renders the accepted result, waits for the exact visible text, holds the final frame, and the refreshed inline before/after clips both end there.*
-- [ ] Serialize back-to-back dialog highlight capture so one dialog cannot replace another's synthetic overlay during recording.
+- [x] Serialize back-to-back dialog highlight capture so one dialog cannot replace another's synthetic overlay during recording. *Capture order is reserved before native resolution, synthetic hosts are isolated one at a time, and the regression verifies both generated screenshots remain readable and ordered.*
 
 ## Implementation log
 
@@ -45,3 +45,4 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - 2026-07-17: Review follow-up requested a visible post-dialog “Discarded!” state in the confirm proof and refreshed matching videos.
 - 2026-07-17: Added the visible result and exact `waitFor()`, regenerated the baseline and dialog-aware recordings from the matching fixture, visually checked the dialog and final frames, and replaced both inline PR videos through Playwriter.
 - 2026-07-17: Cursor Bugbot identified a credible race when page JavaScript opens another dialog immediately after accepting the first; added it as a release-blocking review follow-up.
+- 2026-07-17: Reproduced the race, serialized/isolate queued captures in commit `4e750a1`, replied to and resolved the review thread, and removed the pickup reaction. Typecheck, build, publint, and the 62-pass suite are green.
