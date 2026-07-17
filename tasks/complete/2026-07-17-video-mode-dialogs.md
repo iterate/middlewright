@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The dialog implementation and review fixes are green. A final pacing follow-up is in progress to guarantee at least one second of post-dialog video without requiring fixture-specific waits or final holds.
+Complete. Dialog synthesis, pointer actions, and one-second post-dialog pacing are implemented and documented; local validation, CI, reviews, consumer proof, and refreshed inline videos are green.
 
 ## Goal
 
@@ -29,12 +29,12 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - [x] Pause on the synthetic dialog and animate the video-mode cursor to the chosen button; show prompt entry before confirmation. *Prompt acceptance records a fill-target frame followed by a filled-value/button-target frame.*
 - [x] Cover alert acceptance, confirm acceptance/dismissal, and prompt text in tests. *Coverage lives in `spec/video-mode.spec.ts`.*
 - [x] Document video-mode dialog behavior and any limitations. *README documents artifact-only synthesis and the unsupported beforeunload case.*
-- [x] Run build, typecheck, and focused/full tests. *Typecheck, build, publint, and 61 passing tests completed locally (3 provider-gated tests skipped).*
+- [x] Run build, typecheck, and focused/full tests. *Typecheck, build, publint, and 64 passing tests completed locally (3 provider-gated tests skipped).*
 - [x] Attach matching before/after videos to the pull request and update its reviewer-oriented body. *Uploaded both WebM clips through GitHub's authenticated attachment flow; the PR body renders two inline video players.*
-- [x] Make the confirm rendering spec visibly finish on “Discarded!”, wait for it, and replace both middlewright PR videos. *The fixture renders the accepted result, waits for the exact visible text, holds the final frame, and the refreshed inline before/after clips both end there.*
+- [x] Make the confirm rendering spec visibly finish on “Discarded!”, wait for it, and replace both middlewright PR videos. *The fixture renders the accepted result and waits for the exact visible text as an outcome assertion; pacing no longer relies on a test delay or configured final hold.*
 - [x] Serialize back-to-back dialog highlight capture so one dialog cannot replace another's synthetic overlay during recording. *Capture order is reserved before native resolution, synthetic hosts are isolated one at a time, and the regression verifies both generated screenshots remain readable and ordered.*
 - [x] Record Playwright's automatic dismissal of an unhandled alert against the alert's sole OK control. *Native auto-dismiss behavior remains unchanged; recording metadata and the pointer normalize that closure to alert acknowledgement.*
-- [ ] Guarantee at least one second of clean post-dialog video, extending the final page frame only when natural footage is shorter.
+- [x] Guarantee at least one second of clean post-dialog video, extending the final page frame only when natural footage is shorter. *Rendered-time calculation respects dead-air compression; short tails append only the missing duration from a clean final screenshot, while a regression proves long natural tails are unchanged.*
 
 ## Implementation log
 
@@ -51,3 +51,5 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - 2026-07-17: Bugbot re-review identified that automatic alert dismissal records a nonexistent Cancel target; added a focused release-blocking follow-up.
 - 2026-07-17: Added a failing no-listener alert spec, normalized its recorded action to OK acknowledgement in commit `1d5104f`, then replied to/resolved the thread and removed the pickup reaction. The 63-pass suite is green.
 - 2026-07-17: Follow-up requested system-level post-dialog pacing so Iterate and other consumers do not need scenario-specific sleeps or `finalHold` settings.
+- 2026-07-17: Added failing-first ffmpeg coverage for short and naturally sufficient tails, then implemented renderer-owned one-second post-roll in commit `3e00f54`. The no-delay/`finalHold: 0` fixture ends visibly on “Discarded!” and the full 64-pass suite is green.
+- 2026-07-17: Published immutable preview `https://pkg.pr.new/middlewright@3e00f54`; Iterate PR #2098's unchanged IDE discard spec generated the clean final-page extension and passed. Replaced both PRs' after clips through Playwriter and verified each body has two inline video players.
