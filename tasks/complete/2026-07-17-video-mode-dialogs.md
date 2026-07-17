@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation and verification are complete. Alert, confirm, and prompt interactions render as synthetic paused frames with the real outcome; middlewright CI and the Iterate consumer proof are green, leaving only authenticated PR media upload and final review monitoring.
+Complete. Alert, confirm, and prompt interactions render as synthetic paused frames with the real outcome; middlewright and Iterate consumer tests are green, and matching before/after videos render inline on the pull request.
 
 ## Goal
 
@@ -30,7 +30,7 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - [x] Cover alert acceptance, confirm acceptance/dismissal, and prompt text in tests. *Coverage lives in `spec/video-mode.spec.ts`.*
 - [x] Document video-mode dialog behavior and any limitations. *README documents artifact-only synthesis and the unsupported beforeunload case.*
 - [x] Run build, typecheck, and focused/full tests. *Typecheck, build, publint, and 61 passing tests completed locally (3 provider-gated tests skipped).*
-- [ ] Attach matching before/after videos to the pull request and update its reviewer-oriented body.
+- [x] Attach matching before/after videos to the pull request and update its reviewer-oriented body. *Uploaded both WebM clips through GitHub's authenticated attachment flow; the PR body renders two inline video players.*
 
 ## Implementation log
 
@@ -39,3 +39,4 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - 2026-07-17: Prompt recording now emits a text-input phase with the default value and a decision phase with the supplied value. The existing cursor planner supplies the text and click pointers without adding real-time holds to the test.
 - 2026-07-17: Middlewright CI passed and published `https://pkg.pr.new/middlewright@4` at commit `2cb2a4e`. Iterate PR #2098 consumed that artifact and its unchanged IDE discard spec produced visible Cancel and OK dialog phases.
 - 2026-07-17: Added coverage for synchronous dialog handlers registered before `addPlugins`; video mode now prepends its observer so registration order cannot skip annotation or trigger a second automatic dismissal.
+- 2026-07-17: Uploaded matching before/after recordings to PR #4, verified GitHub rendered both as inline `<video>` players, and completed the reviewer-oriented PR body.
