@@ -224,6 +224,44 @@ test("records an alert acknowledgement", async ({ page }, testInfo) => {
   });
 });
 
+test("records automatic alert dismissal as an OK acknowledgement", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="publish">Publish</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#publish").addEventListener("click", () => {
+        alert("Release published");
+        document.querySelector("#result").textContent = "acknowledged";
+      });
+    </script>
+  `);
+
+  await plugged.locator("#publish").click();
+
+  await expect(plugged.locator("#result")).toHaveText("acknowledged");
+  await expect(video.metadata()).resolves.toMatchObject({
+    highlights: expect.arrayContaining([
+      expect.objectContaining({
+        dialog: {
+          action: "accept",
+          message: "Release published",
+          type: "alert",
+        },
+      }),
+    ]),
+  });
+});
+
 test("records dialogs handled by a listener registered before video mode", async ({
   page,
 }, testInfo) => {

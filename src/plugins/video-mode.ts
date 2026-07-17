@@ -815,6 +815,7 @@ const recordDialogHighlights = async (options: {
   testInfo: TestInfo;
   thickness: number;
 }) => {
+  const action = options.dialog.type() === "alert" ? "accept" : options.action;
   const host = await isolateNextVideoModeDialogOverlay(options.page);
   if (options.state.startedAt === undefined || options.durationMs <= 0) {
     await removeVideoModeDialogOverlay(options.page, host);
@@ -822,10 +823,10 @@ const recordDialogHighlights = async (options: {
   }
 
   try {
-    const snapshot = await videoModeDialogOverlaySnapshot(host, options.action);
+    const snapshot = await videoModeDialogOverlaySnapshot(host, action);
     await mkdir(options.testInfo.outputDir, { recursive: true });
     const dialog: VideoModeDialogAnnotation = {
-      action: options.action,
+      action,
       message: options.dialog.message(),
       ...(options.promptText === undefined ? {} : { promptText: options.promptText }),
       type: options.dialog.type() as VideoModeDialogAnnotation["type"],
@@ -854,7 +855,7 @@ const recordDialogHighlights = async (options: {
 
     if (
       dialog.type === "prompt" &&
-      options.action === "accept" &&
+      action === "accept" &&
       options.promptText !== undefined &&
       snapshot.inputRect
     ) {
@@ -865,7 +866,7 @@ const recordDialogHighlights = async (options: {
     }
 
     await setVideoModeDialogOverlayState(host, {
-      action: options.action,
+      action,
       promptText: options.promptText,
     });
     await record("click", snapshot.buttonRect);
