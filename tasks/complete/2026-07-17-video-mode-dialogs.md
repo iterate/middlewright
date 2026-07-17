@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. The visible-result and both review follow-ups are green: refreshed videos finish on “Discarded!”, nested captures are serialized, and automatically dismissed alerts target their sole visible OK control.
+The dialog implementation and review fixes are green. A final pacing follow-up is in progress to guarantee at least one second of post-dialog video without requiring fixture-specific waits or final holds.
 
 ## Goal
 
@@ -34,6 +34,7 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - [x] Make the confirm rendering spec visibly finish on “Discarded!”, wait for it, and replace both middlewright PR videos. *The fixture renders the accepted result, waits for the exact visible text, holds the final frame, and the refreshed inline before/after clips both end there.*
 - [x] Serialize back-to-back dialog highlight capture so one dialog cannot replace another's synthetic overlay during recording. *Capture order is reserved before native resolution, synthetic hosts are isolated one at a time, and the regression verifies both generated screenshots remain readable and ordered.*
 - [x] Record Playwright's automatic dismissal of an unhandled alert against the alert's sole OK control. *Native auto-dismiss behavior remains unchanged; recording metadata and the pointer normalize that closure to alert acknowledgement.*
+- [ ] Guarantee at least one second of clean post-dialog video, extending the final page frame only when natural footage is shorter.
 
 ## Implementation log
 
@@ -49,3 +50,4 @@ Make `videoMode` recordings show alert, confirm, and prompt interactions even th
 - 2026-07-17: Reproduced the race, serialized/isolate queued captures in commit `4e750a1`, replied to and resolved the review thread, and removed the pickup reaction. Typecheck, build, publint, and the 62-pass suite are green.
 - 2026-07-17: Bugbot re-review identified that automatic alert dismissal records a nonexistent Cancel target; added a focused release-blocking follow-up.
 - 2026-07-17: Added a failing no-listener alert spec, normalized its recorded action to OK acknowledgement in commit `1d5104f`, then replied to/resolved the thread and removed the pickup reaction. The 63-pass suite is green.
+- 2026-07-17: Follow-up requested system-level post-dialog pacing so Iterate and other consumers do not need scenario-specific sleeps or `finalHold` settings.
