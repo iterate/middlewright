@@ -484,7 +484,7 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
 }, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({
-    finalHold: 0,
+    finalHold: 1_000,
     highlight: { mode: "pointer", duration: highlightDurationMs },
     trimStart: "never",
   });
@@ -507,11 +507,23 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
           margin: 80px;
           padding: 14px 20px;
         }
+        #result {
+          display: block;
+          margin: 0 80px;
+          color: rgb(255, 255, 255);
+          font: 700 32px system-ui;
+        }
       </style>
       <button id="discard">Discard file</button>
+      <output id="result"></output>
       <script>
         document.querySelector("#discard").addEventListener("click", () => {
-          document.body.dataset.result = confirm("Discard unsaved changes?") ? "discarded" : "kept";
+          const result = confirm("Discard unsaved changes?")
+            ? "Discarded!"
+            : "Kept";
+          setTimeout(() => {
+            document.querySelector("#result").textContent = result;
+          }, 200);
         });
       </script>
     `);
@@ -519,7 +531,7 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
 
     await plugged.locator("#discard").click();
 
-    await expect(plugged.locator("body")).toHaveAttribute("data-result", "discarded");
+    await plugged.getByText("Discarded!", { exact: true }).waitFor();
   }
 
   const paths = video.outputPaths();
