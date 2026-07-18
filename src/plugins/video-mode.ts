@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
-import type { Locator, TestInfo } from "@playwright/test";
+import type { Dialog, Locator, Page, TestInfo } from "@playwright/test";
 import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
@@ -23,6 +23,8 @@ const VIDEO_MODE_REPORT_PLAYER_FILE = "video-mode-report.html";
 const VIDEO_MODE_POINTER_FILE = "video-mode-pointer.png";
 const VIDEO_MODE_CLICK_POINTER_FILE = "video-mode-click-pointer.png";
 const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
+const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
+const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -82,11 +84,19 @@ export type VideoModeViewport = {
 export type VideoModeHighlight = VideoModeSpan & {
   actionEnd?: number;
   color: string;
+  dialog?: VideoModeDialogAnnotation;
   image?: string;
   method?: OverrideableMethod;
   rect: VideoModeRect;
   thickness: number;
   viewport: VideoModeViewport;
+};
+
+export type VideoModeDialogAnnotation = {
+  action: "accept" | "dismiss";
+  message: string;
+  promptText?: string;
+  type: "alert" | "confirm" | "prompt";
 };
 
 export type VideoModeMetadata = {
@@ -185,9 +195,16 @@ type VideoModeState = {
   deadAirSpans: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   highlightImageIndex: number;
+  lastDialogEndedAt?: number;
   outputs: VideoModeOutputs;
   sourceRange: VideoModeSourceRange;
   startedAt?: number;
+};
+
+type VideoModeDialogOverlaySnapshot = {
+  buttonRect: VideoModeRect;
+  inputRect?: VideoModeRect;
+  viewport: VideoModeViewport;
 };
 
 type RenderVideoSegment = {
@@ -250,12 +267,19 @@ const CURSOR_REST_BEFORE_ACTION_MS = 200;
 const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
 const TEXT_CURSOR_HOLD_IDEAL_MS = 800;
 const TEXT_CURSOR_POINTER_TAIL_MS = 200;
+const DIALOG_POST_ROLL_MS = 1000;
 
 type HighlightInput = {
   durationMs: number;
   image: string;
   inputIndex: number;
   path: string;
+};
+
+type DialogPostFrameInput = {
+  inputIndex: number;
+  path: string;
+  viewport: VideoModeViewport;
 };
 
 type PointerInput = {
@@ -555,6 +579,313 @@ const readVideoModeMetadata = async (
     }
 
     throw error;
+  }
+};
+
+const installVideoModeDialogOverlay = () => {
+  const videoWindow = window as Window & {
+    __middlewrightVideoModeDialogsInstalled?: boolean;
+  };
+
+  if (videoWindow.__middlewrightVideoModeDialogsInstalled) {
+    return;
+  }
+
+  videoWindow.__middlewrightVideoModeDialogsInstalled = true;
+  const originalAlert = window.alert.bind(window);
+  const originalConfirm = window.confirm.bind(window);
+  const originalPrompt = window.prompt.bind(window);
+
+  const messageText = (message: unknown, argumentCount: number) => {
+    return argumentCount === 0 ? "" : String(message);
+  };
+
+  const showOverlay = (
+    type: "alert" | "confirm" | "prompt",
+    message: string,
+    defaultValue: string,
+  ) => {
+    const host = document.createElement("div");
+    host.setAttribute("data-middlewright-video-mode-dialog", "");
+    host.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:2147483647",
+      "display:grid",
+      "place-items:center",
+      "background:rgba(15,23,42,.42)",
+      "pointer-events:none",
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+    ].join(";");
+
+    const panel = document.createElement("section");
+    panel.setAttribute("role", "dialog");
+    panel.style.cssText = [
+      "box-sizing:border-box",
+      "width:min(480px,calc(100vw - 48px))",
+      "border:1px solid #d1d5db",
+      "border-radius:12px",
+      "background:#fff",
+      "box-shadow:0 24px 70px rgba(0,0,0,.32)",
+      "color:#111827",
+      "padding:24px",
+    ].join(";");
+
+    const title = document.createElement("strong");
+    title.textContent = type === "alert" ? "Alert" : type === "confirm" ? "Confirm" : "Prompt";
+    title.style.cssText = "display:block;font-size:17px;line-height:24px;margin:0 0 10px";
+    panel.append(title);
+
+    const copy = document.createElement("div");
+    copy.setAttribute("data-dialog-message", "");
+    copy.textContent = message;
+    copy.style.cssText = "font-size:15px;line-height:22px;overflow-wrap:anywhere;white-space:pre-wrap";
+    panel.append(copy);
+
+    if (type === "prompt") {
+      const input = document.createElement("input");
+      input.setAttribute("data-dialog-input", "");
+      input.value = defaultValue;
+      input.style.cssText = [
+        "box-sizing:border-box",
+        "width:100%",
+        "height:38px",
+        "margin-top:18px",
+        "border:1px solid #9ca3af",
+        "border-radius:7px",
+        "background:#fff",
+        "color:#111827",
+        "font:15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "padding:7px 10px",
+      ].join(";");
+      panel.append(input);
+    }
+
+    const actions = document.createElement("footer");
+    actions.style.cssText = "display:flex;justify-content:flex-end;gap:10px;margin-top:22px";
+    const button = (action: "accept" | "dismiss", label: string) => {
+      const element = document.createElement("button");
+      element.setAttribute("data-dialog-action", action);
+      element.textContent = label;
+      element.style.cssText = [
+        "box-sizing:border-box",
+        "min-width:78px",
+        "height:36px",
+        "border:1px solid #9ca3af",
+        "border-radius:7px",
+        "background:#fff",
+        "color:#111827",
+        "font:600 14px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "padding:7px 14px",
+      ].join(";");
+      actions.append(element);
+      return element;
+    };
+
+    if (type !== "alert") {
+      button("dismiss", "Cancel");
+    }
+    button("accept", "OK");
+    panel.append(actions);
+    host.append(panel);
+    document.documentElement.append(host);
+
+    return {
+      complete: (action: "accept" | "dismiss", promptText?: string) => {
+        host.setAttribute("data-dialog-resolved", "");
+        host.setAttribute("data-dialog-result", action);
+        if (promptText !== undefined) {
+          const input = host.querySelector<HTMLInputElement>("[data-dialog-input]");
+          if (input) input.value = promptText;
+        }
+        const selected = host.querySelector<HTMLButtonElement>(`[data-dialog-action="${action}"]`);
+        if (selected) {
+          selected.style.background = "#2563eb";
+          selected.style.borderColor = "#2563eb";
+          selected.style.color = "#fff";
+        }
+      },
+    };
+  };
+
+  window.alert = function (message?: unknown) {
+    const overlay = showOverlay("alert", messageText(message, arguments.length), "");
+    const result = originalAlert(messageText(message, arguments.length));
+    overlay.complete("accept");
+    return result;
+  };
+
+  window.confirm = function (message?: string) {
+    const text = messageText(message, arguments.length);
+    const overlay = showOverlay("confirm", text, "");
+    const result = originalConfirm(text);
+    overlay.complete(result ? "accept" : "dismiss");
+    return result;
+  };
+
+  window.prompt = function (message?: string, defaultValue?: string) {
+    const text = messageText(message, arguments.length);
+    const initialValue = arguments.length < 2 ? "" : String(defaultValue);
+    const overlay = showOverlay("prompt", text, initialValue);
+    const result = originalPrompt(text, initialValue);
+    overlay.complete(result === null ? "dismiss" : "accept", result === null ? undefined : result);
+    return result;
+  };
+};
+
+const videoModeDialogOverlaySnapshot = async (
+  host: Locator,
+  action: "accept" | "dismiss",
+): Promise<VideoModeDialogOverlaySnapshot> => {
+  return await host.evaluate((host, selectedAction) => {
+    const rectFor = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        height: rect.height,
+        width: rect.width,
+        x: rect.left,
+        y: rect.top,
+      };
+    };
+    const selected = host.querySelector(`[data-dialog-action="${selectedAction}"]`);
+    const input = host.querySelector("[data-dialog-input]");
+
+    if (!selected) {
+      throw new Error(`videoMode dialog overlay has no ${selectedAction} button`);
+    }
+
+    return {
+      buttonRect: rectFor(selected),
+      inputRect: input ? rectFor(input) : undefined,
+      viewport: {
+        height: window.innerHeight,
+        width: window.innerWidth,
+      },
+    };
+  }, action);
+};
+
+const isolateNextVideoModeDialogOverlay = async (page: Page) => {
+  const host = page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}][data-dialog-resolved]`).first();
+  await host.waitFor({ state: "attached", timeout: 1000 });
+  await host.evaluate((selected, attribute) => {
+    for (const candidate of document.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
+      candidate.style.display = candidate === selected ? "grid" : "none";
+    }
+  }, VIDEO_MODE_DIALOG_ATTRIBUTE);
+  return host;
+};
+
+const removeVideoModeDialogOverlay = async (page: Page, host: Locator) => {
+  await host.evaluate((element) => element.remove()).catch(() => {});
+  await page
+    .locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}]`)
+    .evaluateAll((hosts) => hosts.forEach((candidate) => candidate.style.removeProperty("display")))
+    .catch(() => {});
+};
+
+const setVideoModeDialogOverlayState = async (
+  host: Locator,
+  options: { action?: "accept" | "dismiss"; promptText?: string },
+) => {
+  await host.evaluate((host, state) => {
+    const input = host.querySelector<HTMLInputElement>("[data-dialog-input]");
+    if (input && state.promptText !== undefined) {
+      input.value = state.promptText;
+    }
+
+    for (const button of host.querySelectorAll<HTMLButtonElement>("[data-dialog-action]")) {
+      button.style.background = "#fff";
+      button.style.borderColor = "#9ca3af";
+      button.style.color = "#111827";
+    }
+
+    if (state.action) {
+      const selected = host.querySelector<HTMLButtonElement>(
+        `[data-dialog-action="${state.action}"]`,
+      );
+      if (selected) {
+        selected.style.background = "#2563eb";
+        selected.style.borderColor = "#2563eb";
+        selected.style.color = "#fff";
+      }
+    }
+  }, options);
+};
+
+const recordDialogHighlights = async (options: {
+  action: "accept" | "dismiss";
+  color: string;
+  dialog: Dialog;
+  durationMs: number;
+  page: Page;
+  promptText?: string;
+  state: VideoModeState;
+  testInfo: TestInfo;
+  thickness: number;
+}) => {
+  const action = options.dialog.type() === "alert" ? "accept" : options.action;
+  const host = await isolateNextVideoModeDialogOverlay(options.page);
+  if (options.state.startedAt === undefined || options.durationMs <= 0) {
+    await removeVideoModeDialogOverlay(options.page, host);
+    return;
+  }
+
+  try {
+    const snapshot = await videoModeDialogOverlaySnapshot(host, action);
+    await mkdir(options.testInfo.outputDir, { recursive: true });
+    const dialog: VideoModeDialogAnnotation = {
+      action,
+      message: options.dialog.message(),
+      ...(options.promptText === undefined ? {} : { promptText: options.promptText }),
+      type: options.dialog.type() as VideoModeDialogAnnotation["type"],
+    };
+    const record = async (method: OverrideableMethod, rect: VideoModeRect) => {
+      const image = `video-mode-highlight-${options.state.highlightImageIndex}.png`;
+      options.state.highlightImageIndex += 1;
+      await options.page.screenshot({
+        path: join(options.testInfo.outputDir, image),
+        scale: "css",
+      });
+      const start = Math.round(performance.now() - options.state.startedAt!);
+      options.state.highlights.push({
+        actionEnd: start,
+        color: options.color,
+        dialog,
+        end: start + Math.round(options.durationMs),
+        image,
+        method,
+        rect,
+        start,
+        thickness: options.thickness,
+        viewport: snapshot.viewport,
+      });
+    };
+
+    if (
+      dialog.type === "prompt" &&
+      action === "accept" &&
+      options.promptText !== undefined &&
+      snapshot.inputRect
+    ) {
+      await setVideoModeDialogOverlayState(host, {
+        promptText: options.dialog.defaultValue(),
+      });
+      await record("fill", snapshot.inputRect);
+    }
+
+    await setVideoModeDialogOverlayState(host, {
+      action,
+      promptText: options.promptText,
+    });
+    await record("click", snapshot.buttonRect);
+  } finally {
+    await removeVideoModeDialogOverlay(options.page, host);
+    if (options.state.startedAt !== undefined) {
+      options.state.lastDialogEndedAt = Math.round(
+        performance.now() - options.state.startedAt,
+      );
+    }
   }
 };
 
@@ -1286,6 +1617,8 @@ const videoSpanExpression = (spans: VideoModeSpan[]) => {
 const renderedVideoFilter = (options: {
   clickPointerInput?: PointerInput;
   cursorPointerInput?: PointerInput;
+  dialogPostFrameInput: DialogPostFrameInput | undefined;
+  dialogPostHoldMs: number;
   finalHoldMs: number;
   highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
@@ -1366,18 +1699,40 @@ const renderedVideoFilter = (options: {
     filters.push(`${operations.join(",")}[${label}]`);
   }
 
-  const concatLabel = labels.length === 1 ? labels[0].slice(1, -1) : "renderconcat";
+  let concatLabel = labels.length === 1 ? labels[0].slice(1, -1) : "renderconcat";
 
   if (labels.length > 1) {
     filters.push(`${labels.join("")}concat=n=${labels.length}:v=1:a=0[${concatLabel}]`);
   }
 
+  const dialogPostHoldMs = Math.max(0, Math.round(options.dialogPostHoldMs));
   const finalHoldMs = Math.max(0, Math.round(options.finalHoldMs));
-  const outputLabel = finalHoldMs > 0 ? "renderout" : concatLabel;
+  let remainingFinalHoldMs = Math.max(finalHoldMs, dialogPostHoldMs);
 
-  if (finalHoldMs > 0) {
+  if (dialogPostHoldMs > 0 && options.dialogPostFrameInput) {
+    const scaledViewport = scaledViewportSize(
+      options.dialogPostFrameInput.viewport,
+      options.video,
+    );
+    const cleanPostHoldMs = Math.max(dialogPostHoldMs, finalHoldMs);
     filters.push(
-      `[${concatLabel}]tpad=stop_mode=clone:stop_duration=${formatSeconds(finalHoldMs)}[${outputLabel}]`,
+      [
+        `[${options.dialogPostFrameInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+        `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+        `trim=start=0:end=${formatSeconds(cleanPostHoldMs)}`,
+        "setpts=PTS-STARTPTS[dialogpost]",
+      ].join(","),
+    );
+    filters.push(`[${concatLabel}][dialogpost]concat=n=2:v=1:a=0[renderdialogpost]`);
+    concatLabel = "renderdialogpost";
+    remainingFinalHoldMs = 0;
+  }
+
+  const outputLabel = remainingFinalHoldMs > 0 ? "renderout" : concatLabel;
+
+  if (remainingFinalHoldMs > 0) {
+    filters.push(
+      `[${concatLabel}]tpad=stop_mode=clone:stop_duration=${formatSeconds(remainingFinalHoldMs)}[${outputLabel}]`,
     );
   }
 
@@ -1797,6 +2152,8 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
 };
 
 const renderVideo = async (options: {
+  dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
+  dialogPostHoldMs: number;
   finalHoldMs: number;
   highlightMode: "outline" | "pointer";
   highlights: VideoModeHighlight[];
@@ -1832,11 +2189,19 @@ const renderVideo = async (options: {
       inputIndex: index + 1,
       path: join(options.outputDir, highlight.image!),
     }));
+  const dialogPostFrameInput: DialogPostFrameInput | undefined = options.dialogPostFrame
+    ? {
+        inputIndex: highlightInputs.length + 1,
+        path: options.dialogPostFrame.path,
+        viewport: options.dialogPostFrame.viewport,
+      }
+    : undefined;
+  const pointerInputOffset = highlightInputs.length + (dialogPostFrameInput ? 1 : 0);
   const shouldRenderPointer = options.highlightMode === "pointer" && options.highlights.length > 0;
   const cursorPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_POINTER_HOTSPOT,
-        inputIndex: highlightInputs.length + 1,
+        inputIndex: pointerInputOffset + 1,
         path: join(options.outputDir, VIDEO_MODE_POINTER_FILE),
         size: VIDEO_MODE_POINTER_SIZE,
         sourceSize: VIDEO_MODE_POINTER_SOURCE_SIZE,
@@ -1845,7 +2210,7 @@ const renderVideo = async (options: {
   const clickPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_CLICK_POINTER_HOTSPOT,
-        inputIndex: highlightInputs.length + 2,
+        inputIndex: pointerInputOffset + 2,
         path: join(options.outputDir, VIDEO_MODE_CLICK_POINTER_FILE),
         size: VIDEO_MODE_CLICK_POINTER_SIZE,
         sourceSize: VIDEO_MODE_CLICK_POINTER_SOURCE_SIZE,
@@ -1854,7 +2219,7 @@ const renderVideo = async (options: {
   const textPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
         hotspot: VIDEO_MODE_TEXT_POINTER_HOTSPOT,
-        inputIndex: highlightInputs.length + 3,
+        inputIndex: pointerInputOffset + 3,
         path: join(options.outputDir, VIDEO_MODE_TEXT_POINTER_FILE),
         size: VIDEO_MODE_TEXT_POINTER_SIZE,
         sourceSize: VIDEO_MODE_TEXT_POINTER_SOURCE_SIZE,
@@ -1878,6 +2243,8 @@ const renderVideo = async (options: {
   const filter = renderedVideoFilter({
     clickPointerInput,
     cursorPointerInput,
+    dialogPostFrameInput,
+    dialogPostHoldMs: options.dialogPostHoldMs,
     finalHoldMs: options.finalHoldMs,
     highlightMode: options.highlightMode,
     highlightInputs,
@@ -1908,6 +2275,9 @@ const renderVideo = async (options: {
         "-i",
         input.path,
       ]),
+      ...(dialogPostFrameInput
+        ? ["-loop", "1", "-i", dialogPostFrameInput.path]
+        : []),
       ...(cursorPointerInput ? ["-loop", "1", "-i", cursorPointerInput.path] : []),
       ...(clickPointerInput ? ["-loop", "1", "-i", clickPointerInput.path] : []),
       ...(textPointerInput ? ["-loop", "1", "-i", textPointerInput.path] : []),
@@ -1981,6 +2351,18 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     sourceRange: {},
     startedAt: performance.now(),
   };
+  const pendingDialogHighlights = new Set<Promise<void>>();
+  let dialogHighlightQueue = Promise.resolve();
+  const queueDialogHighlight = (capture: () => Promise<void>) => {
+    const recording = dialogHighlightQueue.then(capture);
+    dialogHighlightQueue = recording.catch(() => {});
+    pendingDialogHighlights.add(recording);
+    void recording.then(
+      () => pendingDialogHighlights.delete(recording),
+      () => pendingDialogHighlights.delete(recording),
+    );
+    return recording;
+  };
   let testInfoForOutputPaths: TestInfo | undefined;
   const getVideoTimestamp = () => {
     const now = performance.now();
@@ -1992,6 +2374,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
     getVideoTimestamp,
     metadata: async () => {
+      await Promise.all(pendingDialogHighlights);
       if (!testInfoForOutputPaths) {
         return metadataFor(state);
       }
@@ -2086,11 +2469,15 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
 
     testLifecycle: (emitter) => {
-      const offBeforeTest = emitter.on("beforeTest", ({ page }) => {
+      let dialogPage: Page | undefined;
+      let onDialog: ((dialog: Dialog) => void) | undefined;
+      const offBeforeTest = emitter.on("beforeTest", async ({ page, testInfo }) => {
+        dialogHighlightQueue = Promise.resolve();
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
         state.highlights = [];
+        state.lastDialogEndedAt = undefined;
         state.outputs = {};
         state.sourceRange = {};
         if (state.startedAt) {
@@ -2100,6 +2487,83 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
         } else {
           state.startedAt = performance.now();
+        }
+
+        if (highlight.mode !== "off") {
+          await page.addInitScript(installVideoModeDialogOverlay);
+          await page.evaluate(installVideoModeDialogOverlay);
+          dialogPage = page;
+          const dialogEmitter = page as Page & {
+            listenerCount(event: "dialog"): number;
+            prependListener(event: "dialog", listener: (dialog: Dialog) => void): Page;
+          };
+          onDialog = (dialog) => {
+            const dialogListenerCount = dialogEmitter.listenerCount("dialog");
+
+            if (dialog.type() === "beforeunload") {
+              if (dialogListenerCount === 1) {
+                void dialog.dismiss();
+              }
+              return;
+            }
+
+            const originalAccept = dialog.accept.bind(dialog);
+            const originalDismiss = dialog.dismiss.bind(dialog);
+            const recordResolution = async (
+              action: "accept" | "dismiss",
+              promptText: string | undefined,
+              resolveDialog: () => Promise<void>,
+            ) => {
+              let resolveRecording!: () => void;
+              let rejectRecording!: (reason: unknown) => void;
+              const dialogResolved = new Promise<void>((resolve, reject) => {
+                resolveRecording = resolve;
+                rejectRecording = reject;
+              });
+              const recording = queueDialogHighlight(async () => {
+                await dialogResolved;
+                await recordDialogHighlights({
+                  action,
+                  color: highlight.color,
+                  dialog,
+                  durationMs: highlight.durationMs,
+                  page,
+                  promptText,
+                  state,
+                  testInfo,
+                  thickness: highlight.thickness,
+                });
+              });
+
+              try {
+                await resolveDialog();
+                resolveRecording();
+              } catch (error) {
+                rejectRecording(error);
+                await recording.catch(() => {});
+                throw error;
+              }
+
+              await recording;
+            };
+
+            Object.assign(dialog, {
+              accept: async (promptText?: string) => {
+                await recordResolution("accept", promptText, () => originalAccept(promptText));
+              },
+              dismiss: async () => {
+                await recordResolution("dismiss", undefined, originalDismiss);
+              },
+            });
+
+            // Playwright auto-dismisses dialogs only when there are no dialog
+            // listeners. videoMode must preserve that behavior even though its
+            // observer necessarily counts as a listener.
+            if (dialogListenerCount === 1) {
+              void dialog.dismiss();
+            }
+          };
+          dialogEmitter.prependListener("dialog", onDialog);
         }
 
         // Start the video from the moment the app's "ready" element first shows.
@@ -2119,9 +2583,23 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       });
 
       const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
+        await Promise.all(pendingDialogHighlights);
         const metadataBeforeVideo = metadataFor(state);
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
+        const naturalPostDialogMs =
+          state.lastDialogEndedAt === undefined
+            ? 0
+            : renderVideoSegments({
+                deadAir,
+                finalEnd: getVideoTimestamp(),
+                start: state.lastDialogEndedAt,
+                thresholdMs: deadAirThreshold,
+              }).reduce((total, segment) => total + (segment.end - segment.start) / segment.speed, 0);
+        const dialogPostHoldMs =
+          state.lastDialogEndedAt === undefined
+            ? 0
+            : Math.max(0, DIALOG_POST_ROLL_MS - naturalPostDialogMs);
         // Note: sourceRange is read fresh from state below, not snapshotted here —
         // a selector `waitFor` can still resolve during the awaits in this handler
         // and call setStartTime(), and the render must see that.
@@ -2130,6 +2608,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         if (video) {
           const paths = videoModeOutputPaths(testInfo);
           await mkdir(testInfo.outputDir, { recursive: true });
+          let dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
+
+          if (dialogPostHoldMs > 0 && !page.isClosed()) {
+            const viewport = page.viewportSize();
+            if (!viewport) {
+              throw new Error("videoMode cannot capture a post-dialog frame without a viewport");
+            }
+            const path = join(testInfo.outputDir, VIDEO_MODE_DIALOG_POST_FRAME_FILE);
+            await page.screenshot({ path, scale: "css" });
+            dialogPostFrame = { path, viewport };
+          }
 
           if (!page.isClosed()) {
             await page.close({ runBeforeUnload: false });
@@ -2180,6 +2669,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           ) {
             const wroteRenderedVideo = await renderVideo({
               deadAir,
+              dialogPostFrame,
+              dialogPostHoldMs,
               finalHoldMs: finalHold,
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights,
@@ -2246,6 +2737,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       return () => {
         offBeforeTest();
         offAfterTestFinalize();
+        if (dialogPage && onDialog) {
+          dialogPage.off("dialog", onDialog);
+        }
       };
     },
   };

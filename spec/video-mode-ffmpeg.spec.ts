@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
@@ -477,6 +477,155 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
   });
   expect(pauseCenter.blue).toBeGreaterThan(pauseCenter.red + 80);
   expect(afterClickCenter.red).toBeGreaterThan(afterClickCenter.blue + 80);
+});
+
+test("renders an accepted confirm with a paused dialog and pointer click", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 900;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(17, 24, 39);
+        }
+        button {
+          margin: 80px;
+          padding: 14px 20px;
+        }
+        #result {
+          display: block;
+          margin: 0 80px;
+          color: rgb(255, 255, 255);
+          font: 700 32px system-ui;
+        }
+      </style>
+      <button id="discard">Discard file</button>
+      <output id="result"></output>
+      <script>
+        document.querySelector("#discard").addEventListener("click", () => {
+          document.querySelector("#result").textContent = confirm("Discard unsaved changes?")
+            ? "Discarded!"
+            : "Kept";
+        });
+      </script>
+    `);
+    plugged.once("dialog", (dialog) => dialog.accept());
+
+    await plugged.locator("#discard").click();
+
+    await plugged.getByText("Discarded!", { exact: true }).waitFor();
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const dialogHighlight = metadata.highlights.find(
+    (highlight) => highlight.dialog?.type === "confirm",
+  )!;
+  expect(dialogHighlight).toMatchObject({
+    dialog: {
+      action: "accept",
+      message: "Discard unsaved changes?",
+      type: "confirm",
+    },
+    method: "click",
+  });
+
+  const renderedStart = renderedHighlightStartWithoutDeadAir(
+    dialogHighlight,
+    metadata.highlights,
+  );
+  const dialogFrame = await videoFrame(
+    paths.rendered,
+    renderedStart + highlightDurationMs - 100,
+  );
+  const scale = Math.min(
+    dialogFrame.width / dialogHighlight.viewport.width,
+    dialogFrame.height / dialogHighlight.viewport.height,
+  );
+  const buttonBox = {
+    height: Math.round(dialogHighlight.rect.height * scale),
+    width: Math.round(dialogHighlight.rect.width * scale),
+    x: Math.round(dialogHighlight.rect.x * scale),
+    y: Math.round(dialogHighlight.rect.y * scale),
+  };
+  const panelCenter = averagePixel(dialogFrame, {
+    x: Math.round(dialogFrame.width / 2),
+    y: Math.round(dialogFrame.height / 2),
+  });
+
+  expect(panelCenter).toMatchObject({
+    blue: expect.any(Number),
+    green: expect.any(Number),
+    red: expect.any(Number),
+  });
+  expect(panelCenter.red).toBeGreaterThan(220);
+  expect(panelCenter.green).toBeGreaterThan(220);
+  expect(panelCenter.blue).toBeGreaterThan(220);
+  expect(pointerTailPixelCount(dialogFrame, buttonBox)).toBeGreaterThan(20);
+
+  const renderedDuration = await videoDurationMs(paths.rendered);
+  expect(renderedDuration - (renderedStart + highlightDurationMs)).toBeGreaterThanOrEqual(1_000);
+  const finalFrame = await videoFrame(paths.rendered, renderedDuration - 100);
+  const finalCenter = averagePixel(finalFrame, {
+    x: Math.round(finalFrame.width / 2),
+    y: Math.round(finalFrame.height / 2),
+  });
+  expect(finalCenter.red).toBeLessThan(80);
+  expect(finalCenter.green).toBeLessThan(80);
+  expect(finalCenter.blue).toBeLessThan(80);
+});
+
+test("uses natural post-dialog footage without adding a synthetic hold", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setContent(`
+      <button id="continue">Continue</button>
+      <output id="result"></output>
+      <script>
+        document.querySelector("#continue").addEventListener("click", () => {
+          document.querySelector("#result").textContent = confirm("Continue processing?")
+            ? "Processing"
+            : "Stopped";
+        });
+      </script>
+    `);
+    plugged.once("dialog", (dialog) => dialog.accept());
+
+    await plugged.locator("#continue").click();
+    await plugged.getByText("Processing", { exact: true }).waitFor();
+    await plugged.waitForTimeout(1_100);
+  }
+
+  await video.metadata();
+  await expect(
+    stat(join(testInfo.outputDir, "video-mode-dialog-post-frame.png")),
+  ).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
