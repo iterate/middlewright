@@ -12,6 +12,137 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
+test("burns explicit captions into an otherwise unmodified rendered video", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(30, 40, 80);
+        }
+      </style>
+    `);
+
+    await plugged.videoMode.caption("Create {an} account\\path\nNow", async () => {
+      await plugged.waitForTimeout(500);
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  expect(metadata).toMatchObject({
+    captions: [
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Create {an} account\\path\nNow",
+      },
+    ],
+    outputs: {
+      rendered: "video-rendered.webm",
+    },
+  });
+
+  const caption = metadata.captions[0];
+  const timestamp = caption.start + (caption.end - caption.start) / 2;
+  const rawFrame = await videoFrame(paths.raw, timestamp);
+  const renderedFrame = await videoFrame(paths.rendered, timestamp);
+  const captionArea = {
+    height: Math.round(renderedFrame.height * 0.3),
+    width: renderedFrame.width,
+    x: 0,
+    y: Math.round(renderedFrame.height * 0.7),
+  };
+  const whitePixels = (frame: VideoFrame) =>
+    countPixels(
+      frame,
+      captionArea,
+      ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+    );
+
+  expect(whitePixels(rawFrame)).toBeLessThan(10);
+  expect(whitePixels(renderedFrame)).toBeGreaterThan(100);
+});
+
+test("keeps captions aligned through trimming and dead-air compression", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    deadAirThreshold: 200,
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(30, 40, 80);
+        }
+      </style>
+    `);
+
+    await plugged.videoMode.caption("Process account data", async () => {
+      await plugged.waitForTimeout(100);
+      plugged.videoMode.setStartTime();
+      await plugged.videoMode.deadAir(async () => {
+        await plugged.waitForTimeout(700);
+      });
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  expect(metadata).toMatchObject({
+    captions: [{ text: "Process account data" }],
+    outputs: { rendered: "video-rendered.webm" },
+    sourceRange: { start: expect.any(Number) },
+  });
+
+  const frame = await videoFrame(paths.rendered, 100);
+  const whiteCaptionPixels = countPixels(
+    frame,
+    {
+      height: Math.round(frame.height * 0.3),
+      width: frame.width,
+      x: 0,
+      y: Math.round(frame.height * 0.7),
+    },
+    ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+  );
+
+  expect(whiteCaptionPixels).toBeGreaterThan(100);
+  expect(await videoDurationMs(paths.rendered)).toBeLessThan(
+    (await videoDurationMs(paths.raw)) - 300,
+  );
+});
+
 test("writes a rendered video with dead air sped up and highlights added in post", async ({
   page,
 }, testInfo) => {

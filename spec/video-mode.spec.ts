@@ -3,6 +3,95 @@ import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
+test("records Playwright test steps as captions by default", async ({ page }, testInfo) => {
+  const video = videoMode({ finalHold: 0, highlight: false });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+
+  await test.step("Create an account", async () => {
+    await plugged.setContent("<button>Create</button>");
+    await plugged.getByText("Create").click();
+  });
+
+  await expect(video.metadata()).resolves.toMatchObject({
+    captions: [
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Create an account",
+      },
+    ],
+  });
+  expect((await video.metadata()).captions[0].end).toBeGreaterThan(
+    (await video.metadata()).captions[0].start,
+  );
+});
+
+test("records only explicit captions when configured", async ({ page }, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 0,
+    highlight: false,
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+
+  const result = await test.step("Ignored Playwright step", async () => {
+    return await plugged.videoMode.caption("Create an account", async () => {
+      await plugged.setContent("<button>Create</button>");
+      await plugged.getByText("Create").click();
+      return "created";
+    });
+  });
+
+  expect(result).toBe("created");
+  await expect(video.metadata()).resolves.toMatchObject({
+    captions: [
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Create an account",
+      },
+    ],
+  });
+});
+
+test("shows the innermost caption and resumes its parent", async ({ page }, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 0,
+    highlight: false,
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+
+  await plugged.videoMode.caption("Create an account", async () => {
+    await plugged.waitForTimeout(10);
+    await plugged.videoMode.caption("Choose a plan", async () => {
+      await plugged.waitForTimeout(10);
+    });
+    await plugged.waitForTimeout(10);
+  });
+
+  const captions = (await video.metadata()).captions;
+  expect(captions.map((caption) => caption.text)).toEqual([
+    "Create an account",
+    "Choose a plan",
+    "Create an account",
+  ]);
+  expect(captions[0].end).toBe(captions[1].start);
+  expect(captions[1].end).toBe(captions[2].start);
+});
+
 test("records highlight metadata without mutating element styles", async ({
   page,
 }, testInfo) => {

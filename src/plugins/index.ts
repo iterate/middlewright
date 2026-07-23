@@ -1,6 +1,7 @@
 export { hydrationWaiter, type HydrationWaiterOptions } from "./hydration-waiter.ts";
 export {
   videoMode,
+  type VideoModeCaption,
   type VideoModeControls,
   type VideoModeHighlight,
   type VideoModeMetadata,
