@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. Default and explicit caption capture, nested spans, metadata, timeline-aware ffmpeg rendering, docs, and a paced full-pipeline PR demo are in place. Local validation is green; the latest follow-up only needs its CI run.
+Complete. Default and explicit caption capture, nested spans, metadata, timeline-aware ffmpeg rendering, docs, and a paced full-pipeline PR demo are in place. Local validation, CI, and the continuous preview release are green at the pacing implementation commit.
 
 ## Goal
 
@@ -70,3 +70,4 @@ The explicit helper remains available in either mode.
 - 2026-07-23: Replaced PR #6's old attachment and demo copy with the realistic account-flow video. Local validation and CI passed at `10003c1`; GitHub renders only the new inline video.
 - 2026-07-23: The caption-only demo rendered in 1.84 seconds, with no highlights and no final hold. Turned the same account flow into a full video-mode showcase: five 900 ms pointer holds, three real loading states compressed from roughly 700 ms to 300 ms, and a 1.2-second success-state hold. The resulting 7.6-second render was checked as a 2 fps contact sheet.
 - 2026-07-23: Re-ran typecheck, build, publint, and the full Playwright suite after the pacing follow-up: 69 passed and 3 provider-gated tests skipped.
+- 2026-07-23: Replaced the PR demo with the paced 7.6-second WebM and verified GitHub renders exactly one inline video. CI and the continuous preview release passed at `6a36a85`; there were no unresolved review threads.
