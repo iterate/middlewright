@@ -67,3 +67,4 @@ The explicit helper remains available in either mode.
 - 2026-07-23: Uploaded the caption-only WebM to PR #6, replaced the task-derived draft body with a reviewer-oriented summary, and verified GitHub rendered an inline `<video>` player.
 - 2026-07-23: GitHub CI and continuous preview publishing passed at commit `5d86764`; the PR inbox has no unresolved review threads.
 - 2026-07-23: Follow-up found the PR demo's apparent glyph bug was the deliberately contrived `Create {an} account\path` test title, not added renderer output. Replaced it with an account subscription flow whose `test.step` captions are “Enter account details”, “Choose the Pro plan”, and “Confirm the subscription”, then visually checked all three frames.
+- 2026-07-23: Replaced PR #6's old attachment and demo copy with the realistic account-flow video. Local validation and CI passed at `10003c1`; GitHub renders only the new inline video.
