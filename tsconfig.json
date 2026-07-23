@@ -4,6 +4,7 @@
     "lib": ["es2023", "esnext.disposable", "dom", "dom.iterable"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "types": ["node"],
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
