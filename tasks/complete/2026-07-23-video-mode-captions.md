@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation and local validation are complete. Default and explicit caption capture, nested spans, metadata, timeline-aware ffmpeg rendering, and docs are green; only PR media and review follow-up remain.
+Complete. Default and explicit caption capture, nested spans, metadata, timeline-aware ffmpeg rendering, docs, PR media, local validation, and CI are green.
 
 ## Goal
 
@@ -55,7 +55,7 @@ The explicit helper remains available in either mode.
 - [x] Prove captions alone cause `video-rendered.webm` to be written. *The ffmpeg spec uses no highlight, hold, trim, or compression trigger and compares clean raw pixels with captioned rendered pixels.*
 - [x] Document the option, helper, metadata, and raw/rendered distinction. *README includes both `test.step` and explicit examples plus artifact behavior.*
 - [x] Run focused specs, typecheck, build, and the full suite. *Typecheck, build, publint, diff check, and 69 passing tests completed locally; 3 provider-gated tests skipped.*
-- [ ] Add captioned video or screenshot media to the draft pull request.
+- [x] Add captioned video or screenshot media to the draft pull request. *PR #6 embeds the caption-only rendered fixture through GitHub's inline video player.*
 
 ## Implementation log
 
@@ -64,3 +64,5 @@ The explicit helper remains available in either mode.
 - 2026-07-23: Confirmed the `_addStep`/`complete` bridge exists in the package's minimum supported Playwright 1.49 as well as the installed 1.60.
 - 2026-07-23: Added vertical TDD slices for default `test.step`, explicit-only mode, nested spans, visible ASS rendering, and alignment through trimming/dead-air compression.
 - 2026-07-23: The first four-way full run exposed one existing cursor-frame assertion as concurrency-sensitive; it passed alone, and the second full run completed with 69 passing tests and 3 provider-gated skips.
+- 2026-07-23: Uploaded the caption-only WebM to PR #6, replaced the task-derived draft body with a reviewer-oriented summary, and verified GitHub rendered an inline `<video>` player.
+- 2026-07-23: GitHub CI and continuous preview publishing passed at commit `5d86764`; the PR inbox has no unresolved review threads.
