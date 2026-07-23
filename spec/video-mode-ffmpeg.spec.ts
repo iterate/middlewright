@@ -15,9 +15,13 @@ test.use({ video: "on" });
 test("turns meaningful Playwright steps into readable video captions", async ({
   page,
 }, testInfo) => {
+  const deadAirThresholdMs = 300;
+  const finalHoldMs = 1200;
+  const highlightDurationMs = 900;
   const video = videoMode({
-    finalHold: 0,
-    highlight: false,
+    deadAirThreshold: deadAirThresholdMs,
+    finalHold: finalHoldMs,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
     trimStart: "never",
   });
   {
@@ -68,6 +72,10 @@ test("turns meaningful Playwright steps into readable video captions", async ({
           display: flex;
           gap: 16px;
         }
+        [role="status"] {
+          color: rgb(71, 85, 105);
+          min-height: 24px;
+        }
       </style>
       <main>
         <section data-view="account">
@@ -77,6 +85,7 @@ test("turns meaningful Playwright steps into readable video captions", async ({
             <input aria-label="Work email" type="email" />
           </label>
           <button id="account-next">Continue</button>
+          <p id="account-status" role="status"></p>
         </section>
         <section data-view="plan" hidden>
           <h1>Choose a plan</h1>
@@ -85,11 +94,13 @@ test("turns meaningful Playwright steps into readable video captions", async ({
             <button data-plan="Pro">Pro</button>
           </div>
           <button id="plan-next" disabled>Continue</button>
+          <p id="plan-status" role="status"></p>
         </section>
         <section data-view="review" hidden>
           <h1>Review subscription</h1>
           <p id="summary"></p>
           <button id="confirm">Confirm subscription</button>
+          <p id="review-status" role="status"></p>
         </section>
         <section data-view="success" hidden>
           <h1>Welcome to Pro</h1>
@@ -111,7 +122,9 @@ test("turns meaningful Playwright steps into readable video captions", async ({
         let selectedPlan = '';
 
         document.querySelector('#account-next').addEventListener('click', () => {
-          setTimeout(() => show('plan'), 250);
+          document.querySelector('#account-next').disabled = true;
+          document.querySelector('#account-status').textContent = 'Saving account…';
+          setTimeout(() => show('plan'), 700);
         });
         document.querySelectorAll('[data-plan]').forEach((button) => {
           button.addEventListener('click', () => {
@@ -122,10 +135,14 @@ test("turns meaningful Playwright steps into readable video captions", async ({
         document.querySelector('#plan-next').addEventListener('click', () => {
           document.querySelector('#summary').textContent =
             document.querySelector('[aria-label="Work email"]').value + ' · ' + selectedPlan;
-          setTimeout(() => show('review'), 250);
+          document.querySelector('#plan-next').disabled = true;
+          document.querySelector('#plan-status').textContent = 'Preparing review…';
+          setTimeout(() => show('review'), 700);
         });
         document.querySelector('#confirm').addEventListener('click', () => {
-          setTimeout(() => show('success'), 250);
+          document.querySelector('#confirm').disabled = true;
+          document.querySelector('#review-status').textContent = 'Creating subscription…';
+          setTimeout(() => show('success'), 700);
         });
       </script>
     `);
@@ -133,19 +150,23 @@ test("turns meaningful Playwright steps into readable video captions", async ({
     await test.step("Enter account details", async () => {
       await plugged.getByLabel("Work email").fill("ada@example.com");
       await plugged.getByRole("button", { name: "Continue" }).click();
-      await expect(plugged.getByRole("heading", { name: "Choose a plan" })).toBeVisible();
+      const planHeading = plugged.getByRole("heading", { name: "Choose a plan" });
+      await planHeading.waitFor();
+      await expect(planHeading).toBeVisible();
     });
     await test.step("Choose the Pro plan", async () => {
       await plugged.getByRole("button", { name: "Pro" }).click();
       await plugged.getByRole("button", { name: "Continue" }).click();
-      await expect(
-        plugged.getByRole("heading", { name: "Review subscription" }),
-      ).toBeVisible();
+      const reviewHeading = plugged.getByRole("heading", { name: "Review subscription" });
+      await reviewHeading.waitFor();
+      await expect(reviewHeading).toBeVisible();
       await expect(plugged.locator("#summary")).toContainText("ada@example.com · Pro");
     });
     await test.step("Confirm the subscription", async () => {
       await plugged.getByRole("button", { name: "Confirm subscription" }).click();
-      await expect(plugged.getByRole("heading", { name: "Welcome to Pro" })).toBeVisible();
+      const successHeading = plugged.getByRole("heading", { name: "Welcome to Pro" });
+      await successHeading.waitFor();
+      await expect(successHeading).toBeVisible();
     });
   }
 
@@ -173,27 +194,37 @@ test("turns meaningful Playwright steps into readable video captions", async ({
       rendered: "video-rendered.webm",
     },
   });
+  expect(metadata.deadAir.some((span) => span.end - span.start >= 600)).toBe(true);
+  expect(metadata.highlights.map(({ method }) => method)).toEqual([
+    "fill",
+    "click",
+    "click",
+    "click",
+    "click",
+  ]);
 
-  for (const caption of metadata.captions) {
-    const timestamp = caption.start + (caption.end - caption.start) / 2;
-    const rawFrame = await videoFrame(paths.raw, timestamp);
-    const renderedFrame = await videoFrame(paths.rendered, timestamp);
+  const renderedDurationMs = await videoDurationMs(paths.rendered);
+  const captionFrames = await Promise.all(
+    [0.15, 0.45, 0.7].map((progress) => videoFrame(paths.rendered, renderedDurationMs * progress)),
+  );
+  for (const frame of captionFrames) {
     const captionArea = {
-      height: Math.round(renderedFrame.height * 0.16),
-      width: renderedFrame.width,
+      height: Math.round(frame.height * 0.16),
+      width: frame.width,
       x: 0,
-      y: Math.round(renderedFrame.height * 0.84),
+      y: Math.round(frame.height * 0.84),
     };
-    const whitePixels = (frame: VideoFrame) =>
+    expect(
       countPixels(
         frame,
         captionArea,
         ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
-      );
-
-    expect(whitePixels(rawFrame)).toBeLessThan(10);
-    expect(whitePixels(renderedFrame)).toBeGreaterThan(100);
+      ),
+    ).toBeGreaterThan(100);
   }
+  expect(renderedDurationMs).toBeGreaterThan(
+    finalHoldMs + metadata.highlights.length * highlightDurationMs,
+  );
 });
 
 test("keeps captions aligned through trimming and dead-air compression", async ({
