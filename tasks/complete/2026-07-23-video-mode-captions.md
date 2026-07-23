@@ -51,8 +51,8 @@ The explicit helper remains available in either mode.
 - [x] Add a failing public-behavior spec for `captions: "explicit"` and `page.videoMode.caption()`. *The explicit-mode spec first failed on the missing helper, then went green through the public page extension.*
 - [x] Record explicit spans and suppress automatic Playwright-step captions in explicit mode. *The spec nests an explicit caption inside an ignored Playwright step and verifies the action return value.*
 - [x] Define nested-caption behavior with a focused spec. *Innermost spans interrupt the parent; normalized metadata resumes the parent afterward.*
-- [x] Burn escaped captions into the rendered video and keep them aligned through trimming and dead-air compression. *ASS generation handles slashes, braces, and line breaks; rendered-piece projection covers timeline transforms.*
-- [x] Prove captions alone cause `video-rendered.webm` to be written. *The ffmpeg spec uses no highlight, hold, trim, or compression trigger and compares clean raw pixels with captioned rendered pixels.*
+- [x] Burn captions into the rendered video and keep them aligned through trimming and dead-air compression. *A realistic three-step account flow verifies each meaningful `test.step` title visually; rendered-piece projection covers timeline transforms.*
+- [x] Prove captions alone cause `video-rendered.webm` to be written. *The account-flow spec uses no highlight, hold, trim, or compression trigger and compares clean raw pixels with captioned rendered pixels.*
 - [x] Document the option, helper, metadata, and raw/rendered distinction. *README includes both `test.step` and explicit examples plus artifact behavior.*
 - [x] Run focused specs, typecheck, build, and the full suite. *Typecheck, build, publint, diff check, and 69 passing tests completed locally; 3 provider-gated tests skipped.*
 - [x] Add captioned video or screenshot media to the draft pull request. *PR #6 embeds the caption-only rendered fixture through GitHub's inline video player.*
@@ -66,3 +66,4 @@ The explicit helper remains available in either mode.
 - 2026-07-23: The first four-way full run exposed one existing cursor-frame assertion as concurrency-sensitive; it passed alone, and the second full run completed with 69 passing tests and 3 provider-gated skips.
 - 2026-07-23: Uploaded the caption-only WebM to PR #6, replaced the task-derived draft body with a reviewer-oriented summary, and verified GitHub rendered an inline `<video>` player.
 - 2026-07-23: GitHub CI and continuous preview publishing passed at commit `5d86764`; the PR inbox has no unresolved review threads.
+- 2026-07-23: Follow-up found the PR demo's apparent glyph bug was the deliberately contrived `Create {an} account\path` test title, not added renderer output. Replaced it with an account subscription flow whose `test.step` captions are “Enter account details”, “Choose the Pro plan”, and “Confirm the subscription”, then visually checked all three frames.

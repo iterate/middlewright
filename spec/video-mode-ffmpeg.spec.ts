@@ -12,11 +12,10 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
-test("burns explicit captions into an otherwise unmodified rendered video", async ({
+test("turns meaningful Playwright steps into readable video captions", async ({
   page,
 }, testInfo) => {
   const video = videoMode({
-    captions: "explicit",
     finalHold: 0,
     highlight: false,
     trimStart: "never",
@@ -27,20 +26,126 @@ test("burns explicit captions into an otherwise unmodified rendered video", asyn
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setViewportSize({ width: 800, height: 450 });
     await plugged.setContent(`
       <style>
         html, body {
           margin: 0;
           width: 800px;
-          height: 600px;
-          background: rgb(30, 40, 80);
+          height: 450px;
+          background: rgb(24, 32, 58);
+          color: rgb(30, 41, 59);
+          font: 20px system-ui, sans-serif;
+        }
+        body {
+          display: grid;
+          place-items: center;
+        }
+        main {
+          background: white;
+          border-radius: 18px;
+          box-sizing: border-box;
+          min-height: 300px;
+          padding: 36px;
+          width: 520px;
+        }
+        h1 {
+          margin-top: 0;
+        }
+        label {
+          display: grid;
+          gap: 8px;
+          margin-bottom: 20px;
+        }
+        input, button {
+          font: inherit;
+          padding: 12px 16px;
+        }
+        [data-view][hidden] {
+          display: none;
+        }
+        .plans {
+          display: flex;
+          gap: 16px;
         }
       </style>
+      <main>
+        <section data-view="account">
+          <h1>Create your account</h1>
+          <label>
+            Work email
+            <input aria-label="Work email" type="email" />
+          </label>
+          <button id="account-next">Continue</button>
+        </section>
+        <section data-view="plan" hidden>
+          <h1>Choose a plan</h1>
+          <div class="plans">
+            <button data-plan="Starter">Starter</button>
+            <button data-plan="Pro">Pro</button>
+          </div>
+          <button id="plan-next" disabled>Continue</button>
+        </section>
+        <section data-view="review" hidden>
+          <h1>Review subscription</h1>
+          <p id="summary"></p>
+          <button id="confirm">Confirm subscription</button>
+        </section>
+        <section data-view="success" hidden>
+          <h1>Welcome to Pro</h1>
+          <p>Your account is ready.</p>
+        </section>
+      </main>
+      <script>
+        const views = Object.fromEntries(
+          Array.from(document.querySelectorAll('[data-view]')).map((view) => [
+            view.dataset.view,
+            view,
+          ]),
+        );
+        const show = (name) => {
+          Object.values(views).forEach((view) => {
+            view.hidden = view.dataset.view !== name;
+          });
+        };
+        let selectedPlan = '';
+
+        document.querySelector('#account-next').addEventListener('click', () => {
+          setTimeout(() => show('plan'), 250);
+        });
+        document.querySelectorAll('[data-plan]').forEach((button) => {
+          button.addEventListener('click', () => {
+            selectedPlan = button.dataset.plan;
+            document.querySelector('#plan-next').disabled = false;
+          });
+        });
+        document.querySelector('#plan-next').addEventListener('click', () => {
+          document.querySelector('#summary').textContent =
+            document.querySelector('[aria-label="Work email"]').value + ' · ' + selectedPlan;
+          setTimeout(() => show('review'), 250);
+        });
+        document.querySelector('#confirm').addEventListener('click', () => {
+          setTimeout(() => show('success'), 250);
+        });
+      </script>
     `);
 
-    await plugged.videoMode.caption("Create {an} account\\path\nNow", async () => {
-      await plugged.waitForTimeout(500);
+    await test.step("Enter account details", async () => {
+      await plugged.getByLabel("Work email").fill("ada@example.com");
+      await plugged.getByRole("button", { name: "Continue" }).click();
+      await expect(plugged.getByRole("heading", { name: "Choose a plan" })).toBeVisible();
+    });
+    await test.step("Choose the Pro plan", async () => {
+      await plugged.getByRole("button", { name: "Pro" }).click();
+      await plugged.getByRole("button", { name: "Continue" }).click();
+      await expect(
+        plugged.getByRole("heading", { name: "Review subscription" }),
+      ).toBeVisible();
+      await expect(plugged.locator("#summary")).toContainText("ada@example.com · Pro");
+    });
+    await test.step("Confirm the subscription", async () => {
+      await plugged.getByRole("button", { name: "Confirm subscription" }).click();
+      await expect(plugged.getByRole("heading", { name: "Welcome to Pro" })).toBeVisible();
     });
   }
 
@@ -51,7 +156,17 @@ test("burns explicit captions into an otherwise unmodified rendered video", asyn
       {
         end: expect.any(Number),
         start: expect.any(Number),
-        text: "Create {an} account\\path\nNow",
+        text: "Enter account details",
+      },
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Choose the Pro plan",
+      },
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Confirm the subscription",
       },
     ],
     outputs: {
@@ -59,25 +174,26 @@ test("burns explicit captions into an otherwise unmodified rendered video", asyn
     },
   });
 
-  const caption = metadata.captions[0];
-  const timestamp = caption.start + (caption.end - caption.start) / 2;
-  const rawFrame = await videoFrame(paths.raw, timestamp);
-  const renderedFrame = await videoFrame(paths.rendered, timestamp);
-  const captionArea = {
-    height: Math.round(renderedFrame.height * 0.3),
-    width: renderedFrame.width,
-    x: 0,
-    y: Math.round(renderedFrame.height * 0.7),
-  };
-  const whitePixels = (frame: VideoFrame) =>
-    countPixels(
-      frame,
-      captionArea,
-      ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
-    );
+  for (const caption of metadata.captions) {
+    const timestamp = caption.start + (caption.end - caption.start) / 2;
+    const rawFrame = await videoFrame(paths.raw, timestamp);
+    const renderedFrame = await videoFrame(paths.rendered, timestamp);
+    const captionArea = {
+      height: Math.round(renderedFrame.height * 0.16),
+      width: renderedFrame.width,
+      x: 0,
+      y: Math.round(renderedFrame.height * 0.84),
+    };
+    const whitePixels = (frame: VideoFrame) =>
+      countPixels(
+        frame,
+        captionArea,
+        ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+      );
 
-  expect(whitePixels(rawFrame)).toBeLessThan(10);
-  expect(whitePixels(renderedFrame)).toBeGreaterThan(100);
+    expect(whitePixels(rawFrame)).toBeLessThan(10);
+    expect(whitePixels(renderedFrame)).toBeGreaterThan(100);
+  }
 });
 
 test("keeps captions aligned through trimming and dead-air compression", async ({
