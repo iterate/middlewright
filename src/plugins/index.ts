@@ -1,4 +1,5 @@
 export { hydrationWaiter, type HydrationWaiterOptions } from "./hydration-waiter.ts";
+export { screenshot } from "./screenshot.ts";
 export {
   videoMode,
   type VideoModeControls,

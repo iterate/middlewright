@@ -43,15 +43,16 @@ test("kick off a slow report", async ({ page }) => {
 
 Pair it with an aggressive `actionTimeout` in `playwright.config.ts` (e.g. `1_000`) — the plugins are what make that viable.
 
-For a fixture with all five plugins wired together, see the [kitchen sink](#kitchen-sink) below.
+For a fixture with all six plugins wired together, see the [kitchen sink](#kitchen-sink) below.
 
-Ships with five plugins:
+Ships with six plugins:
 
 | Plugin | What it does | |
 | --- | --- | --- |
 | [`spinnerWaiter`](#spinnerwaiter) | If the app is visibly loading, wait longer for elements. If it isn't, fail fast. | [source](./src/plugins/spinner-waiter.ts) |
 | [`hydrationWaiter`](#hydrationwaiter) | Don't interact with the app until it's hydrated. | [source](./src/plugins/hydration-waiter.ts) |
 | [`uiErrorReporter`](#uierrorreporter) | When an action fails, append any visible error toasts to the error message. | [source](./src/plugins/ui-error-reporter.ts) |
+| [`screenshot`](#screenshot) | Save and attach full-page screenshots after selected successful locator actions. | [source](./src/plugins/screenshot.ts) |
 | [`videoMode`](#videomode) | Record action/dead-air facts and render watchable annotated videos after the run. | [source](./src/plugins/video-mode.ts) |
 | [`llmRecover`](#llmrecover) | When an action fails, ask an LLM to write and run recovery code. Marks the test as soft-failed so nothing silently passes. | [source](./src/plugins/llm-recover.ts) |
 
@@ -129,6 +130,22 @@ When an action fails, grabs the text of any visible error UI (default selector `
 ```ts
 uiErrorReporter({ selector: '[data-type="error"]' });
 ```
+
+### screenshot
+
+Wire `screenshot()` into your fixture once, then select useful points in a flow from the command line without editing the test:
+
+```ts
+plugins: [screenshot()]
+```
+
+`PLAYWRIGHT_SCREENSHOT` is a semicolon-separated list of regular expressions matched against `locator.toString()`:
+
+```sh
+PLAYWRIGHT_SCREENSHOT='getByRole.*Save;getByText.*Published' pnpm test
+```
+
+Each matching successful action saves a full-page PNG in the test output directory and attaches it to the Playwright report. Names are readable locator slugs; repeated matches get `-2`, `-3`, and so on. Failed actions do not produce screenshots.
 
 ### videoMode
 
@@ -229,7 +246,7 @@ Artifacts (every attempt, code, errors, timings) are written to `<test-output-di
 
 ### Kitchen sink
 
-All five plugins wired into one fixture — this mirrors how they ran in the app they were extracted from:
+All six plugins wired into one fixture — this mirrors how they ran in the app they were extracted from:
 
 ```ts
 // test-helpers.ts
@@ -238,6 +255,7 @@ import {
   addPlugins,
   hydrationWaiter,
   llmRecover,
+  screenshot,
   spinnerWaiter,
   uiErrorReporter,
   videoMode,
@@ -255,6 +273,7 @@ export const test = base.extend({
         hydrationWaiter({ timeout: 60_000 }),
         uiErrorReporter(),
         spinnerWaiter(),
+        screenshot(),
         // opt-in: slows everything down to make recordings watchable
         !!process.env.VIDEO_MODE && videoMode({ skipStackFrames: ["test-helpers.ts"] }),
       ],
