@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Specified and ready to implement. The cleanup will remove presentation-only test CSS across the video specs, preserve only styles that drive behavior or pixel assertions, and add representative rendered videos to the draft PR.
+Implementation and validation are complete. Presentation-only CSS is gone from all video specs; the remaining inline declarations drive visibility, geometry, blank-frame detection, or pixel assertions. Three inspected videos still need to be uploaded to the draft PR.
 
 ## Goal
 
@@ -24,15 +24,17 @@ Make video test fixtures read like tests rather than miniature styled applicatio
 
 ## Checklist
 
-- [ ] Inventory every styled video fixture and classify each declaration as presentation-only or assertion-critical.
-- [ ] Apply the already-reviewed account-flow cleanup from the root worktree.
-- [ ] Remove presentation-only styling from the remaining video fixtures.
-- [ ] Replace assertion-critical stylesheet rules with minimal one-line inline styles or direct state-transition updates.
-- [ ] Confirm no `<style>` blocks or multiline style attributes remain in the affected specs.
-- [ ] Run the focused video specs, typecheck, build, publint, and full suite.
-- [ ] Visually inspect a representative set of rendered videos.
+- [x] Inventory every styled video fixture and classify each declaration as presentation-only or assertion-critical. *Reviewed all video fixture CSS in the three affected specs.*
+- [x] Apply the already-reviewed account-flow cleanup from the root worktree. *The account flow now uses browser-default presentation while keeping its meaningful captions and behavior.*
+- [x] Remove presentation-only styling from the remaining video fixtures. *Deleted 304 lines of fixture styling and markup.*
+- [x] Replace assertion-critical stylesheet rules with minimal one-line inline styles or direct state-transition updates. *Kept only colors, geometry, visibility, and transitions consumed by video analysis.*
+- [x] Confirm no `<style>` blocks or multiline style attributes remain in the affected specs. *Repository search and `git diff --check` are clean.*
+- [x] Run the focused video specs, typecheck, build, publint, and full suite. *40 focused tests and the full 74-test suite pass; 3 optional LLM tests remain skipped.*
+- [x] Visually inspect a representative set of rendered videos. *Checked contact sheets for captions, dead-air/highlights, dialog/cursor, and startup trimming.*
 - [ ] Upload a handful of useful videos to the draft PR and explain what each demonstrates.
 
 ## Implementation log
 
 - 2026-07-24: Created `test/simplify-video-fixtures` from `origin/main` so the PR excludes the root worktree's unrelated local `types: ["node"]` commit.
+- 2026-07-24: Two focused failures identified functional cursor-detector inputs; restored only non-cursor target colors and target geometry.
+- 2026-07-24: Selected the captions, dead-air/highlights, and synthetic dialog clips for PR review. The startup-trimming clip is correct but too slight to add review value.
