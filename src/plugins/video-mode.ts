@@ -31,9 +31,10 @@ const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
 const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
 const VIDEO_MODE_CAPTIONS_FILE = "video-mode-captions.ass";
 const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
-// Playwright extends its final screencast frame by at least one second. Keep a
-// known final paint stable beyond that minimum so the raw duration measures the
-// recorder clock at close rather than an invented tail.
+// Playwright extends its final screencast frame by the Node-side time since
+// that frame arrived, with a one-second minimum. Keep a known final paint
+// stable beyond that minimum so raw duration and videoMode time share an
+// endpoint without depending on browser-frame delivery latency.
 const VIDEO_MODE_RECORDER_SETTLE_MS = 1100;
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
@@ -240,6 +241,7 @@ type VideoInfo = {
   width: number;
   height: number;
   durationMs: number;
+  frameDurationMs: number;
 };
 
 type VideoFilter = {
@@ -2102,7 +2104,7 @@ const videoInfo = async (path: string): Promise<VideoInfo> => {
       "-v",
       "error",
       "-show_entries",
-      "format=duration:stream=width,height",
+      "format=duration:stream=width,height,avg_frame_rate",
       "-of",
       "json",
       path,
@@ -2112,13 +2114,24 @@ const videoInfo = async (path: string): Promise<VideoInfo> => {
   const payload = JSON.parse(stdout);
   const seconds = Number(payload.format?.duration);
   const stream = payload.streams?.find((candidate: any) => candidate.width && candidate.height);
+  const [frameRateNumerator, frameRateDenominator] = String(stream?.avg_frame_rate)
+    .split("/")
+    .map(Number);
+  const frameRate = frameRateNumerator / frameRateDenominator;
 
-  if (!Number.isFinite(seconds) || seconds <= 0 || !stream) {
+  if (
+    !Number.isFinite(seconds) ||
+    seconds <= 0 ||
+    !stream ||
+    !Number.isFinite(frameRate) ||
+    frameRate <= 0
+  ) {
     throw new Error(`Could not read video duration from ffprobe output: ${stdout}`);
   }
 
   return {
     durationMs: Math.round(seconds * 1000),
+    frameDurationMs: 1000 / frameRate,
     height: Number(stream.height),
     width: Number(stream.width),
   };
@@ -2994,14 +3007,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             recordingEndedAt === undefined
               ? 0
               : rawVideoInfo.durationMs - recordingEndedAt;
+          const timelineOffset =
+            Math.floor(sourceOffset / rawVideoInfo.frameDurationMs) *
+            rawVideoInfo.frameDurationMs;
           const renderTimeline = translateVideoTimeline({
             captions,
             deadAir,
             highlights,
-            offsetMs: sourceOffset,
+            offsetMs: timelineOffset,
           });
           const annotationSourceRange = metadataFor(state).sourceRange;
-          const sourceRange = translateSourceRange(annotationSourceRange, sourceOffset);
+          const sourceRange = translateSourceRange(annotationSourceRange, timelineOffset);
 
           // No explicit or selector-driven start: fall back to detecting where
           // the blank startup ends in the recorded pixels, and trim to there
@@ -3025,11 +3041,19 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           }
 
           if (sourceRange.start === undefined) {
-            sourceRange.start = Math.max(0, Math.round(sourceOffset));
+            sourceRange.start = Math.max(0, timelineOffset);
           }
 
           if (sourceRange.end === undefined) {
-            sourceRange.end = Math.max(0, Math.round(renderEndedAt + sourceOffset));
+            const minimumHighlightEnd = renderTimeline.highlights.reduce(
+              (end, candidate) =>
+                Math.max(end, candidate.start + 1, candidate.actionEnd || 0),
+              0,
+            );
+            sourceRange.end = Math.max(
+              minimumHighlightEnd,
+              Math.round(renderEndedAt + sourceOffset),
+            );
           }
 
           if (
