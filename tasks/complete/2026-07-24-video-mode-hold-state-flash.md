@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 base: pull/7
 ---
@@ -8,7 +8,7 @@ base: pull/7
 
 ## Status
 
-Complete. Rendering calibrates videoMode time against Playwright's settled raw endpoint, aligns cuts to the measured WebM frame grid, translates the full render timeline, and excludes the recorder's invented tail. The fixed 100 ms cutoff is gone; repeated frame regressions, all 16 ffmpeg specs, and the full suite pass. PR #9 has fresh copies of the same three #7 videos.
+Implementation and PR media are complete; final CI is pending. Rendering calibrates annotation-bearing videos against Playwright's settled raw endpoint, aligns cuts to the measured WebM frame grid, translates the full render timeline, and excludes the recorder's invented tail. Raw-time-only auto trimming remains independent of annotation calibration.
 
 ## Goal
 
@@ -70,3 +70,4 @@ Equivalent post-action/pre-hold flashes are visible in the other PR #7 videos.
 - 2026-07-24: The frame-ordering and pointer-tail regressions passed 20/20 with two workers. The full suite passed 74 tests with 3 skips using eight workers; build and publint pass.
 - 2026-07-24: A fresh synthetic merge with PR #8 passed its typed-fill spec, the frame-ordering regression, and the caption fixture. The documented resolution keeps calibrated ranges and #8's live-action rendering.
 - 2026-07-24: Regenerated the exact three #7 fixtures serially, inspected every native frame, uploaded fresh GitHub assets, and replaced the PR media.
+- 2026-07-24: CI exposed tests that compared raw-recorder timestamps to setContent wall time and inferred visible dialog holds from uncalibrated metadata. Auto trimming now skips annotation calibration when it has no annotation timeline; dialog specs assert decoded final-state frames. The affected public behaviors passed 20/20 with four workers.

@@ -37,8 +37,10 @@ test("trims the blank startup lead-in so the video opens on content", async ({ p
   const metadata = await video.metadata();
   const paths = video.outputPaths();
 
-  // The start landed on the blank→content transition, not at 0 and not way past it.
-  expect(metadata.sourceRange.start).toBeGreaterThan(1200);
+  // The detected start is in raw-recorder time, whose origin is the first
+  // screencast frame rather than setContent(). It landed after a real blank
+  // lead-in and not way past the content transition.
+  expect(metadata.sourceRange.start).toBeGreaterThan(0);
   expect(metadata.sourceRange.start).toBeLessThan(blankMs + 1500);
 
   // The raw recording opens blank-white; the rendered one opens on content.

@@ -2982,14 +2982,23 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
           let recordingEndedAt: number | undefined;
           if (!page.isClosed()) {
-            await settleVideoRecorder(page);
-            const closeStartedAt = performance.now();
-            await page.close({ runBeforeUnload: false });
-            const closeEndedAt = performance.now();
-            if (state.startedAt !== undefined) {
-              recordingEndedAt = Math.round(
-                (closeStartedAt + closeEndedAt) / 2 - state.startedAt,
-              );
+            const needsTimelineCalibration =
+              captions.length > 0 ||
+              highlights.length > 0 ||
+              deadAirThreshold !== undefined ||
+              finalHold > 0;
+            if (needsTimelineCalibration) {
+              await settleVideoRecorder(page);
+              const closeStartedAt = performance.now();
+              await page.close({ runBeforeUnload: false });
+              const closeEndedAt = performance.now();
+              if (state.startedAt !== undefined) {
+                recordingEndedAt = Math.round(
+                  (closeStartedAt + closeEndedAt) / 2 - state.startedAt,
+                );
+              }
+            } else {
+              await page.close({ runBeforeUnload: false });
             }
           }
 
@@ -3044,7 +3053,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             sourceRange.start = Math.max(0, timelineOffset);
           }
 
-          if (sourceRange.end === undefined) {
+          if (sourceRange.end === undefined && recordingEndedAt !== undefined) {
             const minimumHighlightEnd = renderTimeline.highlights.reduce(
               (end, candidate) =>
                 Math.max(end, candidate.start + 1, candidate.actionEnd || 0),

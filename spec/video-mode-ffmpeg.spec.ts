@@ -767,8 +767,20 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
   expect(panelCenter.blue).toBeGreaterThan(220);
   expect(pointerTailPixelCount(dialogFrame, buttonBox)).toBeGreaterThan(20);
 
+  const renderedFrames = await videoFrames(paths.rendered);
+  const finalDarkFrameCount = [...renderedFrames]
+    .reverse()
+    .findIndex((frame) => {
+      const center = averagePixel(frame, {
+        x: Math.round(frame.width / 2),
+        y: Math.round(frame.height / 2),
+      });
+      return center.red >= 80 || center.green >= 80 || center.blue >= 80;
+    });
+  // A one-second post-dialog view is 25 decoded frames. Depending on container
+  // duration semantics, its last PTS can report 40ms less than wall duration.
+  expect(finalDarkFrameCount).toBeGreaterThanOrEqual(24);
   const renderedDuration = await videoDurationMs(paths.rendered);
-  expect(renderedDuration - (renderedStart + highlightDurationMs)).toBeGreaterThanOrEqual(1_000);
   const finalFrame = await videoFrame(paths.rendered, renderedDuration - 100);
   const finalCenter = averagePixel(finalFrame, {
     x: Math.round(finalFrame.width / 2),
@@ -801,6 +813,7 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
           document.querySelector("#result").textContent = confirm("Continue processing?")
             ? "Processing"
             : "Stopped";
+          document.body.style.background = "rgb(0, 180, 0)";
         });
       </script>
     `);
@@ -811,10 +824,19 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
     await plugged.waitForTimeout(1_100);
   }
 
+  const paths = video.outputPaths();
   await video.metadata();
-  await expect(
-    stat(join(testInfo.outputDir, "video-mode-dialog-post-frame.png")),
-  ).rejects.toMatchObject({ code: "ENOENT" });
+  const finalGreenFrameCount = [...(await videoFrames(paths.rendered))]
+    .reverse()
+    .findIndex((frame) => {
+      const center = averagePixel(frame, {
+        x: Math.round(frame.width / 2),
+        y: Math.round(frame.height / 2),
+      });
+      return center.green < center.red + 80 || center.green < center.blue + 80;
+    });
+  expect(finalGreenFrameCount).toBeGreaterThanOrEqual(24);
+  expect(finalGreenFrameCount).toBeLessThan(40);
 });
 
 test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
