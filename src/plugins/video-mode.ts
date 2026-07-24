@@ -36,6 +36,7 @@ const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
 const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
 const VIDEO_MODE_CAPTIONS_FILE = "video-mode-captions.ass";
 const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
+const VIDEO_MODE_HIGHLIGHT_FRAME_MS = 50;
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -101,6 +102,7 @@ export type VideoModeHighlight = VideoModeSpan & {
   color: string;
   dialog?: VideoModeDialogAnnotation;
   image?: string;
+  liveAction?: boolean;
   method?: OverrideableMethod;
   rect: VideoModeRect;
   thickness: number;
@@ -1454,7 +1456,6 @@ const videoPieces = (options: {
   segments: RenderVideoSegment[];
 }): VideoPiece[] => {
   const pieces: VideoPiece[] = [];
-  const frameMs = 50;
 
   for (const segment of options.segments) {
     let cursor = segment.start;
@@ -1470,12 +1471,20 @@ const videoPieces = (options: {
         pieces.push({ end: highlight.start, speed: segment.speed, start: cursor });
       }
 
-      let frameStart = Math.max(segment.start, highlight.start - frameMs);
+      let frameStart = Math.max(
+        segment.start,
+        highlight.start - VIDEO_MODE_HIGHLIGHT_FRAME_MS,
+      );
       let frameEnd = highlight.start;
 
       if (frameEnd <= frameStart) {
         frameStart = highlight.start;
-        frameEnd = Math.min(segment.end, frameStart + frameMs);
+        frameEnd = Math.min(segment.end, frameStart + VIDEO_MODE_HIGHLIGHT_FRAME_MS);
+      }
+
+      if (highlight.liveAction) {
+        const liveEnd = highlight.actionEnd || frameEnd;
+        frameEnd = Math.min(segment.end, Math.max(frameEnd, liveEnd));
       }
 
       if (frameEnd > frameStart) {
@@ -1550,7 +1559,7 @@ const renderedPieceDuration = (piece: VideoPiece) => {
 
   const highlightDuration = piece.highlight.end - piece.highlight.start;
 
-  if (piece.highlight.image) {
+  if (piece.highlight.image && !piece.highlight.liveAction) {
     return highlightDuration;
   }
 
@@ -1938,7 +1947,53 @@ const renderedVideoFilter = (options: {
 
     const operations: string[] = [];
 
-    if (piece.highlight?.image && highlightInputByImage.has(piece.highlight.image)) {
+    if (
+      piece.highlight?.image &&
+      piece.highlight.liveAction &&
+      highlightInputByImage.has(piece.highlight.image)
+    ) {
+      // Keep the surrounding pre-action screenshot stable while replaying the
+      // real typed pixels inside the field.
+      const input = highlightInputByImage.get(piece.highlight.image)!;
+      const scaledViewport = scaledViewportSize(piece.highlight.viewport, options.video);
+      const rect = scaleHighlight(piece.highlight, options.video);
+      const duration = renderedPieceDuration(piece);
+      const sourceDuration = (piece.end - piece.start) / piece.speed;
+      const baseLabel = `livebase${index}`;
+      const cropLabel = `livecrop${index}`;
+      filters.push(
+        [
+          `[${input.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+          `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          `trim=start=0:end=${formatSeconds(duration)}`,
+          `setpts=PTS-STARTPTS[${baseLabel}]`,
+        ].join(","),
+      );
+      filters.push(
+        [
+          `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
+          `setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`,
+          `crop=w=${rect.width}:h=${rect.height}:x=${rect.x}:y=${rect.y}`,
+          `tpad=stop_mode=clone:stop_duration=${formatSeconds(
+            Math.max(0, duration - sourceDuration),
+          )}[${cropLabel}]`,
+        ].join(","),
+      );
+      operations.push(
+        `[${baseLabel}][${cropLabel}]overlay=x=${rect.x}:y=${rect.y}:shortest=1`,
+      );
+      if (options.highlightMode === "outline") {
+        operations.push(drawboxFilter(piece.highlight, options.video));
+      }
+      filters.push(`${operations.join(",")}[${label}]`);
+      continue;
+    }
+
+    if (
+      piece.highlight?.image &&
+      !piece.highlight.liveAction &&
+      highlightInputByImage.has(piece.highlight.image)
+    ) {
       const input = highlightInputByImage.get(piece.highlight.image)!;
       const scaledViewport = scaledViewportSize(piece.highlight.viewport, options.video);
       operations.push(
@@ -1961,7 +2016,7 @@ const renderedVideoFilter = (options: {
       operations.push(`setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`);
     }
 
-    if (piece.highlight && !piece.highlight.image) {
+    if (piece.highlight && (!piece.highlight.image || piece.highlight.liveAction)) {
       const sourceDuration = (piece.end - piece.start) / piece.speed;
       if (options.highlightMode === "outline") {
         operations.push(drawboxFilter(piece.highlight, options.video));
@@ -2465,7 +2520,12 @@ const renderVideo = async (options: {
   const highlightInputs = options.highlights
     .filter((highlight) => highlight.image)
     .map((highlight, index) => ({
-      durationMs: highlight.end - highlight.start,
+      durationMs: Math.max(
+        highlight.end - highlight.start,
+        highlight.liveAction && highlight.actionEnd
+          ? highlight.actionEnd - highlight.start + VIDEO_MODE_HIGHLIGHT_FRAME_MS
+          : 0,
+      ),
       image: highlight.image!,
       inputIndex: index + 1,
       path: join(options.outputDir, highlight.image!),
@@ -2760,6 +2820,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       try {
         const replacement =
           typeFills && method === "fill" ? await typedFillAction(locator, args) : undefined;
+        if (recordedHighlight && replacement) {
+          recordedHighlight.liveAction = true;
+        }
         return await next(replacement);
       } finally {
         if (recordedHighlight && state.startedAt !== undefined) {
