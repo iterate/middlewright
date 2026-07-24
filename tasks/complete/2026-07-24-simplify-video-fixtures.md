@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation and validation are complete. Presentation-only CSS is gone from all video specs; the remaining inline declarations drive visibility, geometry, blank-frame detection, or pixel assertions. Three inspected videos still need to be uploaded to the draft PR.
+Complete. Presentation-only CSS is gone from all video specs; the remaining inline declarations drive visibility, geometry, blank-frame detection, or pixel assertions. The draft PR includes three inspected videos.
 
 ## Goal
 
@@ -31,10 +31,11 @@ Make video test fixtures read like tests rather than miniature styled applicatio
 - [x] Confirm no `<style>` blocks or multiline style attributes remain in the affected specs. *Repository search and `git diff --check` are clean.*
 - [x] Run the focused video specs, typecheck, build, publint, and full suite. *40 focused tests and the full 74-test suite pass; 3 optional LLM tests remain skipped.*
 - [x] Visually inspect a representative set of rendered videos. *Checked contact sheets for captions, dead-air/highlights, dialog/cursor, and startup trimming.*
-- [ ] Upload a handful of useful videos to the draft PR and explain what each demonstrates.
+- [x] Upload a handful of useful videos to the draft PR and explain what each demonstrates. *Added three inline players for captions, dead-air/highlights, and dialog/cursor rendering.*
 
 ## Implementation log
 
 - 2026-07-24: Created `test/simplify-video-fixtures` from `origin/main` so the PR excludes the root worktree's unrelated local `types: ["node"]` commit.
 - 2026-07-24: Two focused failures identified functional cursor-detector inputs; restored only non-cursor target colors and target geometry.
 - 2026-07-24: Selected the captions, dead-air/highlights, and synthetic dialog clips for PR review. The startup-trimming clip is correct but too slight to add review value.
+- 2026-07-24: Uploaded the three selected clips and verified GitHub rendered three inline `<video>` players in PR #7.
