@@ -12,6 +12,284 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
+test("turns meaningful Playwright steps into readable video captions", async ({
+  page,
+}, testInfo) => {
+  const deadAirThresholdMs = 300;
+  const finalHoldMs = 1200;
+  const highlightDurationMs = 900;
+  const video = videoMode({
+    deadAirThreshold: deadAirThresholdMs,
+    finalHold: finalHoldMs,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 450px;
+          background: rgb(24, 32, 58);
+          color: rgb(30, 41, 59);
+          font: 20px system-ui, sans-serif;
+        }
+        body {
+          display: grid;
+          place-items: center;
+        }
+        main {
+          background: white;
+          border-radius: 18px;
+          box-sizing: border-box;
+          min-height: 300px;
+          padding: 36px;
+          width: 520px;
+        }
+        h1 {
+          margin-top: 0;
+        }
+        label {
+          display: grid;
+          gap: 8px;
+          margin-bottom: 20px;
+        }
+        input, button {
+          font: inherit;
+          padding: 12px 16px;
+        }
+        [data-view][hidden] {
+          display: none;
+        }
+        .plans {
+          display: flex;
+          gap: 16px;
+        }
+        [role="status"] {
+          color: rgb(71, 85, 105);
+          min-height: 24px;
+        }
+      </style>
+      <main>
+        <section data-view="account">
+          <h1>Create your account</h1>
+          <label>
+            Work email
+            <input aria-label="Work email" type="email" />
+          </label>
+          <button id="account-next">Continue</button>
+          <p id="account-status" role="status"></p>
+        </section>
+        <section data-view="plan" hidden>
+          <h1>Choose a plan</h1>
+          <div class="plans">
+            <button data-plan="Starter">Starter</button>
+            <button data-plan="Pro">Pro</button>
+          </div>
+          <button id="plan-next" disabled>Continue</button>
+          <p id="plan-status" role="status"></p>
+        </section>
+        <section data-view="review" hidden>
+          <h1>Review subscription</h1>
+          <p id="summary"></p>
+          <button id="confirm">Confirm subscription</button>
+          <p id="review-status" role="status"></p>
+        </section>
+        <section data-view="success" hidden>
+          <h1>Welcome to Pro</h1>
+          <p>Your account is ready.</p>
+        </section>
+      </main>
+      <script>
+        const views = Object.fromEntries(
+          Array.from(document.querySelectorAll('[data-view]')).map((view) => [
+            view.dataset.view,
+            view,
+          ]),
+        );
+        const show = (name) => {
+          Object.values(views).forEach((view) => {
+            view.hidden = view.dataset.view !== name;
+          });
+        };
+        let selectedPlan = '';
+
+        document.querySelector('#account-next').addEventListener('click', () => {
+          document.querySelector('#account-next').disabled = true;
+          document.querySelector('#account-status').textContent = 'Saving account…';
+          setTimeout(() => show('plan'), 700);
+        });
+        document.querySelectorAll('[data-plan]').forEach((button) => {
+          button.addEventListener('click', () => {
+            selectedPlan = button.dataset.plan;
+            document.querySelector('#plan-next').disabled = false;
+          });
+        });
+        document.querySelector('#plan-next').addEventListener('click', () => {
+          document.querySelector('#summary').textContent =
+            document.querySelector('[aria-label="Work email"]').value + ' · ' + selectedPlan;
+          document.querySelector('#plan-next').disabled = true;
+          document.querySelector('#plan-status').textContent = 'Preparing review…';
+          setTimeout(() => show('review'), 700);
+        });
+        document.querySelector('#confirm').addEventListener('click', () => {
+          document.querySelector('#confirm').disabled = true;
+          document.querySelector('#review-status').textContent = 'Creating subscription…';
+          setTimeout(() => show('success'), 700);
+        });
+      </script>
+    `);
+
+    await test.step("Enter account details", async () => {
+      await plugged.getByLabel("Work email").fill("ada@example.com");
+      await plugged.getByRole("button", { name: "Continue" }).click();
+      const planHeading = plugged.getByRole("heading", { name: "Choose a plan" });
+      await planHeading.waitFor();
+      await expect(planHeading).toBeVisible();
+    });
+    await test.step("Choose the Pro plan", async () => {
+      await plugged.getByRole("button", { name: "Pro" }).click();
+      await plugged.getByRole("button", { name: "Continue" }).click();
+      const reviewHeading = plugged.getByRole("heading", { name: "Review subscription" });
+      await reviewHeading.waitFor();
+      await expect(reviewHeading).toBeVisible();
+      await expect(plugged.locator("#summary")).toContainText("ada@example.com · Pro");
+    });
+    await test.step("Confirm the subscription", async () => {
+      await plugged.getByRole("button", { name: "Confirm subscription" }).click();
+      const successHeading = plugged.getByRole("heading", { name: "Welcome to Pro" });
+      await successHeading.waitFor();
+      await expect(successHeading).toBeVisible();
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  expect(metadata).toMatchObject({
+    captions: [
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Enter account details",
+      },
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Choose the Pro plan",
+      },
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        text: "Confirm the subscription",
+      },
+    ],
+    outputs: {
+      rendered: "video-rendered.webm",
+    },
+  });
+  expect(metadata.deadAir.some((span) => span.end - span.start >= 600)).toBe(true);
+  expect(metadata.highlights.map(({ method }) => method)).toEqual([
+    "fill",
+    "click",
+    "click",
+    "click",
+    "click",
+  ]);
+
+  const renderedDurationMs = await videoDurationMs(paths.rendered);
+  const captionFrames = await Promise.all(
+    [0.15, 0.45, 0.7].map((progress) => videoFrame(paths.rendered, renderedDurationMs * progress)),
+  );
+  for (const frame of captionFrames) {
+    const captionArea = {
+      height: Math.round(frame.height * 0.16),
+      width: frame.width,
+      x: 0,
+      y: Math.round(frame.height * 0.84),
+    };
+    expect(
+      countPixels(
+        frame,
+        captionArea,
+        ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+      ),
+    ).toBeGreaterThan(100);
+  }
+  expect(renderedDurationMs).toBeGreaterThan(
+    finalHoldMs + metadata.highlights.length * highlightDurationMs,
+  );
+});
+
+test("keeps captions aligned through trimming and dead-air compression", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    deadAirThreshold: 200,
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        html, body {
+          margin: 0;
+          width: 800px;
+          height: 600px;
+          background: rgb(30, 40, 80);
+        }
+      </style>
+    `);
+
+    await plugged.videoMode.caption("Process account data", async () => {
+      await plugged.waitForTimeout(100);
+      plugged.videoMode.setStartTime();
+      await plugged.videoMode.deadAir(async () => {
+        await plugged.waitForTimeout(700);
+      });
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  expect(metadata).toMatchObject({
+    captions: [{ text: "Process account data" }],
+    outputs: { rendered: "video-rendered.webm" },
+    sourceRange: { start: expect.any(Number) },
+  });
+
+  const frame = await videoFrame(paths.rendered, 100);
+  const whiteCaptionPixels = countPixels(
+    frame,
+    {
+      height: Math.round(frame.height * 0.3),
+      width: frame.width,
+      x: 0,
+      y: Math.round(frame.height * 0.7),
+    },
+    ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+  );
+
+  expect(whiteCaptionPixels).toBeGreaterThan(100);
+  expect(await videoDurationMs(paths.rendered)).toBeLessThan(
+    (await videoDurationMs(paths.raw)) - 300,
+  );
+});
+
 test("writes a rendered video with dead air sped up and highlights added in post", async ({
   page,
 }, testInfo) => {
