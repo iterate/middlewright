@@ -5,6 +5,11 @@
  * infrastructure (github.com/iterate/iterate, private). Modification from the
  * original: the hardcoded skip for iterate's test-helpers file is now the
  * `skipStackFrames` option.
+ *
+ * Caption span capture and ASS rendering are adapted from
+ * `../agents/examples/macwright.ts`. This version observes Playwright
+ * `test.step`, normalizes nested spans, and projects captions through video
+ * mode's trimming, highlight holds, and dead-air compression.
  */
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -24,6 +29,7 @@ const VIDEO_MODE_POINTER_FILE = "video-mode-pointer.png";
 const VIDEO_MODE_CLICK_POINTER_FILE = "video-mode-click-pointer.png";
 const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
 const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
+const VIDEO_MODE_CAPTIONS_FILE = "video-mode-captions.ass";
 const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
@@ -48,6 +54,10 @@ const VIDEO_MODE_TEXT_POINTER_HOTSPOT = { x: 32, y: 32 };
 export type VideoModeSpan = {
   start: number;
   end: number;
+};
+
+export type VideoModeCaption = VideoModeSpan & {
+  text: string;
 };
 
 export type VideoModeOutputs = {
@@ -102,6 +112,7 @@ export type VideoModeDialogAnnotation = {
 export type VideoModeMetadata = {
   schemaVersion: 1;
   timebase: "ms";
+  captions: VideoModeCaption[];
   deadAir: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   outputs: VideoModeOutputs;
@@ -109,6 +120,8 @@ export type VideoModeMetadata = {
 };
 
 export type VideoModeControls = {
+  /** Run an action and show its title as a caption in the rendered video. */
+  caption<T>(text: string, action: () => Promise<T>): Promise<T>;
   /**
    * Run invisible video bookkeeping and write the elapsed span as dead air.
    */
@@ -149,6 +162,11 @@ export type VideoModeHighlightOptions =
     };
 
 export type VideoModeOptions = {
+  /**
+   * Caption source. `"test-step"` records Playwright `test.step` spans;
+   * `"explicit"` records only `videoMode.caption()` spans. Default: `"test-step"`
+   */
+  captions?: "explicit" | "test-step";
   /**
    * Render action annotations. `true` uses pointer mode with default options.
    * Default: true
@@ -191,6 +209,7 @@ export type VideoModeOptions = {
 export type VideoModeTrimStart = "auto" | "detect-blank" | "never" | ["selector", string];
 
 type VideoModeState = {
+  captions: VideoModeCaption[];
   deadAirDepth: number;
   deadAirSpans: VideoModeSpan[];
   highlights: VideoModeHighlight[];
@@ -548,6 +567,7 @@ const sourceRangeIsSet = (sourceRange: VideoModeSourceRange) => {
 
 const metadataFor = (state: VideoModeState): VideoModeMetadata => {
   return {
+    captions: normalizeVideoCaptions(state.captions),
     deadAir: mergeVideoSpans(state.deadAirSpans),
     highlights: normalizeVideoHighlights(state.highlights),
     outputs: state.outputs,
@@ -555,6 +575,130 @@ const metadataFor = (state: VideoModeState): VideoModeMetadata => {
     sourceRange: normalizeSourceRange(state.sourceRange),
     timebase: "ms",
   };
+};
+
+const normalizeVideoCaptions = (captions: VideoModeCaption[]) => {
+  const valid = captions.filter((caption) => caption.end > caption.start);
+  const boundaries = [...new Set(valid.flatMap((caption) => [caption.start, caption.end]))].sort(
+    (left, right) => left - right,
+  );
+  const normalized: VideoModeCaption[] = [];
+
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const start = boundaries[index];
+    const end = boundaries[index + 1];
+    const caption = valid
+      .filter((candidate) => candidate.start <= start && candidate.end >= end)
+      .sort((left, right) => right.start - left.start || left.end - right.end)[0];
+
+    if (!caption || end <= start) {
+      continue;
+    }
+
+    const previous = normalized[normalized.length - 1];
+    if (previous && previous.text === caption.text && previous.end === start) {
+      previous.end = end;
+    } else {
+      normalized.push({ end, start, text: caption.text });
+    }
+  }
+
+  return normalized;
+};
+
+type PlaywrightStepData = {
+  category?: string;
+  title: string;
+};
+
+type PlaywrightInternalStep = {
+  complete(result: unknown): void;
+};
+
+type PlaywrightTestInfo = TestInfo & {
+  _addStep?: (
+    data: PlaywrightStepData,
+    parentStep?: PlaywrightInternalStep,
+  ) => PlaywrightInternalStep;
+};
+
+const observePlaywrightStepCaptions = (
+  testInfo: TestInfo,
+  state: VideoModeState,
+  getVideoTimestamp: () => number,
+) => {
+  const playwrightTestInfo = testInfo as PlaywrightTestInfo;
+  const originalAddStep = playwrightTestInfo._addStep;
+
+  if (!originalAddStep) {
+    return () => {};
+  }
+
+  const activeSteps = new Map<PlaywrightInternalStep, VideoModeCaption>();
+  const finishStep = (step: PlaywrightInternalStep) => {
+    const caption = activeSteps.get(step);
+
+    if (!caption) {
+      return;
+    }
+
+    activeSteps.delete(step);
+    state.captions.push({
+      ...caption,
+      end: Math.max(caption.start + 1, getVideoTimestamp()),
+    });
+  };
+  const addStep = (
+    data: PlaywrightStepData,
+    parentStep?: PlaywrightInternalStep,
+  ): PlaywrightInternalStep => {
+    const step = originalAddStep.call(playwrightTestInfo, data, parentStep);
+
+    if (data.category === "test.step") {
+      activeSteps.set(step, {
+        end: 0,
+        start: getVideoTimestamp(),
+        text: data.title,
+      });
+      const originalComplete = step.complete;
+      step.complete = (result) => {
+        finishStep(step);
+        originalComplete.call(step, result);
+      };
+    }
+
+    return step;
+  };
+
+  playwrightTestInfo._addStep = addStep;
+
+  return () => {
+    for (const step of activeSteps.keys()) {
+      finishStep(step);
+    }
+    if (playwrightTestInfo._addStep === addStep) {
+      playwrightTestInfo._addStep = originalAddStep;
+    }
+  };
+};
+
+const recordCaption = async <T>(
+  state: VideoModeState,
+  getVideoTimestamp: () => number,
+  text: string,
+  action: () => Promise<T>,
+) => {
+  const start = getVideoTimestamp();
+
+  try {
+    return await action();
+  } finally {
+    state.captions.push({
+      end: Math.max(start + 1, getVideoTimestamp()),
+      start,
+      text,
+    });
+  }
 };
 
 const videoModeOutputPaths = (testInfo: TestInfo): VideoModeOutputPaths => {
@@ -1046,6 +1190,62 @@ const formatSeconds = (ms: number) => {
   return value || "0";
 };
 
+const formatAssTime = (ms: number) => {
+  const centiseconds = Math.max(0, Math.round(ms / 10));
+  const hours = Math.floor(centiseconds / 360_000);
+  const minutes = Math.floor((centiseconds % 360_000) / 6_000);
+  const seconds = Math.floor((centiseconds % 6_000) / 100);
+  const remainder = centiseconds % 100;
+
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(
+    remainder,
+  ).padStart(2, "0")}`;
+};
+
+const escapeAssText = (text: string) => {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\r?\n/g, "\\N");
+};
+
+const assCaptions = (
+  captions: VideoModeCaption[],
+  video: { height: number; width: number },
+) => {
+  const fontSize = Math.max(24, Math.round(video.height * 0.06));
+  const margin = Math.max(24, Math.round(video.height * 0.06));
+  const events = captions
+    .map(
+      (caption) =>
+        `Dialogue: 0,${formatAssTime(caption.start)},${formatAssTime(caption.end)},Caption,,0,0,0,,${escapeAssText(caption.text)}`,
+    )
+    .join("\n");
+
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    `PlayResX: ${video.width}`,
+    `PlayResY: ${video.height}`,
+    "ScaledBorderAndShadow: yes",
+    "WrapStyle: 0",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Caption,Arial,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,0,0,0,0,100,100,0,0,3,1,0,2,${margin},${margin},${margin},1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    events,
+    "",
+  ].join("\n");
+};
+
+const escapeFfmpegFilterValue = (value: string) => {
+  return value.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/,/g, "\\,");
+};
+
 const formatFilterNumber = (value: number) => {
   return Number(value.toFixed(6)).toString();
 };
@@ -1332,6 +1532,40 @@ const renderedVideoPieces = (pieces: VideoPiece[]) => {
   return rendered;
 };
 
+const projectVideoCaptions = (
+  captions: VideoModeCaption[],
+  pieces: RenderedVideoPiece[],
+) => {
+  const projected = captions.flatMap((caption) => {
+    return pieces.flatMap((piece) => {
+      const overlap = clipVideoSpan(caption, piece);
+
+      if (!overlap || !Number.isFinite(piece.speed)) {
+        return [];
+      }
+
+      const start = piece.outputStart + (overlap.start - piece.start) / piece.speed;
+      const mappedEnd = piece.outputStart + (overlap.end - piece.start) / piece.speed;
+      const end =
+        piece.highlight &&
+        caption.start <= piece.highlight.start &&
+        caption.end >= piece.highlight.start
+          ? piece.outputEnd
+          : mappedEnd;
+
+      return [
+        {
+          end: Math.round(end),
+          start: Math.round(start),
+          text: caption.text,
+        },
+      ];
+    });
+  });
+
+  return normalizeVideoCaptions(projected);
+};
+
 const highlightCursorPoint = (
   highlight: VideoModeHighlight,
   video: { width: number; height: number },
@@ -1615,6 +1849,7 @@ const videoSpanExpression = (spans: VideoModeSpan[]) => {
 };
 
 const renderedVideoFilter = (options: {
+  captionFile?: string;
   clickPointerInput?: PointerInput;
   cursorPointerInput?: PointerInput;
   dialogPostFrameInput: DialogPostFrameInput | undefined;
@@ -1736,6 +1971,8 @@ const renderedVideoFilter = (options: {
     );
   }
 
+  let annotatedOutputLabel = outputLabel;
+
   if (
     options.highlightMode === "pointer" &&
     options.cursorPointerInput &&
@@ -1788,20 +2025,21 @@ const renderedVideoFilter = (options: {
         }),
       );
 
-      return {
-        outputLabel: clickPointerOutputLabel,
-        value: filters.join(";"),
-      };
+      pointerOutputLabel = clickPointerOutputLabel;
     }
 
-    return {
-      outputLabel: pointerOutputLabel,
-      value: filters.join(";"),
-    };
+    annotatedOutputLabel = pointerOutputLabel;
+  }
+
+  if (options.captionFile) {
+    filters.push(
+      `[${annotatedOutputLabel}]ass=${escapeFfmpegFilterValue(options.captionFile)}[rendercaptions]`,
+    );
+    annotatedOutputLabel = "rendercaptions";
   }
 
   return {
-    outputLabel,
+    outputLabel: annotatedOutputLabel,
     value: filters.join(";"),
   };
 };
@@ -2152,6 +2390,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
 };
 
 const renderVideo = async (options: {
+  captions: VideoModeCaption[];
   dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
   dialogPostHoldMs: number;
   finalHoldMs: number;
@@ -2240,7 +2479,24 @@ const renderVideo = async (options: {
     start: rangeStart,
     thresholdMs: options.thresholdMs,
   });
+  const renderedCaptions = projectVideoCaptions(
+    options.captions,
+    renderedVideoPieces(
+      videoPieces({
+        highlights: options.highlights,
+        segments,
+      }),
+    ),
+  );
+  const captionFile =
+    renderedCaptions.length > 0 ? join(options.outputDir, VIDEO_MODE_CAPTIONS_FILE) : undefined;
+
+  if (captionFile) {
+    await writeFile(captionFile, assCaptions(renderedCaptions, info));
+  }
+
   const filter = renderedVideoFilter({
+    captionFile,
     clickPointerInput,
     cursorPointerInput,
     dialogPostFrameInput,
@@ -2299,11 +2555,15 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   if (process.env.PWDEBUG) {
     let testInfoForOutputPaths: TestInfo | undefined;
     const controls: VideoModeControls = {
+      caption: async (_text, action) => {
+        return await action();
+      },
       deadAir: async (action) => {
         return await action();
       },
       getVideoTimestamp: () => 0,
       metadata: async () => ({
+        captions: [],
         deadAir: [],
         highlights: [],
         outputs: {},
@@ -2337,12 +2597,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     name: "videoMode finalHold",
     value: options.finalHold,
   });
+  const captionMode = options.captions || "test-step";
   const highlight = resolveVideoModeHighlight(options);
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
   const trimStart = resolveTrimStart(options.trimStart);
   const state: VideoModeState = {
+    captions: [],
     deadAirDepth: 0,
     deadAirSpans: [],
     highlightImageIndex: 0,
@@ -2369,6 +2631,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     return Math.round(now - (state.startedAt || now));
   };
   const controls: VideoModeControls = {
+    caption: async (text, action) => {
+      return await recordCaption(state, getVideoTimestamp, text, action);
+    },
     deadAir: async (action) => {
       return await recordDeadAir(state, action);
     },
@@ -2471,8 +2736,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     testLifecycle: (emitter) => {
       let dialogPage: Page | undefined;
       let onDialog: ((dialog: Dialog) => void) | undefined;
+      let stopObservingPlaywrightSteps = () => {};
       const offBeforeTest = emitter.on("beforeTest", async ({ page, testInfo }) => {
         dialogHighlightQueue = Promise.resolve();
+        state.captions = [];
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
@@ -2487,6 +2754,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
         } else {
           state.startedAt = performance.now();
+        }
+        stopObservingPlaywrightSteps();
+        if (captionMode === "test-step") {
+          stopObservingPlaywrightSteps = observePlaywrightStepCaptions(
+            testInfo,
+            state,
+            getVideoTimestamp,
+          );
         }
 
         if (highlight.mode !== "off") {
@@ -2585,6 +2860,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
         await Promise.all(pendingDialogHighlights);
         const metadataBeforeVideo = metadataFor(state);
+        const captions = metadataBeforeVideo.captions;
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
         const naturalPostDialogMs =
@@ -2662,12 +2938,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const sourceRange = metadataFor(state).sourceRange;
 
           if (
+            captions.length > 0 ||
             highlights.length > 0 ||
             deadAirThreshold !== undefined ||
             finalHold > 0 ||
             sourceRangeIsSet(sourceRange)
           ) {
             const wroteRenderedVideo = await renderVideo({
+              captions,
               deadAir,
               dialogPostFrame,
               dialogPostHoldMs,
@@ -2714,6 +2992,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
         const metadata = metadataFor(state);
         if (
+          metadata.captions.length > 0 ||
           metadata.deadAir.length > 0 ||
           metadata.highlights.length > 0 ||
           metadata.outputs.player ||
@@ -2735,6 +3014,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       });
 
       return () => {
+        stopObservingPlaywrightSteps();
         offBeforeTest();
         offAfterTestFinalize();
         if (dialogPage && onDialog) {
