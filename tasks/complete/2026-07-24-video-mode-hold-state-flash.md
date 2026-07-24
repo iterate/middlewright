@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 base: pull/7
 ---
@@ -8,7 +8,7 @@ base: pull/7
 
 ## Status
 
-About 70% complete. A deterministic frame-level regression now covers the flash, and the renderer replaces the recorder's lagging pre-action tail with the captured pre-action frame. All 16 ffmpeg specs pass. Full-suite validation, #8 compatibility, and the three comparison video uploads remain.
+Complete. A deterministic frame-level regression covers the flash, and the renderer replaces the recorder's lagging pre-action tail with the captured pre-action frame. Focused and full validation pass; PR #9 includes the same three videos as #7 plus tested #8 merge notes.
 
 ## Goal
 
@@ -41,10 +41,10 @@ Equivalent post-action/pre-hold flashes are visible in the other PR #7 videos.
 - [x] Rank and test plausible causes in the rendered timeline/filter construction. *Raw-frame inspection showed the completed paint already timestamped 80–100 ms before the wall-clock action boundary; concat and screenshot ordering were ruled out.*
 - [x] Add a failing public-behavior regression spec for the visible state ordering. *The calibrated highlight spec now decodes the rendered output and rejects any completed-state frame before the hold.*
 - [x] Fix hold composition without coupling video mode to another plugin. *Highlight timing starts before capture, and the final 100 ms before an action is replaced by its known pre-action screenshot.*
-- [ ] Re-run focused video specs and the full validation suite.
-- [ ] Regenerate and visually inspect the same three videos used by PR #7.
-- [ ] Attach those three videos to the PR for direct comparison.
-- [ ] Document the expected interaction with PR #8 in the PR body.
+- [x] Re-run focused video specs and the full validation suite. *40 focused video tests and 74 full-suite tests pass; 3 provider-gated tests skip. Typecheck, build, and publint pass.*
+- [x] Regenerate and visually inspect the same three videos used by PR #7. *Serial final renders of the caption, dead-air, and dialog fixtures were inspected as timestamped contact sheets.*
+- [x] Attach those three videos to the PR for direct comparison. *PR #9 renders exactly three inline GitHub video players.*
+- [x] Document the expected interaction with PR #8 in the PR body. *A synthetic merge identified the `videoPieces()` conflict; the typed-fill, frame-ordering, and caption specs pass with the documented resolution.*
 
 ## Implementation log
 
@@ -53,3 +53,6 @@ Equivalent post-action/pre-hold flashes are visible in the other PR #7 videos.
 - 2026-07-24: A large blue-to-red click fixture made the signal deterministic. Before the fix, three runs each found 2–3 red frames before the blue pre-click hold.
 - 2026-07-24: The same regression passed five consecutive runs after the fix. The original account flow was regenerated and its first 1.2 seconds inspected as a contact sheet; the input remains empty until the real post-hold action footage.
 - 2026-07-24: All 16 ffmpeg video-mode specs pass on the implementation.
+- 2026-07-24: The focused video-mode suite passed 40/40. The full suite passed 74 tests with 3 provider-gated skips; typecheck, build, and publint passed.
+- 2026-07-24: A synthetic merge with PR #8 required a manual `videoPieces()` resolution because both branches change the highlight source window. Keeping the 100 ms cutoff while preserving `liveAction` through `actionEnd` passed the relevant three specs.
+- 2026-07-24: Uploaded the same caption, dead-air, and dialog videos as PR #7 to PR #9. GitHub's rendered body contains three inline video players.
