@@ -87,8 +87,13 @@ export type ActionTiming = {
   middlewares: ActionMiddlewareTiming[];
 };
 
+export type NextAction = {
+  args: unknown[];
+  method: OverrideableMethod;
+};
+
 /** Function that calls the next middleware or the original action */
-export type NextFn = (args?: unknown[]) => Promise<unknown>;
+export type NextFn = (action?: unknown[] | NextAction) => Promise<unknown>;
 
 /** Middleware function - wraps an action, must call next() */
 export type ActionMiddleware = (ctx: ActionContext, next: NextFn) => Promise<unknown>;
@@ -362,7 +367,9 @@ const patchLocatorPrototype = (
       ...args: unknown[]
     ): Promise<unknown> {
       let currentArgs = args;
-      const callOriginal = () => (this[`${method}_original`] as Function)(...currentArgs);
+      let currentMethod = method;
+      const callOriginal = () =>
+        (this[`${currentMethod}_original`] as Function)(...currentArgs);
 
       // Pages that never had plugins added (e.g. a second page in the same
       // worker) fall through to the original implementation.
@@ -392,10 +399,15 @@ const patchLocatorPrototype = (
 
       // Build middleware chain - each middleware calls next() to continue
       let index = 0;
-      const next: NextFn = async (nextArgs) => {
-        if (nextArgs) {
-          currentArgs = nextArgs;
-          ctx.args = nextArgs;
+      const next: NextFn = async (action) => {
+        if (Array.isArray(action)) {
+          currentArgs = action;
+          ctx.args = action;
+        } else if (action) {
+          currentArgs = action.args;
+          currentMethod = action.method;
+          ctx.args = action.args;
+          ctx.method = action.method;
         }
 
         if (index < actionMiddlewares.length) {

@@ -17,7 +17,12 @@ import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Dialog, Locator, Page, TestInfo } from "@playwright/test";
-import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
+import type {
+  ActionTiming,
+  LocatorWithOriginal,
+  Plugin,
+  OverrideableMethod,
+} from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
 const VIDEO_MODE_METADATA_FILE = "video-mode.json";
@@ -174,6 +179,11 @@ export type VideoModeOptions = {
   highlight?: VideoModeHighlightOptions;
   /** Final hold duration in the rendered video (ms). Default: 3000 */
   finalHold?: number;
+  /**
+   * Type non-empty `fill()` values of at most 100 characters sequentially so
+   * text entry is visible in the recording. Default: true
+   */
+  typeFills?: boolean;
   /** Methods to skip highlighting. Default: ['waitFor'] */
   skipMethods?: OverrideableMethod[];
   /**
@@ -207,6 +217,38 @@ export type VideoModeOptions = {
 };
 
 export type VideoModeTrimStart = "auto" | "detect-blank" | "never" | ["selector", string];
+
+const TYPED_FILL_DELAY_MS = 50;
+const TYPED_FILL_MAX_LENGTH = 100;
+
+type FillOptions = NonNullable<Parameters<Locator["fill"]>[1]>;
+type TypeOptions = NonNullable<Parameters<Locator["type"]>[1]>;
+
+const typedFillAction = async (
+  locator: LocatorWithOriginal,
+  args: unknown[],
+): Promise<{ args: unknown[]; method: "type" } | undefined> => {
+  const value = args[0];
+  const fillOptions = args[1] as FillOptions | undefined;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > TYPED_FILL_MAX_LENGTH ||
+    fillOptions?.force
+  ) {
+    return;
+  }
+
+  await locator.fill_original("", fillOptions);
+  const typeOptions: TypeOptions = { delay: TYPED_FILL_DELAY_MS };
+  if (fillOptions?.noWaitAfter !== undefined) {
+    typeOptions.noWaitAfter = fillOptions.noWaitAfter;
+  }
+  if (fillOptions?.timeout !== undefined) {
+    typeOptions.timeout = fillOptions.timeout;
+  }
+  return { args: [value, typeOptions], method: "type" };
+};
 
 type VideoModeState = {
   captions: VideoModeCaption[];
@@ -2601,6 +2643,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const highlight = resolveVideoModeHighlight(options);
   const skipMethods = options.skipMethods || ["waitFor"];
   const skipStackFrames = options.skipStackFrames || [];
+  const typeFills = options.typeFills !== false;
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
   const trimStart = resolveTrimStart(options.trimStart);
   const state: VideoModeState = {
@@ -2671,7 +2714,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       return { videoMode: controls };
     },
 
-    middleware: async ({ locator, method, testInfo, timing }, next) => {
+    middleware: async ({ args, locator, method, testInfo, timing }, next) => {
       if (state.deadAirDepth > 0) return next();
 
       // Skip if called from internal helpers (navigation, login flows etc)
@@ -2715,7 +2758,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             });
 
       try {
-        return await next();
+        const replacement =
+          typeFills && method === "fill" ? await typedFillAction(locator, args) : undefined;
+        return await next(replacement);
       } finally {
         if (recordedHighlight && state.startedAt !== undefined) {
           recordedHighlight.actionEnd = Math.max(

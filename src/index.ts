@@ -9,6 +9,7 @@ export {
   type ActionMiddleware,
   type ActionMiddlewareTiming,
   type ActionTiming,
+  type NextAction,
   type NextFn,
   type TestLifecycleEvents,
   type LocatorWithOriginal,

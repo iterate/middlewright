@@ -162,6 +162,7 @@ await using page = await addPlugins({
       deadAirThreshold: 300,
       skipMethods: ["waitFor"],
       skipStackFrames: ["test-helpers.ts"], // don't annotate internal login/setup helpers
+      typeFills: false, // opt out of visible character-by-character entry
     }),
   ],
 });
@@ -182,6 +183,12 @@ page.videoMode.setStartTime();
 await page.locator("#important-flow").click();
 page.videoMode.setEndTime();
 ```
+
+By default, `videoMode` clears and types non-empty `fill()` values of up to 100
+characters with a 50 ms delay per character, so text entry is visible in the
+recording. The highlight and metadata still describe the caller's `fill()`
+action. Empty, longer, and forced fills keep Playwright's original behavior.
+Use `typeFills: false` to opt out for every fill.
 
 By default, `videoMode` burns Playwright `test.step` titles into the rendered video:
 

@@ -3,6 +3,57 @@ import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
+test("types short fills by default and supports opting out", async ({ page, context }, testInfo) => {
+  await page.setContent(`
+    <input aria-label="typed" value="old value" />
+    <script>
+      const seenValues = [];
+      document.querySelector("input").addEventListener("input", (event) => {
+        seenValues.push(event.currentTarget.value);
+        document.body.dataset.seenValues = JSON.stringify(seenValues);
+      });
+    </script>
+  `);
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [videoMode({ finalHold: 0, highlight: false })],
+    });
+
+    await plugged.getByLabel("typed").fill("Ada");
+
+    await expect(plugged.locator("body")).toHaveAttribute(
+      "data-seen-values",
+      JSON.stringify(["", "A", "Ad", "Ada"]),
+    );
+  }
+
+  const optOutPage = await context.newPage();
+  await optOutPage.setContent(`
+    <input aria-label="filled" value="old value" />
+    <script>
+      const seenValues = [];
+      document.querySelector("input").addEventListener("input", (event) => {
+        seenValues.push(event.currentTarget.value);
+        document.body.dataset.seenValues = JSON.stringify(seenValues);
+      });
+    </script>
+  `);
+  await using plugged = await addPlugins({
+    page: optOutPage,
+    testInfo,
+    plugins: [videoMode({ finalHold: 0, highlight: false, typeFills: false })],
+  });
+
+  await plugged.getByLabel("filled").fill("Ada");
+
+  await expect(plugged.locator("body")).toHaveAttribute(
+    "data-seen-values",
+    JSON.stringify(["Ada"]),
+  );
+});
+
 test("records Playwright test steps as captions by default", async ({ page }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false });
   await using plugged = await addPlugins({
