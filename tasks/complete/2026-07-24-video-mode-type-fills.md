@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: small
 ---
 
@@ -7,7 +7,7 @@ size: small
 
 ## Status
 
-Nearly complete. Default short-fill typing, opt-out, live rendered field footage, docs, and local validation are green; PR media and CI on the final commit remain.
+Complete. Default short-fill typing, opt-out, live rendered field footage, docs, local validation, final CI, and matching inline PR videos are green.
 
 ## Goal
 
@@ -38,8 +38,8 @@ videoMode({ typeFills: false }); // preserve Playwright fill behavior
 - [x] Rewrite eligible fills to clear + type while preserving fill metadata and bypassing values over 100 characters. *Video mode records the incoming fill, clears through the original action, then dispatches a 50 ms sequential type; empty, long, and forced fills are untouched.*
 - [x] Document the default, opt-out, and character boundary. *README covers pacing, metadata, exclusions, and `typeFills: false`.*
 - [x] Run the focused spec, typecheck, build, publint, and full suite. *Focused behavior/render regressions passed; typecheck, build, and publint passed; the final full run passed 75 tests with 3 provider-gated skips.*
-- [ ] Record, inspect, and attach a rendered before/after video to the draft pull request.
-- [ ] Move this task to `tasks/complete/` and update the pull request body when validation is green.
+- [x] Record, inspect, and attach a rendered before/after video to the draft pull request. *PR #8 renders matching baseline/changed WebMs as two inline players; sequential frame review confirms the typed progression.*
+- [x] Move this task to `tasks/complete/` and update the pull request body when validation is green. *The reviewer-oriented body includes the API, behavior boundary, before/after videos, validation, and session ID.*
 
 ## Implementation log
 
@@ -48,3 +48,5 @@ videoMode({ typeFills: false }); // preserve Playwright fill behavior
 - 2026-07-24: Visual review found the renderer's static highlight hold discarded action-time footage. Rewritten fills now mark their highlight as live: ffmpeg overlays the real typed field pixels on the stable pre-action screenshot, retaining character entry without replaying unrelated page effects.
 - 2026-07-24: The first full run after the renderer follow-up missed an existing concurrent frame-count assertion by one frame (`3` versus `2` allowed). It passed immediately in isolation; the next full run passed 75 tests with 3 provider-gated skips.
 - 2026-07-24: Captured matching 7.7-second baseline and 7.5-second changed account-flow videos from `origin/main` and this branch. Sequential frame review shows the baseline hold remains empty while the changed hold advances through the email one or two characters per 10 fps sample.
+- 2026-07-24: Uploaded both WebMs through GitHub's authenticated attachment flow and verified the PR body renders two real inline `<video>` players.
+- 2026-07-24: CI and the continuous preview release passed at `33fa175`; no review threads are open.
