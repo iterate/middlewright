@@ -31,10 +31,10 @@ const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
 const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
 const VIDEO_MODE_CAPTIONS_FILE = "video-mode-captions.ass";
 const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
-// Playwright's 25 fps recording timestamps can trail the action clock by a
-// frame or two. Replace a short lead-in with the known pre-action screenshot so
-// a completed action frame cannot appear immediately before its synthetic hold.
-const VIDEO_MODE_PRE_ACTION_FRAME_MS = 100;
+// Playwright extends its final screencast frame by at least one second. Keep a
+// known final paint stable beyond that minimum so the raw duration measures the
+// recorder clock at close rather than an invented tail.
+const VIDEO_MODE_RECORDER_SETTLE_MS = 1100;
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -563,6 +563,51 @@ const normalizeSourceRange = (sourceRange: VideoModeSourceRange): VideoModeSourc
   }
 
   return normalized;
+};
+
+const translateVideoSpan = (span: VideoModeSpan, offsetMs: number): VideoModeSpan => {
+  return {
+    end: Math.max(0, Math.round(span.end + offsetMs)),
+    start: Math.max(0, Math.round(span.start + offsetMs)),
+  };
+};
+
+const translateVideoTimeline = (options: {
+  captions: VideoModeCaption[];
+  deadAir: VideoModeSpan[];
+  highlights: VideoModeHighlight[];
+  offsetMs: number;
+}) => {
+  return {
+    captions: options.captions.map((caption) => ({
+      ...translateVideoSpan(caption, options.offsetMs),
+      text: caption.text,
+    })),
+    deadAir: options.deadAir.map((span) => translateVideoSpan(span, options.offsetMs)),
+    highlights: options.highlights.map((highlight) => {
+      const start = Math.max(0, Math.round(highlight.start + options.offsetMs));
+      return {
+        ...highlight,
+        actionEnd:
+          highlight.actionEnd === undefined
+            ? undefined
+            : Math.max(start, Math.round(highlight.actionEnd + options.offsetMs)),
+        end: start + (highlight.end - highlight.start),
+        start,
+      };
+    }),
+  };
+};
+
+const translateSourceRange = (sourceRange: VideoModeSourceRange, offsetMs: number) => {
+  return {
+    ...(sourceRange.end === undefined
+      ? {}
+      : { end: Math.max(0, Math.round(sourceRange.end + offsetMs)) }),
+    ...(sourceRange.start === undefined
+      ? {}
+      : { start: Math.max(0, Math.round(sourceRange.start + offsetMs)) }),
+  };
 };
 
 const sourceRangeIsSet = (sourceRange: VideoModeSourceRange) => {
@@ -1426,26 +1471,27 @@ const videoPieces = (options: {
     for (let index = 0; index < highlights.length; index += 1) {
       const highlight = highlights[index];
       const nextHighlight = highlights[index + 1];
-      let frameStart = Math.max(
-        segment.start,
-        highlight.start - VIDEO_MODE_PRE_ACTION_FRAME_MS,
+
+      if (highlight.start > cursor) {
+        pieces.push({ end: highlight.start, speed: segment.speed, start: cursor });
+      }
+
+      const actionEnd = Math.max(highlight.start, highlight.actionEnd || highlight.start);
+      const highlightSourceEnd = Math.min(
+        segment.end,
+        Math.max(highlight.start + 1, actionEnd),
       );
-      let frameEnd = highlight.start;
 
-      if (frameEnd <= frameStart) {
-        frameStart = highlight.start;
-        frameEnd = Math.min(segment.end, frameStart + VIDEO_MODE_PRE_ACTION_FRAME_MS);
+      if (highlightSourceEnd > highlight.start) {
+        pieces.push({
+          end: highlightSourceEnd,
+          highlight,
+          speed: segment.speed,
+          start: highlight.start,
+        });
       }
 
-      if (frameStart > cursor) {
-        pieces.push({ end: frameStart, speed: segment.speed, start: cursor });
-      }
-
-      if (frameEnd > frameStart) {
-        pieces.push({ end: frameEnd, highlight, speed: segment.speed, start: frameStart });
-      }
-
-      let nextCursor = Math.max(highlight.start, highlight.actionEnd || highlight.start);
+      let nextCursor = actionEnd;
 
       if (nextHighlight && highlight.end > nextHighlight.start) {
         nextCursor = Math.max(nextCursor, nextHighlight.start);
@@ -2099,6 +2145,25 @@ const waitForNonEmptyFile = async (path: string, timeoutMs = 5000) => {
   throw lastError instanceof Error
     ? lastError
     : new Error(`Timed out waiting for non-empty file: ${path}`);
+};
+
+const settleVideoRecorder = async (page: Page) => {
+  // This frame is deliberately outside the render range. It gives Playwright a
+  // final compositor update, then remains unchanged long enough for the raw
+  // endpoint and videoMode's close timestamp to describe the same instant.
+  await page.evaluate(() => {
+    const cover = document.createElement("div");
+    cover.setAttribute("data-middlewright-video-mode-calibration", "");
+    Object.assign(cover.style, {
+      background: "rgb(1, 2, 3)",
+      inset: "0",
+      position: "fixed",
+      zIndex: "2147483647",
+    });
+    (document.body || document.documentElement).append(cover);
+  });
+  await page.screenshot({ scale: "css" });
+  await new Promise((resolve) => setTimeout(resolve, VIDEO_MODE_RECORDER_SETTLE_MS));
 };
 
 const escapeHtml = (value: string) => {
@@ -2864,6 +2929,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
       const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
         await Promise.all(pendingDialogHighlights);
+        const renderEndedAt = getVideoTimestamp();
         const metadataBeforeVideo = metadataFor(state);
         const captions = metadataBeforeVideo.captions;
         const deadAir = metadataBeforeVideo.deadAir;
@@ -2873,7 +2939,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             ? 0
             : renderVideoSegments({
                 deadAir,
-                finalEnd: getVideoTimestamp(),
+                finalEnd: renderEndedAt,
                 start: state.lastDialogEndedAt,
                 thresholdMs: deadAirThreshold,
               }).reduce((total, segment) => total + (segment.end - segment.start) / segment.speed, 0);
@@ -2901,8 +2967,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             dialogPostFrame = { path, viewport };
           }
 
+          let recordingEndedAt: number | undefined;
           if (!page.isClosed()) {
+            await settleVideoRecorder(page);
+            const closeStartedAt = performance.now();
             await page.close({ runBeforeUnload: false });
+            const closeEndedAt = performance.now();
+            if (state.startedAt !== undefined) {
+              recordingEndedAt = Math.round(
+                (closeStartedAt + closeEndedAt) / 2 - state.startedAt,
+              );
+            }
           }
 
           const recordedVideoPath = await video.path();
@@ -2914,49 +2989,64 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             path: paths.raw,
           });
 
+          const rawVideoInfo = await videoInfo(paths.raw);
+          const sourceOffset =
+            recordingEndedAt === undefined
+              ? 0
+              : rawVideoInfo.durationMs - recordingEndedAt;
+          const renderTimeline = translateVideoTimeline({
+            captions,
+            deadAir,
+            highlights,
+            offsetMs: sourceOffset,
+          });
+          const annotationSourceRange = metadataFor(state).sourceRange;
+          const sourceRange = translateSourceRange(annotationSourceRange, sourceOffset);
+
           // No explicit or selector-driven start: fall back to detecting where
           // the blank startup ends in the recorded pixels, and trim to there
           // when the lead-in is long enough to be worth removing. The second
           // `undefined` check guards the window across the ffmpeg await: if a
           // selector start landed meanwhile, it wins.
           //
-          // This start is in the raw recording's timebase (t=0 = context
-          // creation), which is exactly what the ffmpeg trim wants. Highlights
-          // and dead-air are in videoMode time (from `startedAt` at plugin
-          // construction); the two origins differ only by the fixture-setup gap
-          // between context creation and construction — sub-frame in practice and
-          // independent of how long the app takes to paint — so annotations stay
-          // aligned with the trimmed video. (`setStartTime` instead shares the
-          // videoMode timebase, so its trim and annotations shift together.)
-          if (trimStart.detectBlank && state.sourceRange.start === undefined) {
+          // A detected start is already in raw-video time. Explicit timestamps,
+          // captions, dead air, and highlights are translated from videoMode's
+          // clock using the settled recording endpoint above.
+          if (trimStart.detectBlank && annotationSourceRange.start === undefined) {
             const detectedStart = await detectBlankLeadInEndMs(paths.raw);
             if (
               detectedStart !== undefined &&
               detectedStart >= TRIM_START_MIN_LEAD_IN_MS &&
-              state.sourceRange.start === undefined
+              annotationSourceRange.start === undefined
             ) {
               state.sourceRange.start = detectedStart;
+              sourceRange.start = detectedStart;
             }
           }
 
-          // Read fresh, so an explicit, selector, or pixel-detected start all show.
-          const sourceRange = metadataFor(state).sourceRange;
+          if (sourceRange.start === undefined) {
+            sourceRange.start = Math.max(0, Math.round(sourceOffset));
+          }
+
+          if (sourceRange.end === undefined) {
+            sourceRange.end = Math.max(0, Math.round(renderEndedAt + sourceOffset));
+          }
 
           if (
             captions.length > 0 ||
             highlights.length > 0 ||
             deadAirThreshold !== undefined ||
             finalHold > 0 ||
-            sourceRangeIsSet(sourceRange)
+            sourceRangeIsSet(state.sourceRange)
           ) {
             const wroteRenderedVideo = await renderVideo({
-              captions,
-              deadAir,
+              captions: renderTimeline.captions,
+              deadAir: renderTimeline.deadAir,
               dialogPostFrame,
               dialogPostHoldMs,
               finalHoldMs: finalHold,
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
-              highlights,
+              highlights: renderTimeline.highlights,
               inputPath: paths.raw,
               outputDir: testInfo.outputDir,
               outputPath: paths.rendered,

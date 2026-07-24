@@ -633,13 +633,14 @@ test("holds the pre-click state without flashing the completed action state firs
   });
 
   const renderedPath = paths.rendered;
+  const renderedDurationMs = await videoDurationMs(renderedPath);
   const pauseFrame = await videoFrame(
     renderedPath,
     highlight.start + Math.round(highlightDurationMs / 2),
   );
   const afterClickFrame = await videoFrame(
     renderedPath,
-    highlight.start + highlightDurationMs + 250,
+    renderedDurationMs - 80,
   );
   const expectedScale = Math.min(
     pauseFrame.width / highlight.viewport.width,
@@ -678,6 +679,9 @@ test("holds the pre-click state without flashing the completed action state firs
   });
   expect(pauseCenter.blue).toBeGreaterThan(pauseCenter.red + 80);
   expect(afterClickCenter.red).toBeGreaterThan(afterClickCenter.blue + 80);
+  expect(renderedDurationMs).toBeLessThan(
+    (await videoDurationMs(paths.raw)) + highlightDurationMs - 400,
+  );
 });
 
 test("renders an accepted confirm with a paused dialog and pointer click", async ({

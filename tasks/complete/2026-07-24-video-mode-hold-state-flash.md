@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 base: pull/7
 ---
@@ -8,7 +8,7 @@ base: pull/7
 
 ## Status
 
-Complete. A deterministic frame-level regression covers the flash, and the renderer replaces the recorder's lagging pre-action tail with the captured pre-action frame. Focused and full validation pass; PR #9 includes the same three videos as #7 plus tested #8 merge notes.
+Implementation complete; final PR media and CI are pending. Rendering now calibrates videoMode time against Playwright's settled raw endpoint, translates the full render timeline, and excludes the recorder's invented tail. The fixed 100 ms cutoff is gone; all 16 ffmpeg specs and repeated frame-order regressions pass.
 
 ## Goal
 
@@ -45,6 +45,10 @@ Equivalent post-action/pre-hold flashes are visible in the other PR #7 videos.
 - [x] Regenerate and visually inspect the same three videos used by PR #7. *Serial final renders of the caption, dead-air, and dialog fixtures were inspected as timestamped contact sheets.*
 - [x] Attach those three videos to the PR for direct comparison. *PR #9 renders exactly three inline GitHub video players.*
 - [x] Document the expected interaction with PR #8 in the PR body. *A synthetic merge identified the `videoPieces()` conflict; the typed-fill, frame-ordering, and caption specs pass with the documented resolution.*
+- [x] Reproduce every remaining state reversal in the three PR videos. *A native-rate audit exposed the more general mismatch: raw frames, annotation spans, and Playwright's synthetic recorder tail used different origins.*
+- [x] Replace the fixed 100 ms guard with a measured video/annotation timeline mapping. *A known settled final paint calibrates the raw endpoint; captions, dead air, highlights, and explicit source ranges are translated together.*
+- [x] Add a regression that covers the clock mapping rather than another larger cutoff. *The frame-ordering spec now also rejects the uncalibrated recorder tail; it failed at 2.08 s before calibration and passes around 1.48 s after it.*
+- [ ] Regenerate and inspect every frame of the three comparison videos, then replace their PR attachments. *All frames of fresh local renders are clean; attachment replacement remains.*
 
 ## Implementation log
 
@@ -56,3 +60,8 @@ Equivalent post-action/pre-hold flashes are visible in the other PR #7 videos.
 - 2026-07-24: The focused video-mode suite passed 40/40. The full suite passed 74 tests with 3 provider-gated skips; typecheck, build, and publint passed.
 - 2026-07-24: A synthetic merge with PR #8 required a manual `videoPieces()` resolution because both branches change the highlight source window. Keeping the 100 ms cutoff while preserving `liveAction` through `actionEnd` passed the relevant three specs.
 - 2026-07-24: Uploaded the same caption, dead-air, and dialog videos as PR #7 to PR #9. GitHub's rendered body contains three inline video players.
+- 2026-07-24: Reopened after review still found visible flashes. The fixed cutoff and sampled contact-sheet inspection are no longer considered a complete fix.
+- 2026-07-24: Read Playwright 1.60's recorder implementation. Its WebM clock begins at the first browser screencast frame and its final frame is extended by at least one second; neither boundary is videoMode's Node monotonic origin.
+- 2026-07-24: Replaced the guessed lead-in with endpoint calibration. Finalization paints a frame outside the render range, lets the recorder settle, measures the raw/annotation offset at close, translates all render inputs, and trims the calibration plus synthetic recorder tail.
+- 2026-07-24: The strengthened regression failed before calibration because a 1.28 s raw video became a 2.08 s render; the calibrated render is about 1.48 s and preserves the pre-click hold followed by the red post-click state. Five repeated runs passed.
+- 2026-07-24: All 16 ffmpeg specs pass. A native 25 fps audit of the caption, dead-air, and dialog renders found no completed-state → pre-action-state → completed-state reversals.
