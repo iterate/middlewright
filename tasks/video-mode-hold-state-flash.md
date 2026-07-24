@@ -8,7 +8,7 @@ base: pull/7
 
 ## Status
 
-Specified and ready for diagnosis. The worktree is based on PR #7 so its three videos can be regenerated for direct comparison. Reproduction, regression coverage, the runtime fix, and rendered-video validation remain.
+About 70% complete. A deterministic frame-level regression now covers the flash, and the renderer replaces the recorder's lagging pre-action tail with the captured pre-action frame. All 16 ffmpeg specs pass. Full-suite validation, #8 compatibility, and the three comparison video uploads remain.
 
 ## Goal
 
@@ -37,10 +37,10 @@ Equivalent post-action/pre-hold flashes are visible in the other PR #7 videos.
 
 ## Checklist
 
-- [ ] Build a deterministic frame-level reproduction of the post-action/pre-hold flash.
-- [ ] Rank and test plausible causes in the rendered timeline/filter construction.
-- [ ] Add a failing public-behavior regression spec for the visible state ordering.
-- [ ] Fix hold composition without coupling video mode to another plugin.
+- [x] Build a deterministic frame-level reproduction of the post-action/pre-hold flash. *The rendered color-transition fixture consistently exposed 2–3 completed-state frames before its pre-click hold.*
+- [x] Rank and test plausible causes in the rendered timeline/filter construction. *Raw-frame inspection showed the completed paint already timestamped 80–100 ms before the wall-clock action boundary; concat and screenshot ordering were ruled out.*
+- [x] Add a failing public-behavior regression spec for the visible state ordering. *The calibrated highlight spec now decodes the rendered output and rejects any completed-state frame before the hold.*
+- [x] Fix hold composition without coupling video mode to another plugin. *Highlight timing starts before capture, and the final 100 ms before an action is replaced by its known pre-action screenshot.*
 - [ ] Re-run focused video specs and the full validation suite.
 - [ ] Regenerate and visually inspect the same three videos used by PR #7.
 - [ ] Attach those three videos to the PR for direct comparison.
@@ -49,3 +49,7 @@ Equivalent post-action/pre-hold flashes are visible in the other PR #7 videos.
 ## Implementation log
 
 - 2026-07-24: Created `fix/video-mode-hold-state-flash` from PR #7 head `2c637b7`. Kept PR #8 out of the branch so its typed-fill change can be assessed independently.
+- 2026-07-24: Reproduced the reported account-flow flash at 25 fps: the filled value appeared at 40 ms and 80 ms, then the pre-action screenshot resumed at 120 ms.
+- 2026-07-24: A large blue-to-red click fixture made the signal deterministic. Before the fix, three runs each found 2–3 red frames before the blue pre-click hold.
+- 2026-07-24: The same regression passed five consecutive runs after the fix. The original account flow was regenerated and its first 1.2 seconds inspected as a contact sheet; the input remains empty until the real post-hold action footage.
+- 2026-07-24: All 16 ffmpeg video-mode specs pass on the implementation.

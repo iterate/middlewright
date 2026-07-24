@@ -31,6 +31,10 @@ const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
 const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
 const VIDEO_MODE_CAPTIONS_FILE = "video-mode-captions.ass";
 const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
+// Playwright's 25 fps recording timestamps can trail the action clock by a
+// frame or two. Replace a short lead-in with the known pre-action screenshot so
+// a completed action frame cannot appear immediately before its synthetic hold.
+const VIDEO_MODE_PRE_ACTION_FRAME_MS = 100;
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -1080,9 +1084,9 @@ const recordHighlight = async (options: {
     options.state.highlightImageIndex += 1;
     const imagePath = join(options.testInfo.outputDir, image);
     await mkdir(options.testInfo.outputDir, { recursive: true });
+    const start = Math.round(performance.now() - options.state.startedAt);
     await options.locator.page().screenshot({ path: imagePath, scale: "css" });
 
-    const start = Math.round(performance.now() - options.state.startedAt);
     const highlight: VideoModeHighlight = {
       color: options.color,
       end: start + Math.round(options.durationMs),
@@ -1412,7 +1416,6 @@ const videoPieces = (options: {
   segments: RenderVideoSegment[];
 }): VideoPiece[] => {
   const pieces: VideoPiece[] = [];
-  const frameMs = 50;
 
   for (const segment of options.segments) {
     let cursor = segment.start;
@@ -1423,17 +1426,19 @@ const videoPieces = (options: {
     for (let index = 0; index < highlights.length; index += 1) {
       const highlight = highlights[index];
       const nextHighlight = highlights[index + 1];
-
-      if (highlight.start > cursor) {
-        pieces.push({ end: highlight.start, speed: segment.speed, start: cursor });
-      }
-
-      let frameStart = Math.max(segment.start, highlight.start - frameMs);
+      let frameStart = Math.max(
+        segment.start,
+        highlight.start - VIDEO_MODE_PRE_ACTION_FRAME_MS,
+      );
       let frameEnd = highlight.start;
 
       if (frameEnd <= frameStart) {
         frameStart = highlight.start;
-        frameEnd = Math.min(segment.end, frameStart + frameMs);
+        frameEnd = Math.min(segment.end, frameStart + VIDEO_MODE_PRE_ACTION_FRAME_MS);
+      }
+
+      if (frameStart > cursor) {
+        pieces.push({ end: frameStart, speed: segment.speed, start: cursor });
       }
 
       if (frameEnd > frameStart) {

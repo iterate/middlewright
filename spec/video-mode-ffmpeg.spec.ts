@@ -589,7 +589,9 @@ test("skips rendering an empty selected video source range", async ({ page }, te
   }
 });
 
-test("renders calibrated highlight boxes on a paused pre-click frame", async ({ page }, testInfo) => {
+test("holds the pre-click state without flashing the completed action state first", async ({
+  page,
+}, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({ trimStart: "never",
     finalHold: 0,
@@ -606,6 +608,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
       <div id="target" style="position: absolute; left: 120px; top: 80px; width: 160px; height: 90px; background: rgb(0, 80, 255)" onclick="this.style.background = 'rgb(255, 0, 0)'"></div>
     `);
 
+    await plugged.waitForTimeout(300);
     await plugged.locator("#target").click();
     await expect(plugged.locator("#target")).toHaveCSS("background-color", "rgb(255, 0, 0)");
     await page.waitForTimeout(300);
@@ -649,6 +652,13 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
     y: Math.round(highlight.rect.y * expectedScale),
   };
   const yellowBox = yellowBoundingBox(pauseFrame);
+  const completedStateBeforeHold = (await videoFrames(renderedPath))
+    .slice(0, Math.ceil(highlight.start / 40))
+    .map((frame, index) => ({
+      color: averagePixel(frame, centerOf(expectedBox)),
+      timestamp: index * 40,
+    }))
+    .filter(({ color }) => color.red > color.blue + 80);
 
   expect(yellowBox).toMatchObject({
     height: expect.closeTo(expectedBox.height, 4),
@@ -656,6 +666,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
     x: expect.closeTo(expectedBox.x, 3),
     y: expect.closeTo(expectedBox.y, 3),
   });
+  expect(completedStateBeforeHold).toEqual([]);
 
   const pauseCenter = averagePixel(pauseFrame, centerOf(expectedBox));
   const afterClickCenter = averagePixel(afterClickFrame, centerOf(expectedBox));
