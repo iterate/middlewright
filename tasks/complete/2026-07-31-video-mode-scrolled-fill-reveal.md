@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-About 75% through the review follow-up. Scrolling and expanding textareas now reveal line-height-aligned raster bands in order, with rendered-frame regressions green. Stress/full validation and replacement PR videos remain.
+Complete. Scrolling and expanding textareas reveal line-height-aligned raster bands in order; the rendered-frame regressions, stress/full validation, and replacement PR videos are all green.
 
 ## Goal
 
@@ -45,7 +45,7 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - [x] Update the PR body, resolve review feedback, and move this task to `tasks/complete/`. *PR #12 documents the fallback, limits, videos, and green validation; no review feedback is outstanding.*
 - [x] Add a rendered-video regression proving a later textarea line stays covered while the first visible line reveals. *The old column wipe exposed 1,005 dark pixels in later rows at the early sample; the regression now requires fewer than 10.*
 - [x] Reveal multiline final pixels one line-height band at a time while retaining the single-band input behavior. *Reveal metadata records visible bands aligned to the field's used line height and scroll offset; the renderer completes each band before advancing.*
-- [ ] Regenerate and inspect the affected videos, update PR #12, and return this task to `tasks/complete/` after green CI.
+- [x] Regenerate and inspect the affected videos, update PR #12, and return this task to `tasks/complete/` after green CI. *The scrolling and expanding clips were replaced with line-by-line videos; 20/20 stress iterations, 83-test suite, build, typecheck, `publint`, and current PR checks pass.*
 
 ## Implementation log
 
@@ -56,3 +56,4 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: Uploaded all four clips as inline GitHub video players, updated PR #12, and confirmed its test and release checks are green before completing the task.
 - 2026-07-31: Review found the best-effort fallback visually read as a paragraph-wide column wipe. Reopened the task to use line-aligned raster bands without per-letter DOM measurement.
 - 2026-07-31: Completed the line-band RED→GREEN slice. Explicit and browser-default line heights work, all 24 FFmpeg specs pass, and contact sheets show ordered lines for scrolling and expanding textareas.
+- 2026-07-31: Replaced the two affected inline PR videos, confirmed all four players render, and completed the review follow-up after green local and remote checks.
