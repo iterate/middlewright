@@ -99,8 +99,14 @@ export type VideoModeViewport = {
 };
 
 export type VideoModeFillReveal = {
+  cover?: {
+    color: string;
+    rect: VideoModeRect;
+  };
   contentRect: VideoModeRect;
   image: string;
+  initialRect: VideoModeRect;
+  revealBands: { height: number; y: number }[];
   revealStops: number[];
 };
 
@@ -261,6 +267,8 @@ type VideoFilter = {
 type VideoPiece = {
   end: number;
   highlight?: VideoModeHighlight;
+  postAction?: VideoModeHighlight;
+  preAction?: VideoModeHighlight;
   speed: number;
   start: number;
 };
@@ -1253,6 +1261,7 @@ const recordFillReveal = async (options: {
   state: VideoModeState;
   testInfo: TestInfo;
 }) => {
+  const initialRect = { ...options.highlight.rect };
   try {
     const snapshot = await options.locator.evaluate((element, captureOptions) => {
       if (
@@ -1284,19 +1293,18 @@ const recordFillReveal = async (options: {
         Math.abs(rect.top - captureOptions.expectedRect.y) > 1;
       const isTextarea = element instanceof HTMLTextAreaElement;
       const value = element.value;
-
-      if (
-        rectChanged ||
-        value.length === 0 ||
-        value.length > captureOptions.maxCharacters ||
-        value.includes("\n") ||
-        style.direction === "rtl" ||
-        !["left", "start"].includes(style.textAlign) ||
+      const scrollChanged =
         element.scrollLeft > 0 ||
         element.scrollTop > 0 ||
         (isTextarea &&
           (element.scrollHeight > element.clientHeight + 1 ||
-            element.scrollWidth > element.clientWidth + 1)) ||
+            element.scrollWidth > element.clientWidth + 1));
+
+      if (
+        value.length === 0 ||
+        value.length > captureOptions.maxCharacters ||
+        style.direction === "rtl" ||
+        !["left", "start"].includes(style.textAlign) ||
         (element instanceof HTMLInputElement && element.type === "password")
       ) {
         return { ...geometry, kind: "fallback" as const };
@@ -1321,6 +1329,81 @@ const recordFillReveal = async (options: {
 
       if (contentRect.width <= 0 || contentRect.height <= 0) {
         return { ...geometry, kind: "fallback" as const };
+      }
+
+      const backgroundChannels = style.backgroundColor
+        .match(/[\d.]+/g)
+        ?.map(Number);
+      const backgroundColor =
+        backgroundChannels &&
+        backgroundChannels.length >= 3 &&
+        (backgroundChannels[3] === undefined || backgroundChannels[3] >= 0.99)
+          ? `#${backgroundChannels
+              .slice(0, 3)
+              .map((channel) => Math.max(0, Math.min(255, Math.round(channel))))
+              .map((channel) => channel.toString(16).padStart(2, "0"))
+              .join("")}`
+          : undefined;
+      const needsBestEffort = rectChanged || scrollChanged || value.includes("\n");
+
+      if (needsBestEffort) {
+        if (!backgroundColor) {
+          return { ...geometry, kind: "fallback" as const };
+        }
+        const stopCount = Math.max(4, Math.min(12, Math.ceil(contentRect.width / 64)));
+        const revealBands = (() => {
+          if (!isTextarea) {
+            return [{ height: contentRect.height, y: 0 }];
+          }
+
+          let lineHeight = pixels(style.lineHeight);
+          if (lineHeight <= 0) {
+            const probe = document.createElement("span");
+            Object.assign(probe.style, {
+              display: "inline-block",
+              font: style.font,
+              lineHeight: style.lineHeight,
+              pointerEvents: "none",
+              position: "fixed",
+              visibility: "hidden",
+              whiteSpace: "pre",
+            });
+            probe.textContent = "M";
+            (document.body || document.documentElement).append(probe);
+            const oneLineHeight = probe.getBoundingClientRect().height;
+            probe.textContent = "M\nM";
+            lineHeight = probe.getBoundingClientRect().height - oneLineHeight;
+            probe.remove();
+          }
+          if (lineHeight <= 0) {
+            return [{ height: contentRect.height, y: 0 }];
+          }
+
+          const bands: { height: number; y: number }[] = [];
+          for (
+            let y = -(element.scrollTop % lineHeight);
+            y < contentRect.height;
+            y += lineHeight
+          ) {
+            const top = Math.max(0, y);
+            const bottom = Math.min(contentRect.height, y + lineHeight);
+            if (bottom > top) {
+              bands.push({ height: bottom - top, y: top });
+            }
+          }
+          return bands;
+        })();
+        return {
+          ...geometry,
+          contentRect,
+          cover: { color: backgroundColor, rect: geometry.rect },
+          kind: "reveal" as const,
+          replaceGeometry: true,
+          revealBands,
+          revealStops: Array.from({ length: stopCount }, (_, index) =>
+            Math.ceil((contentRect.width * (index + 1)) / stopCount),
+          ),
+        };
       }
 
       const canvas = document.createElement("canvas");
@@ -1348,7 +1431,12 @@ const recordFillReveal = async (options: {
       return {
         ...geometry,
         contentRect,
+        cover: backgroundColor
+          ? { color: backgroundColor, rect: contentRect }
+          : undefined,
         kind: "reveal" as const,
+        replaceGeometry: false,
+        revealBands: [{ height: contentRect.height, y: 0 }],
         revealStops,
       };
     }, {
@@ -1373,9 +1461,16 @@ const recordFillReveal = async (options: {
       options.highlight.viewport = snapshot.viewport;
       return;
     }
+    if (snapshot.replaceGeometry) {
+      options.highlight.rect = snapshot.rect;
+      options.highlight.viewport = snapshot.viewport;
+    }
     options.highlight.fillReveal = {
       contentRect: snapshot.contentRect,
+      cover: snapshot.cover,
       image,
+      initialRect,
+      revealBands: snapshot.revealBands,
       revealStops: snapshot.revealStops,
     };
   } catch {
@@ -1699,6 +1794,7 @@ const videoPieces = (options: {
 
   for (const segment of options.segments) {
     let cursor = segment.start;
+    let previousHighlight: VideoModeHighlight | undefined;
     const highlights = options.highlights.filter(
       (highlight) => highlight.start >= segment.start && highlight.start < segment.end,
     );
@@ -1708,7 +1804,13 @@ const videoPieces = (options: {
       const nextHighlight = highlights[index + 1];
 
       if (highlight.start > cursor) {
-        pieces.push({ end: highlight.start, speed: segment.speed, start: cursor });
+        pieces.push({
+          end: highlight.start,
+          postAction: previousHighlight?.fillReveal ? previousHighlight : undefined,
+          preAction: highlight.fillReveal ? highlight : undefined,
+          speed: segment.speed,
+          start: cursor,
+        });
       }
 
       const actionEnd = Math.max(highlight.start, highlight.actionEnd || highlight.start);
@@ -1733,10 +1835,16 @@ const videoPieces = (options: {
       }
 
       cursor = Math.min(segment.end, nextCursor);
+      previousHighlight = highlight;
     }
 
     if (segment.end > cursor) {
-      pieces.push({ end: segment.end, speed: segment.speed, start: cursor });
+      pieces.push({
+        end: segment.end,
+        postAction: previousHighlight?.fillReveal ? previousHighlight : undefined,
+        speed: segment.speed,
+        start: cursor,
+      });
     }
   }
 
@@ -1781,17 +1889,24 @@ const scaledViewportSize = (
   };
 };
 
-const drawboxFilter = (highlight: VideoModeHighlight, video: { width: number; height: number }) => {
-  const rect = scaleHighlight(highlight, video);
+const drawboxFilterForRect = (
+  highlight: VideoModeHighlight,
+  rect: VideoModeRect,
+  video: { width: number; height: number },
+) => {
+  const scaledRect = scaleVideoModeRect(rect, highlight.viewport, video);
   return [
-    `drawbox=x=${rect.x}`,
-    `y=${rect.y}`,
-    `w=${rect.width}`,
-    `h=${rect.height}`,
+    `drawbox=x=${scaledRect.x}`,
+    `y=${scaledRect.y}`,
+    `w=${scaledRect.width}`,
+    `h=${scaledRect.height}`,
     `color=${highlight.color}`,
     `t=${Math.max(1, Math.round(highlight.thickness))}`,
   ].join(":");
 };
+
+const drawboxFilter = (highlight: VideoModeHighlight, video: { width: number; height: number }) =>
+  drawboxFilterForRect(highlight, highlight.rect, video);
 
 const renderedPieceDuration = (piece: VideoPiece) => {
   const sourceDuration = (piece.end - piece.start) / piece.speed;
@@ -1864,7 +1979,9 @@ const highlightCursorPoint = (
   highlight: VideoModeHighlight,
   video: { width: number; height: number },
 ) => {
-  const rect = scaleHighlight(highlight, video);
+  const rect = highlight.fillReveal
+    ? scaleVideoModeRect(highlight.fillReveal.initialRect, highlight.viewport, video)
+    : scaleHighlight(highlight, video);
 
   return {
     x: Math.max(0, Math.min(video.width - 1, rect.x + rect.width / 2)),
@@ -2192,6 +2309,12 @@ const renderedVideoFilter = (options: {
     labels.push(`[${label}]`);
 
     const operations: string[] = [];
+    const preActionInput = piece.preAction?.image
+      ? highlightInputByImage.get(piece.preAction.image)
+      : undefined;
+    const postActionInput = piece.postAction?.fillReveal
+      ? highlightInputByImage.get(piece.postAction.fillReveal.image)
+      : undefined;
     const fillReveal = piece.highlight?.fillReveal;
     const preFillInput = piece.highlight?.image
       ? highlightInputByImage.get(piece.highlight.image)
@@ -2199,6 +2322,84 @@ const renderedVideoFilter = (options: {
     const postFillInput = fillReveal
       ? highlightInputByImage.get(fillReveal.image)
       : undefined;
+
+    const stabilizations: {
+      input: HighlightInput;
+      rect: VideoModeRect;
+      viewport: VideoModeViewport;
+    }[] = [];
+    if (piece.postAction?.fillReveal && postActionInput) {
+      stabilizations.push({
+        input: postActionInput,
+        rect: piece.postAction.rect,
+        viewport: piece.postAction.viewport,
+      });
+    }
+    if (piece.preAction?.fillReveal && preActionInput) {
+      stabilizations.push({
+        input: preActionInput,
+        rect: piece.preAction.fillReveal.initialRect,
+        viewport: piece.preAction.viewport,
+      });
+    }
+
+    if (stabilizations.length > 0) {
+      const preActionCover = piece.preAction?.fillReveal?.cover;
+      const coverRect = preActionCover
+        ? scaleVideoModeRect(
+            preActionCover.rect,
+            piece.preAction!.viewport,
+            options.video,
+          )
+        : undefined;
+      const durationSeconds = formatSeconds(renderedPieceDuration(piece));
+      const baseLabel = `stabilizebase${index}`;
+      filters.push(
+        [
+          `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
+          `setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`,
+          coverRect && preActionCover
+            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${preActionCover.color}:t=fill`
+            : undefined,
+        ]
+          .filter((operation): operation is string => Boolean(operation))
+          .join(",") + `[${baseLabel}]`,
+      );
+
+      let composedLabel = baseLabel;
+      for (let stabilizationIndex = 0; stabilizationIndex < stabilizations.length; stabilizationIndex += 1) {
+        const stabilization = stabilizations[stabilizationIndex];
+        const scaledViewport = scaledViewportSize(stabilization.viewport, options.video);
+        const rect = scaleVideoModeRect(
+          stabilization.rect,
+          stabilization.viewport,
+          options.video,
+        );
+        const cropLabel = `stabilizecrop${index}x${stabilizationIndex}`;
+        const nextLabel =
+          stabilizationIndex === stabilizations.length - 1
+            ? label
+            : `stabilized${index}x${stabilizationIndex}`;
+        filters.push(
+          [
+            `[${stabilization.input.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+            `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+            `crop=w=${rect.width}:h=${rect.height}:x=${rect.x}:y=${rect.y}`,
+            `trim=start=0:end=${durationSeconds}`,
+            `setpts=PTS-STARTPTS[${cropLabel}]`,
+          ].join(","),
+        );
+        filters.push(
+          [
+            `[${composedLabel}][${cropLabel}]overlay=x=${rect.x}`,
+            `y=${rect.y}`,
+            `shortest=1[${nextLabel}]`,
+          ].join(":"),
+        );
+        composedLabel = nextLabel;
+      }
+      continue;
+    }
 
     if (piece.highlight && fillReveal && preFillInput && postFillInput) {
       const scaledViewport = scaledViewportSize(piece.highlight.viewport, options.video);
@@ -2209,6 +2410,20 @@ const renderedVideoFilter = (options: {
       );
       const duration = renderedPieceDuration(piece);
       const durationSeconds = formatSeconds(duration);
+      const coverRect = fillReveal.cover
+        ? scaleVideoModeRect(fillReveal.cover.rect, piece.highlight.viewport, options.video)
+        : undefined;
+      const initialRect = scaleVideoModeRect(
+        fillReveal.initialRect,
+        piece.highlight.viewport,
+        options.video,
+      );
+      const finalRect = scaleHighlight(piece.highlight, options.video);
+      const geometryChanged =
+        initialRect.height !== finalRect.height ||
+        initialRect.width !== finalRect.width ||
+        initialRect.x !== finalRect.x ||
+        initialRect.y !== finalRect.y;
       const scale = Math.min(
         options.video.width / piece.highlight.viewport.width,
         options.video.height / piece.highlight.viewport.height,
@@ -2216,6 +2431,14 @@ const renderedVideoFilter = (options: {
       const revealStops = fillReveal.revealStops
         .map((stop) => Math.max(1, Math.min(contentRect.width, Math.round(stop * scale))))
         .filter((stop, stopIndex, stops) => stopIndex === 0 || stop !== stops[stopIndex - 1]);
+      const revealSteps = fillReveal.revealBands.flatMap((band) => {
+        const y = Math.max(0, Math.min(contentRect.height - 1, Math.round(band.y * scale)));
+        const height = Math.max(
+          1,
+          Math.min(contentRect.height - y, Math.round(band.height * scale)),
+        );
+        return revealStops.map((width) => ({ height, width, y }));
+      });
       const target = plan.targets.find(
         (candidate) => candidate.highlight === piece.highlight,
       );
@@ -2226,21 +2449,33 @@ const renderedVideoFilter = (options: {
       const pointerArrival = target
         ? Math.max(0, target.arriveAt - renderedPiece.outputStart)
         : 0;
-      const pointerRevealStart =
-        options.highlightMode === "pointer"
-          ? pointerArrival + Math.max(0, revealEnd - pointerArrival) / 2
-          : 0;
-      const revealStart = Math.max(0, Math.min(revealEnd, pointerRevealStart));
+      const availableAfterArrival = Math.max(0, revealEnd - pointerArrival);
+      const preRevealHold = Math.min(
+        TEXT_CURSOR_HOLD_IDEAL_MS,
+        availableAfterArrival / 2,
+      );
+      const revealStart = Math.max(
+        0,
+        Math.min(revealEnd, pointerArrival + preRevealHold),
+      );
       const baseLabel = `fillbase${index}`;
-      const splitLabels = revealStops.map((_, stopIndex) => `fillpost${index}x${stopIndex}`);
+      const splitLabels = revealSteps.map((_, stepIndex) => `fillpost${index}x${stepIndex}`);
 
       filters.push(
         [
           `[${preFillInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
           `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          geometryChanged && fillReveal.cover
+            ? `drawbox=x=${initialRect.x}:y=${initialRect.y}:w=${initialRect.width}:h=${initialRect.height}:color=${fillReveal.cover.color}:t=fill`
+            : undefined,
+          coverRect && fillReveal.cover
+            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${fillReveal.cover.color}:t=fill${geometryChanged ? `:enable='gte(t\\,${formatSeconds(revealStart)})'` : ""}`
+            : undefined,
           `trim=start=0:end=${durationSeconds}`,
           `setpts=PTS-STARTPTS[${baseLabel}]`,
-        ].join(","),
+        ]
+          .filter((operation): operation is string => Boolean(operation))
+          .join(","),
       );
       filters.push(
         [
@@ -2249,30 +2484,31 @@ const renderedVideoFilter = (options: {
           `crop=w=${contentRect.width}:h=${contentRect.height}:x=${contentRect.x}:y=${contentRect.y}`,
           `trim=start=0:end=${durationSeconds}`,
           "setpts=PTS-STARTPTS",
-          `split=${revealStops.length}${splitLabels.map((splitLabel) => `[${splitLabel}]`).join("")}`,
+          `split=${revealSteps.length}${splitLabels.map((splitLabel) => `[${splitLabel}]`).join("")}`,
         ].join(","),
       );
 
       let composedLabel = baseLabel;
-      for (let stopIndex = 0; stopIndex < revealStops.length; stopIndex += 1) {
-        const cropLabel = `fillcrop${index}x${stopIndex}`;
-        const nextLabel = `fillcomposed${index}x${stopIndex}`;
+      for (let stepIndex = 0; stepIndex < revealSteps.length; stepIndex += 1) {
+        const step = revealSteps[stepIndex];
+        const cropLabel = `fillcrop${index}x${stepIndex}`;
+        const nextLabel = `fillcomposed${index}x${stepIndex}`;
         const showAt =
           revealStart +
-          ((revealEnd - revealStart) * (stopIndex + 1)) /
-            (revealStops.length + 1);
+          ((revealEnd - revealStart) * (stepIndex + 1)) /
+            (revealSteps.length + 1);
         filters.push(
           `${[
-            `[${splitLabels[stopIndex]}]crop=w=${revealStops[stopIndex]}`,
-            `h=${contentRect.height}`,
+            `[${splitLabels[stepIndex]}]crop=w=${step.width}`,
+            `h=${step.height}`,
             "x=0",
-            "y=0",
+            `y=${step.y}`,
           ].join(":")}[${cropLabel}]`,
         );
         filters.push(
           [
             `[${composedLabel}][${cropLabel}]overlay=x=${contentRect.x}`,
-            `y=${contentRect.y}`,
+            `y=${contentRect.y + step.y}`,
             `enable='gte(t\\,${formatSeconds(showAt)})'`,
             `shortest=1[${nextLabel}]`,
           ].join(":"),
@@ -2280,11 +2516,20 @@ const renderedVideoFilter = (options: {
         composedLabel = nextLabel;
       }
 
-      filters.push(
-        options.highlightMode === "outline"
-          ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`
-          : `[${composedLabel}]null[${label}]`,
-      );
+      if (options.highlightMode === "outline" && geometryChanged) {
+        filters.push(
+          [
+            `[${composedLabel}]${drawboxFilterForRect(piece.highlight, fillReveal.initialRect, options.video)}:enable='lt(t\\,${formatSeconds(revealStart)})'`,
+            `${drawboxFilter(piece.highlight, options.video)}:enable='gte(t\\,${formatSeconds(revealStart)})'[${label}]`,
+          ].join(","),
+        );
+      } else {
+        filters.push(
+          options.highlightMode === "outline"
+            ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`
+            : `[${composedLabel}]null[${label}]`,
+        );
+      }
       continue;
     }
 
@@ -3175,12 +3420,6 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
       try {
         const result = await next();
-        if (recordedHighlight && state.startedAt !== undefined) {
-          recordedHighlight.actionEnd = Math.max(
-            recordedHighlight.start,
-            Math.round(performance.now() - state.startedAt),
-          );
-        }
         if (
           recordedHighlight &&
           method === "fill" &&
@@ -3193,6 +3432,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             state,
             testInfo,
           });
+        }
+        if (recordedHighlight && state.startedAt !== undefined) {
+          recordedHighlight.actionEnd = Math.max(
+            recordedHighlight.start,
+            Math.round(performance.now() - state.startedAt),
+          );
         }
         return result;
       } finally {
