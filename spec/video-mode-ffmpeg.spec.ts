@@ -589,7 +589,9 @@ test("skips rendering an empty selected video source range", async ({ page }, te
   }
 });
 
-test("renders calibrated highlight boxes on a paused pre-click frame", async ({ page }, testInfo) => {
+test("holds the pre-click state without flashing the completed action state first", async ({
+  page,
+}, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({ trimStart: "never",
     finalHold: 0,
@@ -606,6 +608,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
       <div id="target" style="position: absolute; left: 120px; top: 80px; width: 160px; height: 90px; background: rgb(0, 80, 255)" onclick="this.style.background = 'rgb(255, 0, 0)'"></div>
     `);
 
+    await plugged.waitForTimeout(300);
     await plugged.locator("#target").click();
     await expect(plugged.locator("#target")).toHaveCSS("background-color", "rgb(255, 0, 0)");
     await page.waitForTimeout(300);
@@ -630,13 +633,14 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
   });
 
   const renderedPath = paths.rendered;
+  const renderedDurationMs = await videoDurationMs(renderedPath);
   const pauseFrame = await videoFrame(
     renderedPath,
     highlight.start + Math.round(highlightDurationMs / 2),
   );
   const afterClickFrame = await videoFrame(
     renderedPath,
-    highlight.start + highlightDurationMs + 250,
+    renderedDurationMs - 80,
   );
   const expectedScale = Math.min(
     pauseFrame.width / highlight.viewport.width,
@@ -649,6 +653,13 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
     y: Math.round(highlight.rect.y * expectedScale),
   };
   const yellowBox = yellowBoundingBox(pauseFrame);
+  const completedStateBeforeHold = (await videoFrames(renderedPath))
+    .slice(0, Math.ceil(highlight.start / 40))
+    .map((frame, index) => ({
+      color: averagePixel(frame, centerOf(expectedBox)),
+      timestamp: index * 40,
+    }))
+    .filter(({ color }) => color.red > color.blue + 80);
 
   expect(yellowBox).toMatchObject({
     height: expect.closeTo(expectedBox.height, 4),
@@ -656,6 +667,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
     x: expect.closeTo(expectedBox.x, 3),
     y: expect.closeTo(expectedBox.y, 3),
   });
+  expect(completedStateBeforeHold).toEqual([]);
 
   const pauseCenter = averagePixel(pauseFrame, centerOf(expectedBox));
   const afterClickCenter = averagePixel(afterClickFrame, centerOf(expectedBox));
@@ -667,6 +679,9 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
   });
   expect(pauseCenter.blue).toBeGreaterThan(pauseCenter.red + 80);
   expect(afterClickCenter.red).toBeGreaterThan(afterClickCenter.blue + 80);
+  expect(renderedDurationMs).toBeLessThan(
+    (await videoDurationMs(paths.raw)) + highlightDurationMs - 400,
+  );
 });
 
 test("renders an accepted confirm with a paused dialog and pointer click", async ({
@@ -752,8 +767,20 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
   expect(panelCenter.blue).toBeGreaterThan(220);
   expect(pointerTailPixelCount(dialogFrame, buttonBox)).toBeGreaterThan(20);
 
+  const renderedFrames = await videoFrames(paths.rendered);
+  const finalDarkFrameCount = [...renderedFrames]
+    .reverse()
+    .findIndex((frame) => {
+      const center = averagePixel(frame, {
+        x: Math.round(frame.width / 2),
+        y: Math.round(frame.height / 2),
+      });
+      return center.red >= 80 || center.green >= 80 || center.blue >= 80;
+    });
+  // A one-second post-dialog view is 25 decoded frames. Depending on container
+  // duration semantics, its last PTS can report 40ms less than wall duration.
+  expect(finalDarkFrameCount).toBeGreaterThanOrEqual(24);
   const renderedDuration = await videoDurationMs(paths.rendered);
-  expect(renderedDuration - (renderedStart + highlightDurationMs)).toBeGreaterThanOrEqual(1_000);
   const finalFrame = await videoFrame(paths.rendered, renderedDuration - 100);
   const finalCenter = averagePixel(finalFrame, {
     x: Math.round(finalFrame.width / 2),
@@ -786,6 +813,7 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
           document.querySelector("#result").textContent = confirm("Continue processing?")
             ? "Processing"
             : "Stopped";
+          document.body.style.background = "rgb(0, 180, 0)";
         });
       </script>
     `);
@@ -796,10 +824,19 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
     await plugged.waitForTimeout(1_100);
   }
 
+  const paths = video.outputPaths();
   await video.metadata();
-  await expect(
-    stat(join(testInfo.outputDir, "video-mode-dialog-post-frame.png")),
-  ).rejects.toMatchObject({ code: "ENOENT" });
+  const finalGreenFrameCount = [...(await videoFrames(paths.rendered))]
+    .reverse()
+    .findIndex((frame) => {
+      const center = averagePixel(frame, {
+        x: Math.round(frame.width / 2),
+        y: Math.round(frame.height / 2),
+      });
+      return center.green < center.red + 80 || center.green < center.blue + 80;
+    });
+  expect(finalGreenFrameCount).toBeGreaterThanOrEqual(24);
+  expect(finalGreenFrameCount).toBeLessThan(40);
 });
 
 test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
