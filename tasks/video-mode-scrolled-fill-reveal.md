@@ -62,3 +62,4 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: Replaced the two affected inline PR videos, confirmed all four players render, and completed the review follow-up after green local and remote checks.
 - 2026-07-31: Review caught two related timeline gaps: outline mode bypassed the pre-reveal pause, and resized fields drew their final cover/outline from the first hold frame. Reopened for a timing/geometry regression slice.
 - 2026-07-31: Added rendered RED regressions, shared the pause calculation across highlight modes, and retained initial fill geometry until reveal. All 24 FFmpeg specs and 50/50 focused stress runs pass.
+- 2026-07-31: Lengthened the four PR media fixtures to a 1.6s highlight so reviewers see the full 800ms pause and a slower 800ms reveal; the adjusted cases pass 20/20 repeated runs.

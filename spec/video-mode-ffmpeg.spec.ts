@@ -1270,7 +1270,7 @@ test("preserves gradient field pixels while revealing the filled text", async ({
 });
 
 test("reveals a stable single-line textarea fill", async ({ page }, testInfo) => {
-  const highlightDurationMs = 1000;
+  const highlightDurationMs = 1600;
   const video = videoMode({
     captions: "explicit",
     finalHold: 1000,
@@ -1378,10 +1378,11 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
 test("reveals a scrolling textarea one visible line at a time", async ({
   page,
 }, testInfo) => {
+  const highlightDurationMs = 1600;
   const video = videoMode({
     captions: "explicit",
     finalHold: 1000,
-    highlight: { mode: "outline", duration: 800 },
+    highlight: { mode: "outline", duration: highlightDurationMs },
     trimStart: ["selector", 'textarea[aria-label="Log"]'],
   });
   {
@@ -1430,7 +1431,9 @@ test("reveals a scrolling textarea one visible line at a time", async ({
   );
   const frames = await videoFramesAt(
     video.outputPaths().rendered,
-    [200, 450, 500, 550, 600, 650, 700, 750, 790].map((offset) => fillStart + offset),
+    [200, 850, 950, 1050, 1150, 1250, 1350, 1450, 1580].map(
+      (offset) => fillStart + offset,
+    ),
   );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
@@ -1498,10 +1501,11 @@ test("reveals a scrolling textarea one visible line at a time", async ({
 test("reveals the final visible portion of a horizontally scrolling input", async ({
   page,
 }, testInfo) => {
+  const highlightDurationMs = 1600;
   const video = videoMode({
     captions: "explicit",
     finalHold: 1000,
-    highlight: { mode: "outline", duration: 800 },
+    highlight: { mode: "outline", duration: highlightDurationMs },
     trimStart: ["selector", 'input[aria-label="Reference"]'],
   });
   {
@@ -1545,7 +1549,9 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
   );
   const frames = await videoFramesAt(
     video.outputPaths().rendered,
-    [200, 450, 500, 550, 600, 650, 700, 750, 790].map((offset) => fillStart + offset),
+    [200, 850, 950, 1050, 1150, 1250, 1350, 1450, 1580].map(
+      (offset) => fillStart + offset,
+    ),
   );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
@@ -1593,10 +1599,11 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
 test("reveals an expanding textarea one line at a time at its final geometry", async ({
   page,
 }, testInfo) => {
+  const highlightDurationMs = 1600;
   const video = videoMode({
     captions: "explicit",
     finalHold: 1000,
-    highlight: { mode: "outline", duration: 800 },
+    highlight: { mode: "outline", duration: highlightDurationMs },
     trimStart: ["selector", 'textarea[aria-label="Summary"]'],
   });
   let initialHeight = 0;
