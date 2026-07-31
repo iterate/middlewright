@@ -1,35 +1,38 @@
-status: complete
+status: in-progress
 size: medium
 
 # Video mode address bar overlay
 
 ## Status
 
-Complete. The overlay, option, cleanup, docs, and regression spec are ready for review. The PR demo now uses a three-navigation release flow with visible interactions between pages.
+Reopened after review. The option and visual design exist, but the live-page injection must be replaced with a post-render ffmpeg overlay. The replacement demo must come from the checked-in multi-navigation integration test.
 
 ## Goal
 
-Make `videoMode` recordings show where `page.goto()` navigates. During navigation, render a compact Chrome-style address bar at the top of the page with the destination URL, keep it visible briefly after navigation finishes, then remove it.
+Make rendered `videoMode` recordings show where `page.goto()` navigates. Record the resolved destination and burn a compact Chrome-style address bar into the final video without changing the live page or delaying navigation.
 
 ## Assumptions
 
 - The overlay belongs to `videoMode`, because it exists to make recorded videos easier to follow.
 - It is enabled by default when `videoMode()` is active.
 - `addressBar: false` opts out.
-- `addressBar: { holdMs: number }` controls how long the bar remains after `page.goto()` completes.
-- The default hold is short enough to keep tests responsive while making the URL readable in a recording.
+- `addressBar: { holdMs: number }` controls how long the post-rendered bar remains after `page.goto()` completes.
+- `page.goto()` must return as soon as Playwright completes; video presentation must not slow the test.
 - The displayed destination is the resolved URL known to Playwright, with long URLs visually truncated by CSS rather than changing their text.
-- The overlay is synthetic recording UI only: it must not change navigation results, page layout, or survive after its hold.
+- Navigation spans and URLs are public video metadata and stay aligned through trimming, dead-air compression, and synthetic action holds.
+- The overlay is synthetic recording UI only: it must never enter the page DOM or raw video.
+- PR demo media comes from a checked-in regression test, not an ignored one-off spec.
 
 ## Checklist
 
-- [x] Add a public-behavior spec that navigates with a plugged page and observes the address bar during and after `goto()`. *`spec/video-mode.spec.ts` drives a routed navigation through the plugged page and observes the accessible status overlay.*
+- [ ] Replace the live-page spec with public behavior proving `goto()` records navigation metadata without changing the DOM or delaying the call.
 - [x] Add a `videoMode` option for the default overlay, opt-out, and hold duration. *`addressBar` defaults to a 1000ms hold, accepts an explicit `holdMs`, and supports `false`.*
-- [x] Render a fixed, Chrome-style top overlay with the destination URL without shifting page content. *`video-mode.ts` mounts an isolated dark browser strip and rounded URL pill in a shadow root.*
-- [x] Remove the overlay after navigation plus the configured hold, including when navigation throws. *The overlay is added only after successful navigation, removed in a `finally`, and waits through two paint frames so the recorder sees the clean state.*
-- [x] Document the option and behavior. *The README configuration example and video-mode guide cover the default, custom hold, and opt-out.*
-- [x] Run focused and full verification. *`pnpm typecheck`, `pnpm build`, and all 79 Playwright specs pass (76 passed, 3 skipped).*
-- [x] Expand the PR demo after review feedback. *The replacement clip filters release runs, selects a browser, and reveals report details across three navigations.*
+- [ ] Burn timed Chrome-style address bars into `video-rendered.webm` with ffmpeg while leaving `video-raw.webm` untouched.
+- [ ] Keep navigation overlays aligned through existing timeline transforms.
+- [ ] Replace the ignored demo with a checked-in multi-navigation integration test containing visible interactions between navigations.
+- [ ] Document the post-render behavior, metadata, and option.
+- [ ] Run focused and full verification.
+- [ ] Upload the checked-in integration test's rendered artifact as the PR demo.
 
 ## Implementation log
 
@@ -38,3 +41,4 @@ Make `videoMode` recordings show where `page.goto()` navigates. During navigatio
 - 2026-07-31: Generated a 960×540 demo recording and inspected frames with the overlay visible and removed.
 - 2026-07-31: Uploaded the demo as an inline GitHub video for PR review.
 - 2026-07-31: Replaced the single-navigation demo with a 10-second multi-page flow and inspected the settled state after every interaction.
+- 2026-07-31: Reopened after review rejected live DOM injection. The implementation and demo source must both be replaced: rendering belongs in ffmpeg, and reviewer media belongs to a real checked-in test.
