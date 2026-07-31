@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Done. Every fill reveal pauses before text appears, expanding textareas stay at their initial size until that pause ends, and multiline fallbacks reveal one visible line at a time. Four slower inline PR videos show the final behavior; local validation and remote CI pass.
+Nearly done. Native-frame regressions now reject both boundary leaks, and raw gaps stabilize both the prior fill's final pixels and the next fill's pre-action pixels. The two affected cases pass 100/100 mixed stress plus the full suite; replacement media and remote CI remain.
 
 ## Goal
 
@@ -49,6 +49,9 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - [x] Add rendered-frame regressions for a text-free pre-reveal pause in outline mode and initial textarea geometry during that pause. *The FFmpeg specs find a placeholder-free, text-free outlined frame and prove an expanding field's early outline is less than 75% of its final height.*
 - [x] Share the reveal pause budget across pointer and outline modes, and switch resized fields to final geometry only when reveal starts. *Both modes now spend up to the 800ms text-cursor pause budget before reveal; changed fields keep their pre-fill cover and outline until that boundary.*
 - [x] Replace affected PR videos again, validate, and complete the task after CI. *All four clips now show the full 800ms pause, a slower 800ms reveal, and a final hold; PR #12 has four inline players and both checks pass.*
+- [x] Reject pre-fill pixels after any revealed text has appeared. *The stable textarea spec decodes every frame after the first revealed glyph and reports any returning placeholder frame; the old clip fails at frame 81.*
+- [x] Reject completed target pixels before the synthetic fill hold begins. *The expanding spec scans every frame before the first small outline and reports completed-looking target pixels; the old clip fails at frames 2–3.*
+- [ ] Regenerate and inspect every native frame of the affected clips, replace PR media, and complete after CI.
 
 ## Implementation log
 
@@ -64,3 +67,7 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: Added rendered RED regressions, shared the pause calculation across highlight modes, and retained initial fill geometry until reveal. All 24 FFmpeg specs and 50/50 focused stress runs pass.
 - 2026-07-31: Lengthened the four PR media fixtures to a 1.6s highlight so reviewers see the full 800ms pause and a slower 800ms reveal; the adjusted cases pass 20/20 repeated runs.
 - 2026-07-31: Inspected all four replacement contact sheets, uploaded fresh inline clips, verified GitHub rendered four video players, and completed the task with PR #12 clean and green.
+- 2026-07-31: Review found one placeholder flash at rendered frame 81 (3.24s) and two completed-state flashes at expanding frames 2–3 (80–120ms). Reopened using PR #9's decode-every-frame regression approach.
+- 2026-07-31: The placeholder came from the first stale raw frame after the synthetic reveal, so fill `actionEnd` now lands after its post-action screenshot. The expanding flash came from recorder-late pixels below the original field height; pre-action composition now covers the final footprint before restoring the initial field rectangle.
+- 2026-07-31: Both source WebMs are clean under native 25fps scans. The full 24-test FFmpeg suite passes, and the rare expanding case improved from 1/50 failing to 50/50 passing.
+- 2026-07-31: A mixed stress run exposed one remaining recorder-late placeholder frame after reveal. Raw gaps now compose both sides symmetrically: prior post-fill pixels first, then next pre-fill pixels. The cases pass 100/100; the full suite passes 83 tests with 3 provider-gated skips, plus typecheck, build, and `publint`.

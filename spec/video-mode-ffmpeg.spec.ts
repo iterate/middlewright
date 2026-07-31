@@ -1366,13 +1366,27 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
       (_, index) => placeholderPixels[index] < 10 && darkTextPixels[index] < 10,
     ),
   ).toBe(true);
-  const completedTextPixels = Math.max(...darkTextPixels);
+  const textSizedDarkPixelCounts = darkTextPixels.filter(
+    (darkPixels) => darkPixels > 10 && darkPixels < 10_000,
+  );
+  const completedTextPixels = Math.max(...textSizedDarkPixelCounts);
   expect(completedTextPixels).toBeGreaterThan(300);
   expect(
     darkTextPixels.some(
       (darkPixels) => darkPixels > 10 && darkPixels < completedTextPixels,
     ),
   ).toBe(true);
+  const firstRevealedFrameIndex = darkTextPixels.findIndex(
+    (darkPixels, frame) =>
+      darkPixels > 10 && darkPixels < 10_000 && placeholderPixels[frame] < 100,
+  );
+  expect(firstRevealedFrameIndex).toBeGreaterThanOrEqual(0);
+  expect(
+    placeholderPixels
+      .map((pixels, frame) => ({ frame, pixels }))
+      .slice(firstRevealedFrameIndex)
+      .filter(({ pixels }) => pixels > 100),
+  ).toEqual([]);
 });
 
 test("reveals a scrolling textarea one visible line at a time", async ({
@@ -1694,6 +1708,13 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
   );
+  const firstOutlinedFrameIndex = frames.indexOf(earlyOutlinedFrame!.frame);
+  expect(
+    darkTextPixels
+      .slice(0, firstOutlinedFrameIndex)
+      .map((pixels, frame) => ({ frame, pixels }))
+      .filter(({ pixels }) => pixels > 200 && pixels < 10_000),
+  ).toEqual([]);
   expect(
     countPixels(
       earlyOutlinedFrame!.frame,
