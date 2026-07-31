@@ -476,15 +476,15 @@ const FINAL_PAINT_MAX_SCAN_MS = 30_000;
 const FINAL_PAINT_DIFF_THRESHOLD = 3;
 
 /**
- * Find the encoded span matching the page's final live screenshot.
+ * Find the last encoded frame matching the page's final live screenshot.
  * Playwright can append a black close frame for the recorder settle period
  * when a static page emits no more screencast frames.
  */
-const detectFinalPaintSpan = async (options: {
+const detectFinalPaintEndMs = async (options: {
   durationMs: number;
   finalFramePath: string;
   inputPath: string;
-}): Promise<VideoModeSpan | undefined> => {
+}): Promise<number | undefined> => {
   const size = AUTO_START_SAMPLE_SIZE;
   const frameSize = size * size;
   const sampleStart = Math.max(0, options.durationMs - FINAL_PAINT_MAX_SCAN_MS);
@@ -540,24 +540,14 @@ const detectFinalPaintSpan = async (options: {
       return undefined;
     }
 
-    let firstMatch: number | undefined;
-    let lastMatch: number | undefined;
-    for (let index = 0; index < frameCount; index += 1) {
+    for (let index = frameCount - 1; index >= 0; index -= 1) {
       const frame = videoFrames.subarray(index * frameSize, (index + 1) * frameSize);
       if (frameMeanAbsDiff(frame, finalFrame) <= FINAL_PAINT_DIFF_THRESHOLD) {
-        firstMatch = firstMatch === undefined ? index : firstMatch;
-        lastMatch = index;
-      }
-    }
-
-    if (firstMatch !== undefined && lastMatch !== undefined) {
-      return {
-        end: Math.min(
+        return Math.min(
           options.durationMs,
-          Math.round(sampleStart + ((lastMatch + 1) / FINAL_PAINT_SAMPLE_FPS) * 1000),
-        ),
-        start: Math.round(sampleStart + (firstMatch / FINAL_PAINT_SAMPLE_FPS) * 1000),
-      };
+          Math.round(sampleStart + ((index + 1) / FINAL_PAINT_SAMPLE_FPS) * 1000),
+        );
+      }
     }
   } catch {
     // Calibration is best-effort; retain endpoint calibration when no final
@@ -3389,7 +3379,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             dialogPostFrame = { path, viewport };
           }
 
-          if ((finalHold > 0 || trimStart.detectBlank) && !page.isClosed()) {
+          if (finalHold > 0 && !page.isClosed()) {
             const viewport = page.viewportSize();
             if (!viewport) {
               throw new Error("videoMode cannot capture a final frame without a viewport");
@@ -3431,17 +3421,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
 
           const rawVideoInfo = await videoInfo(paths.raw);
-          const finalPaintSpan =
+          const finalPaintEnd =
             finalFrame === undefined
               ? undefined
-              : await detectFinalPaintSpan({
+              : await detectFinalPaintEndMs({
                   durationMs: rawVideoInfo.durationMs,
                   finalFramePath: finalFrame.path,
                   inputPath: paths.raw,
                 });
           const sourceOffset =
-            finalPaintSpan !== undefined
-              ? finalPaintSpan.end - renderEndedAt
+            finalPaintEnd !== undefined
+              ? finalPaintEnd - renderEndedAt
               : recordingEndedAt === undefined
               ? 0
               : rawVideoInfo.durationMs - recordingEndedAt;
@@ -3467,8 +3457,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           // captions, dead air, and highlights are translated from videoMode's
           // clock using the settled recording endpoint above.
           if (trimStart.detectBlank && annotationSourceRange.start === undefined) {
-            const detectedStart =
-              (await detectBlankLeadInEndMs(paths.raw)) || finalPaintSpan?.start;
+            const detectedStart = await detectBlankLeadInEndMs(paths.raw);
             if (
               detectedStart !== undefined &&
               detectedStart >= TRIM_START_MIN_LEAD_IN_MS &&
@@ -3507,7 +3496,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               deadAir: renderTimeline.deadAir,
               dialogPostFrame,
               dialogPostHoldMs,
-              finalFrame: finalHold > 0 ? finalFrame : undefined,
+              finalFrame,
               finalHoldMs: finalHold,
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights: renderTimeline.highlights,
