@@ -1,11 +1,11 @@
-status: in-progress
+status: complete
 size: medium
 
 # Video mode address bar overlay
 
 ## Status
 
-About 90% complete. The overlay, option, cleanup, docs, and regression spec are done; only the PR demo upload and final handoff remain.
+Complete. The overlay, option, cleanup, docs, regression spec, and PR demo are ready for review.
 
 ## Goal
 
@@ -35,3 +35,4 @@ Make `videoMode` recordings show where `page.goto()` navigates. During navigatio
 - 2026-07-31: Created the worktree task from the user request and reference screenshot. Chose a `videoMode`-owned overlay to preserve plugin boundaries.
 - 2026-07-31: Added the failing public-behavior spec, then implemented and documented the default overlay.
 - 2026-07-31: Generated a 960×540 demo recording and inspected frames with the overlay visible and removed.
+- 2026-07-31: Uploaded the demo as an inline GitHub video for PR review.
