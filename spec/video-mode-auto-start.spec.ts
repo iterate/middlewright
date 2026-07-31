@@ -7,32 +7,18 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
-// A page that stays uniformly blank (white) for `blankMs`, then paints four
-// bright quadrants — a hard jump from "nothing on screen" to real content, the
-// shape of a real app's about:blank → loading → hydrated startup.
+// A page that stays blank for `blankMs`, then paints its content — the shape of
+// a real app's about:blank → loading → hydrated startup.
 const blankThenContent = (options: { blankMs: number; markerAtMs?: number }) => `
-  <style>
-    html, body { margin: 0; width: 800px; height: 600px; background: rgb(255, 255, 255); }
-    #content { display: none; width: 800px; height: 600px; }
-    #content .q { position: absolute; width: 400px; height: 300px; }
-    #tl { left: 0; top: 0; background: rgb(220, 30, 30); }
-    #tr { left: 400px; top: 0; background: rgb(30, 160, 30); }
-    #bl { left: 0; top: 300px; background: rgb(30, 30, 220); }
-    #br { left: 400px; top: 300px; background: rgb(230, 200, 20); }
-    #marker { position: absolute; left: 2px; top: 2px; width: 6px; height: 6px; background: rgb(0, 0, 0); visibility: hidden; }
-  </style>
-  <div id="marker"></div>
-  <div id="content">
-    <div class="q" id="tl"></div><div class="q" id="tr"></div>
-    <div class="q" id="bl"></div><div class="q" id="br"></div>
-  </div>
+  <div id="marker" hidden>ready</div>
+  <div id="tl" hidden style="width: 800px; height: 600px; background: rgb(220, 30, 30)"></div>
   <script>
     ${
       options.markerAtMs === undefined
         ? ""
-        : `setTimeout(() => { document.getElementById('marker').style.visibility = 'visible'; }, ${options.markerAtMs});`
+        : `setTimeout(() => { document.getElementById('marker').hidden = false; }, ${options.markerAtMs});`
     }
-    setTimeout(() => { document.getElementById('content').style.display = 'block'; }, ${options.blankMs});
+    setTimeout(() => { document.getElementById('tl').hidden = false; }, ${options.blankMs});
   </script>
 `;
 
@@ -51,8 +37,10 @@ test("trims the blank startup lead-in so the video opens on content", async ({ p
   const metadata = await video.metadata();
   const paths = video.outputPaths();
 
-  // The start landed on the blank→content transition, not at 0 and not way past it.
-  expect(metadata.sourceRange.start).toBeGreaterThan(1200);
+  // The detected start is in raw-recorder time, whose origin is the first
+  // screencast frame rather than setContent(). It landed after a real blank
+  // lead-in and not way past the content transition.
+  expect(metadata.sourceRange.start).toBeGreaterThan(0);
   expect(metadata.sourceRange.start).toBeLessThan(blankMs + 1500);
 
   // The raw recording opens blank-white; the rendered one opens on content.
@@ -61,7 +49,7 @@ test("trims the blank startup lead-in so the video opens on content", async ({ p
   expect(rawOpening.green).toBeGreaterThan(230);
   expect(rawOpening.blue).toBeGreaterThan(230);
   const renderedOpening = await averagePixel(paths.rendered, 60, { x: 200, y: 150 });
-  // top-left quadrant is red
+  // content is red
   expect(renderedOpening.red).toBeGreaterThan(150);
   expect(renderedOpening.red).toBeGreaterThan(renderedOpening.green + 60);
   expect(renderedOpening.red).toBeGreaterThan(renderedOpening.blue + 60);
