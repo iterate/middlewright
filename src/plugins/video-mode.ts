@@ -114,9 +114,14 @@ export type VideoModeDialogAnnotation = {
   type: "alert" | "confirm" | "prompt";
 };
 
+export type VideoModeAddressBar = VideoModeSpan & {
+  url: string;
+};
+
 export type VideoModeMetadata = {
   schemaVersion: 1;
   timebase: "ms";
+  addressBars: VideoModeAddressBar[];
   captions: VideoModeCaption[];
   deadAir: VideoModeSpan[];
   highlights: VideoModeHighlight[];
@@ -168,8 +173,8 @@ export type VideoModeHighlightOptions =
 
 export type VideoModeOptions = {
   /**
-   * Show the destination URL after `page.goto()` and hold it in the recorded
-   * page before the call completes. Default: `{ holdMs: 1000 }`
+   * Show the destination URL after `page.goto()` in the rendered video without
+   * changing the live page or delaying navigation. Default: `{ holdMs: 1000 }`
    */
   addressBar?: false | { holdMs: number };
   /**
@@ -219,6 +224,7 @@ export type VideoModeOptions = {
 export type VideoModeTrimStart = "auto" | "detect-blank" | "never" | ["selector", string];
 
 type VideoModeState = {
+  addressBars: VideoModeAddressBar[];
   captions: VideoModeCaption[];
   deadAirDepth: number;
   deadAirSpans: VideoModeSpan[];
@@ -637,6 +643,9 @@ const sourceRangeIsSet = (sourceRange: VideoModeSourceRange) => {
 
 const metadataFor = (state: VideoModeState): VideoModeMetadata => {
   return {
+    addressBars: state.addressBars
+      .filter((addressBar) => addressBar.end > addressBar.start)
+      .sort((left, right) => left.start - right.start || left.end - right.end),
     captions: normalizeVideoCaptions(state.captions),
     deadAir: mergeVideoSpans(state.deadAirSpans),
     highlights: normalizeVideoHighlights(state.highlights),
@@ -945,80 +954,6 @@ const installVideoModeDialogOverlay = () => {
     overlay.complete(result === null ? "dismiss" : "accept", result === null ? undefined : result);
     return result;
   };
-};
-
-const showVideoModeAddressBar = (url: string) => {
-  const attribute = "data-middlewright-video-mode-address-bar";
-  document.querySelector(`[${attribute}]`)?.remove();
-
-  const host = document.createElement("div");
-  host.setAttribute(attribute, "");
-  host.style.cssText = [
-    "position:fixed",
-    "inset:0 0 auto",
-    "z-index:2147483647",
-    "pointer-events:none",
-  ].join(";");
-
-  const shadow = host.attachShadow({ mode: "open" });
-  const browserBar = document.createElement("div");
-  browserBar.style.cssText = [
-    "box-sizing:border-box",
-    "width:100%",
-    "padding:12px 16px 14px",
-    "background:#303134",
-    "box-shadow:0 2px 8px rgba(0,0,0,.28)",
-    "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-  ].join(";");
-
-  const address = document.createElement("div");
-  address.style.cssText = [
-    "box-sizing:border-box",
-    "display:flex",
-    "align-items:center",
-    "gap:10px",
-    "height:44px",
-    "width:100%",
-    "border-radius:22px",
-    "background:#5f6368",
-    "color:#f8f9fa",
-    "font-size:17px",
-    "line-height:22px",
-    "padding:0 18px",
-  ].join(";");
-
-  const icon = document.createElement("span");
-  icon.setAttribute("aria-hidden", "true");
-  icon.textContent = "●";
-  icon.style.cssText = [
-    "flex:none",
-    "color:#dfe1e5",
-    "font-size:10px",
-    "text-shadow:0 0 0 3px #dfe1e5",
-  ].join(";");
-
-  const text = document.createElement("span");
-  text.setAttribute("aria-label", "Current address");
-  text.setAttribute("role", "status");
-  text.textContent = url;
-  text.style.cssText = [
-    "min-width:0",
-    "overflow:hidden",
-    "text-overflow:ellipsis",
-    "white-space:nowrap",
-  ].join(";");
-
-  address.append(icon, text);
-  browserBar.append(address);
-  shadow.append(browserBar);
-  document.documentElement.append(host);
-};
-
-const removeVideoModeAddressBar = async () => {
-  document.querySelector("[data-middlewright-video-mode-address-bar]")?.remove();
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  });
 };
 
 const videoModeDialogOverlaySnapshot = async (
@@ -2739,6 +2674,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       },
       getVideoTimestamp: () => 0,
       metadata: async () => ({
+        addressBars: [],
         captions: [],
         deadAir: [],
         highlights: [],
@@ -2781,6 +2717,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
   const trimStart = resolveTrimStart(options.trimStart);
   const state: VideoModeState = {
+    addressBars: [],
     captions: [],
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -2919,6 +2856,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       let stopObservingPlaywrightSteps = () => {};
       const offBeforeTest = emitter.on("beforeTest", async ({ page, testInfo }) => {
         dialogHighlightQueue = Promise.resolve();
+        state.addressBars = [];
         state.captions = [];
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
@@ -2948,14 +2886,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const originalGoto = page.goto;
           const goto: Page["goto"] = async (url, gotoOptions) => {
             const response = await originalGoto.call(page, url, gotoOptions);
-            await page.evaluate(showVideoModeAddressBar, page.url());
-            try {
-              await page.waitForTimeout(addressBar.holdMs);
-            } finally {
-              if (!page.isClosed()) {
-                await page.evaluate(removeVideoModeAddressBar);
-              }
-            }
+            const start = getVideoTimestamp();
+            state.addressBars.push({
+              end: start + addressBar.holdMs,
+              start,
+              url: page.url(),
+            });
             return response;
           };
           addressBarOriginalGoto = originalGoto;
@@ -3237,6 +3173,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
         const metadata = metadataFor(state);
         if (
+          metadata.addressBars.length > 0 ||
           metadata.captions.length > 0 ||
           metadata.deadAir.length > 0 ||
           metadata.highlights.length > 0 ||

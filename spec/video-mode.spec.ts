@@ -3,36 +3,52 @@ import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
-test("shows the new address during goto, then removes it after the hold", async ({
+test("records goto destinations without changing the live page", async ({
   page,
 }, testInfo) => {
   const destination = "https://app.middlewright.test/reports?period=this-week";
   await page.route(destination, async (route) => {
     await route.fulfill({
-      body: "<main>Weekly reports</main>",
+      body: `
+        <main>Weekly reports</main>
+        <script>
+          window.addressBarEnteredPage = false;
+          new MutationObserver(() => {
+            if (document.querySelector('[data-middlewright-video-mode-address-bar]')) {
+              window.addressBarEnteredPage = true;
+            }
+          }).observe(document.documentElement, { childList: true, subtree: true });
+        </script>
+      `,
       contentType: "text/html",
     });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 5000 },
+    finalHold: 0,
+    highlight: false,
   });
   await using plugged = await addPlugins({
     page,
     testInfo,
-    plugins: [
-      videoMode({
-        addressBar: { holdMs: 100 },
-        finalHold: 0,
-        highlight: false,
-      }),
-    ],
+    plugins: [video],
   });
 
-  const navigation = plugged.goto(destination);
-  const addressBar = plugged.getByRole("status", { name: "Current address" });
+  const startedAt = performance.now();
+  await plugged.goto(destination);
 
-  await expect(addressBar).toBeVisible();
-  await expect(addressBar).toHaveText(destination);
-  await navigation;
-  await expect(addressBar).toHaveCount(0);
+  expect(performance.now() - startedAt).toBeLessThan(2000);
   await expect(plugged.getByRole("main")).toHaveText("Weekly reports");
+  expect(await plugged.evaluate(() => (window as any).addressBarEnteredPage)).toBe(false);
+  await expect(video.metadata()).resolves.toMatchObject({
+    addressBars: [
+      {
+        end: expect.any(Number),
+        start: expect.any(Number),
+        url: destination,
+      },
+    ],
+  });
 });
 
 test("records Playwright test steps as captions by default", async ({ page }, testInfo) => {
