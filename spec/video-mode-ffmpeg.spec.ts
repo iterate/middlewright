@@ -1284,8 +1284,12 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
     });
     await plugged.setViewportSize({ width: 800, height: 450 });
     await plugged.setContent(`
+      <style>
+        textarea::placeholder { color: rgb(170, 20, 170); opacity: 1; }
+      </style>
       <textarea
         aria-label="Notes"
+        placeholder="Write some notes"
         style="position: absolute; box-sizing: border-box; left: 120px; top: 130px; width: 560px; height: 150px; border: 0; padding: 18px 20px; overflow: hidden; resize: none; background: white; color: black; caret-color: transparent; font: 48px monospace"
       ></textarea>
       <script>
@@ -1299,6 +1303,10 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
     `);
     await plugged.getByLabel("Notes").waitFor();
 
+    await plugged.videoMode.caption("Show the placeholder", async () => {
+      await plugged.getByLabel("Notes").click();
+      await expect(plugged.getByLabel("Notes")).toBeFocused();
+    });
     await plugged.videoMode.caption("Reveal a stable textarea fill", async () => {
       await plugged.getByLabel("Notes").fill("Ada notes");
       await expect(plugged.getByLabel("Notes")).toHaveValue("Ada notes");
@@ -1311,12 +1319,19 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
 
   const paths = video.outputPaths();
   const metadata = await video.metadata();
+  const clickHighlight = metadata.highlights.find((highlight) => highlight.method === "click")!;
   const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(clickHighlight).toBeDefined();
   expect(fillHighlight.fillReveal).toBeDefined();
 
+  const placeholderStart = renderedHighlightStartWithoutDeadAir(
+    clickHighlight,
+    metadata.highlights,
+  );
   const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
-  const [earlyFrame, middleFrame, lateFrame] = await Promise.all(
-    [100, 500, 900].map((offset) => videoFrame(paths.rendered, fillStart + offset)),
+  const [placeholderFrame, earlyFrame, middleFrame, lateFrame] = await videoFramesAt(
+    paths.rendered,
+    [placeholderStart + 500, fillStart + 100, fillStart + 500, fillStart + 900],
   );
   const scale = Math.min(
     lateFrame.width / fillHighlight.viewport.width,
@@ -1335,13 +1350,22 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
   );
+  const placeholderPixels = [placeholderFrame, earlyFrame].map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red > 120 && green < 80 && blue > 120,
+    ),
+  );
 
+  expect(placeholderPixels[0]).toBeGreaterThan(100);
+  expect(placeholderPixels[1]).toBeLessThan(10);
   expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
   expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
   expect(darkTextPixels[2]).toBeGreaterThan(300);
 });
 
-test("falls back to a normal fill for a scrolling textarea", async ({
+test("reveals the final visible portion of a scrolling textarea", async ({
   page,
 }, testInfo) => {
   const video = videoMode({
@@ -1358,14 +1382,18 @@ test("falls back to a normal fill for a scrolling textarea", async ({
     });
     await plugged.setViewportSize({ width: 800, height: 450 });
     await plugged.setContent(`
+      <style>
+        textarea::placeholder { color: rgb(170, 20, 170); opacity: 1; }
+      </style>
       <textarea
         aria-label="Log"
+        placeholder="Add log entries"
         style="position: absolute; box-sizing: border-box; left: 220px; top: 120px; width: 360px; height: 150px; padding: 14px; resize: none; background: white; color: black; font: 30px monospace"
       ></textarea>
     `);
     await plugged.getByLabel("Log").waitFor();
 
-    await plugged.videoMode.caption("Scrolling textarea: use a normal fill", async () => {
+    await plugged.videoMode.caption("Reveal the visible scrolled lines", async () => {
       await plugged
         .getByLabel("Log")
         .fill("first line\nsecond line\nthird line\nfourth line\nfifth line");
@@ -1385,16 +1413,20 @@ test("falls back to a normal fill for a scrolling textarea", async ({
   const metadata = await video.metadata();
   const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
   expect(fillHighlight).toBeDefined();
-  expect(fillHighlight).not.toHaveProperty("fillReveal");
-  const frame = await videoFrame(
+  expect(fillHighlight.fillReveal).toBeDefined();
+  const fillStart = renderedHighlightStartWithoutDeadAir(
+    fillHighlight,
+    metadata.highlights,
+  );
+  const frames = await videoFramesAt(
     video.outputPaths().rendered,
-    renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights) + 600,
+    [fillStart + 100, fillStart + 400, fillStart + 700],
   );
   const scale = Math.min(
-    frame.width / fillHighlight.viewport.width,
-    frame.height / fillHighlight.viewport.height,
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
   );
-  expect(
+  const darkTextPixels = frames.map((frame) =>
     countPixels(
       frame,
       inset(
@@ -1408,10 +1440,119 @@ test("falls back to a normal fill for a scrolling textarea", async ({
       ),
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
-  ).toBeGreaterThan(200);
+  );
+  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
+  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
+  expect(darkTextPixels[2]).toBeGreaterThan(200);
+  expect(
+    countPixels(
+      frames[0],
+      inset(
+        {
+          height: Math.round(fillHighlight.rect.height * scale),
+          width: Math.round(fillHighlight.rect.width * scale),
+          x: Math.round(fillHighlight.rect.x * scale),
+          y: Math.round(fillHighlight.rect.y * scale),
+        },
+        10,
+      ),
+      ({ blue, green, red }) => red > 120 && green < 80 && blue > 120,
+    ),
+  ).toBeLessThan(10);
 });
 
-test("falls back to a normal fill when a textarea expands", async ({
+test("reveals the final visible portion of a horizontally scrolling input", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 1000,
+    highlight: { mode: "outline", duration: 800 },
+    trimStart: ["selector", 'input[aria-label="Reference"]'],
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <style>
+        input::placeholder { color: rgb(170, 20, 170); opacity: 1; }
+      </style>
+      <input
+        aria-label="Reference"
+        placeholder="Add a reference"
+        style="position: absolute; box-sizing: border-box; left: 220px; top: 160px; width: 360px; height: 80px; padding: 14px; background: white; color: black; font: 30px monospace"
+      />
+    `);
+    await plugged.getByLabel("Reference").waitFor();
+
+    await plugged.videoMode.caption("Reveal the visible reference suffix", async () => {
+      await plugged
+        .getByLabel("Reference")
+        .fill("prefix-that-scrolls-out-of-view-visible-reference-end");
+      await expect(plugged.getByLabel("Reference")).toHaveValue(
+        "prefix-that-scrolls-out-of-view-visible-reference-end",
+      );
+      await expect
+        .poll(() => plugged.getByLabel("Reference").evaluate((input) => input.scrollLeft))
+        .toBeGreaterThan(0);
+    });
+  }
+
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight.fillReveal).toBeDefined();
+  const fillStart = renderedHighlightStartWithoutDeadAir(
+    fillHighlight,
+    metadata.highlights,
+  );
+  const frames = await videoFramesAt(
+    video.outputPaths().rendered,
+    [fillStart + 100, fillStart + 400, fillStart + 700],
+  );
+  const scale = Math.min(
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
+  );
+  const darkTextPixels = frames.map((frame) =>
+    countPixels(
+      frame,
+      inset(
+        {
+          height: Math.round(fillHighlight.rect.height * scale),
+          width: Math.round(fillHighlight.rect.width * scale),
+          x: Math.round(fillHighlight.rect.x * scale),
+          y: Math.round(fillHighlight.rect.y * scale),
+        },
+        10,
+      ),
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  );
+  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
+  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
+  expect(darkTextPixels[2]).toBeGreaterThan(100);
+  expect(
+    countPixels(
+      frames[0],
+      inset(
+        {
+          height: Math.round(fillHighlight.rect.height * scale),
+          width: Math.round(fillHighlight.rect.width * scale),
+          x: Math.round(fillHighlight.rect.x * scale),
+          y: Math.round(fillHighlight.rect.y * scale),
+        },
+        10,
+      ),
+      ({ blue, green, red }) => red > 120 && green < 80 && blue > 120,
+    ),
+  ).toBeLessThan(10);
+});
+
+test("reveals an expanding textarea at its final geometry", async ({
   page,
 }, testInfo) => {
   const video = videoMode({
@@ -1429,8 +1570,12 @@ test("falls back to a normal fill when a textarea expands", async ({
     });
     await plugged.setViewportSize({ width: 800, height: 450 });
     await plugged.setContent(`
+      <style>
+        textarea::placeholder { color: rgb(170, 20, 170); opacity: 1; }
+      </style>
       <textarea
         aria-label="Summary"
+        placeholder="Add a summary"
         style="position: absolute; box-sizing: border-box; left: 240px; top: 100px; width: 320px; height: 70px; padding: 12px; overflow: hidden; resize: none; background: white; color: black; font: 30px sans-serif"
       ></textarea>
       <script>
@@ -1444,7 +1589,7 @@ test("falls back to a normal fill when a textarea expands", async ({
     await plugged.getByLabel("Summary").waitFor();
     initialHeight = (await plugged.getByLabel("Summary").boundingBox())!.height;
 
-    await plugged.videoMode.caption("Expanding textarea: use a normal fill", async () => {
+    await plugged.videoMode.caption("Reveal at the expanded size", async () => {
       await plugged
         .getByLabel("Summary")
         .fill("This textarea grows to fit a longer summary without scrolling.");
@@ -1460,17 +1605,21 @@ test("falls back to a normal fill when a textarea expands", async ({
   const metadata = await video.metadata();
   const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
   expect(fillHighlight).toBeDefined();
-  expect(fillHighlight).not.toHaveProperty("fillReveal");
+  expect(fillHighlight.fillReveal).toBeDefined();
   expect(fillHighlight.rect.height).toBeGreaterThan(initialHeight);
-  const frame = await videoFrame(
+  const fillStart = renderedHighlightStartWithoutDeadAir(
+    fillHighlight,
+    metadata.highlights,
+  );
+  const frames = await videoFramesAt(
     video.outputPaths().rendered,
-    renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights) + 600,
+    [fillStart + 100, fillStart + 400, fillStart + 700],
   );
   const scale = Math.min(
-    frame.width / fillHighlight.viewport.width,
-    frame.height / fillHighlight.viewport.height,
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
   );
-  expect(
+  const darkTextPixels = frames.map((frame) =>
     countPixels(
       frame,
       inset(
@@ -1484,7 +1633,25 @@ test("falls back to a normal fill when a textarea expands", async ({
       ),
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
-  ).toBeGreaterThan(200);
+  );
+  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
+  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
+  expect(darkTextPixels[2]).toBeGreaterThan(200);
+  expect(
+    countPixels(
+      frames[0],
+      inset(
+        {
+          height: Math.round(fillHighlight.rect.height * scale),
+          width: Math.round(fillHighlight.rect.width * scale),
+          x: Math.round(fillHighlight.rect.x * scale),
+          y: Math.round(fillHighlight.rect.y * scale),
+        },
+        10,
+      ),
+      ({ blue, green, red }) => red > 120 && green < 80 && blue > 120,
+    ),
+  ).toBeLessThan(10);
 });
 
 test("uses a normal pointer tail after text cursor holds", async ({
@@ -1889,6 +2056,13 @@ const videoFrames = async (path: string): Promise<VideoFrame[]> => {
   }
 
   return frames;
+};
+
+const videoFramesAt = async (path: string, timestampsMs: number[]) => {
+  const frames = await videoFrames(path);
+  return timestampsMs.map((timestampMs) =>
+    frames[Math.max(0, Math.min(frames.length - 1, Math.round(timestampMs / 40)))],
+  );
 };
 
 const yellowBoundingBox = (frame: VideoFrame) => {

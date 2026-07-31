@@ -99,6 +99,10 @@ export type VideoModeViewport = {
 };
 
 export type VideoModeFillReveal = {
+  cover?: {
+    color: string;
+    rect: VideoModeRect;
+  };
   contentRect: VideoModeRect;
   image: string;
   revealStops: number[];
@@ -1284,19 +1288,18 @@ const recordFillReveal = async (options: {
         Math.abs(rect.top - captureOptions.expectedRect.y) > 1;
       const isTextarea = element instanceof HTMLTextAreaElement;
       const value = element.value;
-
-      if (
-        rectChanged ||
-        value.length === 0 ||
-        value.length > captureOptions.maxCharacters ||
-        value.includes("\n") ||
-        style.direction === "rtl" ||
-        !["left", "start"].includes(style.textAlign) ||
+      const scrollChanged =
         element.scrollLeft > 0 ||
         element.scrollTop > 0 ||
         (isTextarea &&
           (element.scrollHeight > element.clientHeight + 1 ||
-            element.scrollWidth > element.clientWidth + 1)) ||
+            element.scrollWidth > element.clientWidth + 1));
+
+      if (
+        value.length === 0 ||
+        value.length > captureOptions.maxCharacters ||
+        style.direction === "rtl" ||
+        !["left", "start"].includes(style.textAlign) ||
         (element instanceof HTMLInputElement && element.type === "password")
       ) {
         return { ...geometry, kind: "fallback" as const };
@@ -1321,6 +1324,38 @@ const recordFillReveal = async (options: {
 
       if (contentRect.width <= 0 || contentRect.height <= 0) {
         return { ...geometry, kind: "fallback" as const };
+      }
+
+      const backgroundChannels = style.backgroundColor
+        .match(/[\d.]+/g)
+        ?.map(Number);
+      const backgroundColor =
+        backgroundChannels &&
+        backgroundChannels.length >= 3 &&
+        (backgroundChannels[3] === undefined || backgroundChannels[3] >= 0.99)
+          ? `#${backgroundChannels
+              .slice(0, 3)
+              .map((channel) => Math.max(0, Math.min(255, Math.round(channel))))
+              .map((channel) => channel.toString(16).padStart(2, "0"))
+              .join("")}`
+          : undefined;
+      const needsBestEffort = rectChanged || scrollChanged || value.includes("\n");
+
+      if (needsBestEffort) {
+        if (!backgroundColor) {
+          return { ...geometry, kind: "fallback" as const };
+        }
+        const stopCount = Math.max(4, Math.min(12, Math.ceil(contentRect.width / 64)));
+        return {
+          ...geometry,
+          contentRect,
+          cover: { color: backgroundColor, rect: geometry.rect },
+          kind: "reveal" as const,
+          replaceGeometry: true,
+          revealStops: Array.from({ length: stopCount }, (_, index) =>
+            Math.ceil((contentRect.width * (index + 1)) / stopCount),
+          ),
+        };
       }
 
       const canvas = document.createElement("canvas");
@@ -1348,7 +1383,11 @@ const recordFillReveal = async (options: {
       return {
         ...geometry,
         contentRect,
+        cover: backgroundColor
+          ? { color: backgroundColor, rect: contentRect }
+          : undefined,
         kind: "reveal" as const,
+        replaceGeometry: false,
         revealStops,
       };
     }, {
@@ -1373,8 +1412,13 @@ const recordFillReveal = async (options: {
       options.highlight.viewport = snapshot.viewport;
       return;
     }
+    if (snapshot.replaceGeometry) {
+      options.highlight.rect = snapshot.rect;
+      options.highlight.viewport = snapshot.viewport;
+    }
     options.highlight.fillReveal = {
       contentRect: snapshot.contentRect,
+      cover: snapshot.cover,
       image,
       revealStops: snapshot.revealStops,
     };
@@ -2209,6 +2253,9 @@ const renderedVideoFilter = (options: {
       );
       const duration = renderedPieceDuration(piece);
       const durationSeconds = formatSeconds(duration);
+      const coverRect = fillReveal.cover
+        ? scaleVideoModeRect(fillReveal.cover.rect, piece.highlight.viewport, options.video)
+        : undefined;
       const scale = Math.min(
         options.video.width / piece.highlight.viewport.width,
         options.video.height / piece.highlight.viewport.height,
@@ -2238,9 +2285,14 @@ const renderedVideoFilter = (options: {
         [
           `[${preFillInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
           `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          coverRect && fillReveal.cover
+            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${fillReveal.cover.color}:t=fill`
+            : undefined,
           `trim=start=0:end=${durationSeconds}`,
           `setpts=PTS-STARTPTS[${baseLabel}]`,
-        ].join(","),
+        ]
+          .filter((operation): operation is string => Boolean(operation))
+          .join(","),
       );
       filters.push(
         [

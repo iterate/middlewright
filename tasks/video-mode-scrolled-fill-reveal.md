@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Specified and ready for implementation. The follow-up will extend #10's post-production reveal to final-state crops whose textarea geometry or scroll position changed, cover horizontally scrolled inputs, and make placeholder behavior visible in the review media.
+About 70% complete. The final-crop fallback, final geometry, horizontal scrolling, and placeholder cover are implemented and the full FFmpeg suite passes. Stress/full-suite validation and PR media remain.
 
 ## Goal
 
@@ -35,11 +35,11 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 
 ## Checklist
 
-- [ ] Add one failing public-behavior FFmpeg spec for a vertically scrolling textarea reveal.
-- [ ] Implement the minimal final-geometry/background-overlay fallback to make it pass.
-- [ ] Add and pass an expanding-textarea reveal spec.
-- [ ] Add and pass a horizontally scrolling single-line input reveal spec.
-- [ ] Add placeholders and placeholder-pixel assertions across the focused reveal fixtures.
+- [x] Add one failing public-behavior FFmpeg spec for a vertically scrolling textarea reveal. *The tracer bullet failed because #10 emitted only a static `highlight.image`; it now asserts progressive final-visible pixels.*
+- [x] Implement the minimal final-geometry/background-overlay fallback to make it pass. *`recordFillReveal()` records an opaque cover plus stepped final crop; the renderer draws the cover before compositing those steps.*
+- [x] Add and pass an expanding-textarea reveal spec. *The highlight now adopts the post-fill rect and reveals at the expanded height.*
+- [x] Add and pass a horizontally scrolling single-line input reveal spec. *The rendered hold exposes the final scrolled suffix progressively.*
+- [x] Add placeholders and placeholder-pixel assertions across the focused reveal fixtures. *All four focused fixtures have placeholders; the stable textarea video holds a visible magenta placeholder before proving it is absent from the reveal.*
 - [ ] Stress the affected frame-level specs and run the full validation suite.
 - [ ] Generate, inspect, and upload current videos for every focused scenario.
 - [ ] Update the PR body, resolve review feedback, and move this task to `tasks/complete/`.
@@ -47,3 +47,5 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 ## Implementation log
 
 - 2026-07-31: Follow-up requested after merging #10. Chose a best-effort final visible crop rather than recreating browser layout or synthetic typing in post-production.
+- 2026-07-31: Completed the RED→GREEN scrolling tracer bullet, then covered expanded geometry and horizontal input scrolling through the same final-crop path.
+- 2026-07-31: A combined run exposed inaccurate keyframe seeking in the new pixel assertions. They now sample the fully decoded 25fps stream; all 24 FFmpeg specs pass.
