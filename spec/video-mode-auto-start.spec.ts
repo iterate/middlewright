@@ -10,6 +10,20 @@ test.use({ video: "on" });
 // A page that stays blank for `blankMs`, then paints its content — the shape of
 // a real app's about:blank → loading → hydrated startup.
 const blankThenContent = (options: { blankMs: number; markerAtMs?: number }) => `
+  <style>
+    @keyframes recorder-heartbeat {
+      from { transform: translateX(0); }
+      to { transform: translateX(790px); }
+    }
+    #recorder-heartbeat {
+      animation: recorder-heartbeat 100ms linear infinite alternate;
+      background: rgb(254, 254, 254);
+      height: 2px;
+      position: fixed;
+      width: 2px;
+    }
+  </style>
+  <div id="recorder-heartbeat"></div>
   <div id="marker" hidden>ready</div>
   <div id="tl" hidden style="width: 800px; height: 600px; background: rgb(220, 30, 30)"></div>
   <script>

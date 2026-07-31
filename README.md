@@ -208,6 +208,8 @@ Nested spans show the innermost caption, then resume their parent. When Playwrig
 
 Each successful `page.goto()` records the resolved destination in `addressBars` metadata. During post-rendering, ffmpeg adds a Chrome-style URL bar over a frozen destination frame; the default hold is 1000ms. The live page and `video-raw.webm` stay untouched, and navigation returns without waiting for the hold. Set `addressBar: { holdMs: 2000 }` to keep the rendered bar readable for longer, or `addressBar: false` to disable it.
 
+Highlighted non-empty `fill()` actions reveal the completed field text one whole glyph at a time during the rendered hold. The browser still runs one normal Playwright `fill()`; video mode captures the final field pixels and adds the typewriter-like effect in post, preserving backgrounds such as gradients. The surrounding frame stays at its pre-action state. Stable single-line inputs and textareas get the reveal; scrolling, resizing, multiline, password, right-to-left, and unusually long fields fall back to a stable post-fill highlight.
+
 Chromium's native `alert`, `confirm`, and `prompt` UI is outside the page video surface. With highlighting enabled, `videoMode` observes the real Playwright dialog interaction and adds a synthetic dialog to the rendered video: the real message is readable, the chosen OK/Cancel button is held on screen, and the pointer clicks it. Accepted prompts first show a text-cursor hold over the default value, then the supplied prompt text and chosen button. The rendered video always includes at least one second after the final dialog; natural footage is left alone when it is long enough, otherwise the final clean page frame is extended. The test still handles the real Playwright `Dialog`; this only changes the rendered artifact. `beforeunload` dialogs are not synthesized.
 
 #### Trimming the blank startup lead-in (`trimStart`)
@@ -234,7 +236,7 @@ videoMode({ trimStart: "never" });
 
 An explicit `setStartTime()` always wins over `trimStart`.
 
-`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
+`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. The final hold uses the last live page frame instead of extending recorder shutdown frames. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
 
 ```ts
 videoMode({
