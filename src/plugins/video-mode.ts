@@ -1253,9 +1253,8 @@ const recordFillReveal = async (options: {
         const prefix = graphemes.slice(0, index + 1).join("");
         return Math.ceil(
           textIndent +
-            context.measureText(prefix).width +
-            letterSpacing * index +
-            2,
+            context.measureText(prefix).actualBoundingBoxRight +
+            letterSpacing * index,
         );
       });
       revealStops[revealStops.length - 1] = Math.ceil(contentRect.width);

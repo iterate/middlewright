@@ -57,3 +57,4 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - 2026-07-31: Replaced the moving solid cover with grapheme-width content crops, sequenced pointer arrival before reveal, and added gradient plus three textarea scenarios.
 - 2026-07-31: Visual review exposed blank fallback holds. Scrolling and expanding textareas now replace the pre-action hold with a captured post-fill frame and updated geometry.
 - 2026-07-31: Full suite: 82 passed, 3 provider-gated tests skipped. Six focused scenarios passed 60/60 with two workers; typecheck, build, and `publint` pass.
+- 2026-07-31: Linux CI exposed a font-dependent two-pixel leak before `@`. Reveal stops now use each prefix's actual ink boundary instead of its advance width plus a gutter; the four animated scenarios passed another 40/40 stress run.
