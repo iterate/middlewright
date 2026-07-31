@@ -541,10 +541,10 @@ test("marks default visible waitFor calls as dead air", async ({ page }, testInf
     plugins: [video],
   });
   await plugged.setContent(`
-    <div id="ready" style="display: none;">ready</div>
+    <div id="ready" hidden>ready</div>
     <script>
       setTimeout(() => {
-        document.querySelector('#ready').style.display = 'block';
+        document.querySelector('#ready').hidden = false;
       }, 150);
     </script>
   `);
@@ -582,11 +582,11 @@ test("marks attached actionability waits as dead air", async ({ page }, testInfo
     plugins: [video],
   });
   await plugged.setContent(`
-    <button id="ready" style="display: none;">ready</button>
+    <button id="ready" hidden>ready</button>
     <div id="result"></div>
     <script>
       setTimeout(() => {
-        document.querySelector('#ready').style.display = 'block';
+        document.querySelector('#ready').hidden = false;
       }, 150);
       document.querySelector('#ready').addEventListener('click', () => {
         document.querySelector('#result').textContent = 'clicked';

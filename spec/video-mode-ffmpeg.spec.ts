@@ -32,51 +32,6 @@ test("turns meaningful Playwright steps into readable video captions", async ({
     });
     await plugged.setViewportSize({ width: 800, height: 450 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 450px;
-          background: rgb(24, 32, 58);
-          color: rgb(30, 41, 59);
-          font: 20px system-ui, sans-serif;
-        }
-        body {
-          display: grid;
-          place-items: center;
-        }
-        main {
-          background: white;
-          border-radius: 18px;
-          box-sizing: border-box;
-          min-height: 300px;
-          padding: 36px;
-          width: 520px;
-        }
-        h1 {
-          margin-top: 0;
-        }
-        label {
-          display: grid;
-          gap: 8px;
-          margin-bottom: 20px;
-        }
-        input, button {
-          font: inherit;
-          padding: 12px 16px;
-        }
-        [data-view][hidden] {
-          display: none;
-        }
-        .plans {
-          display: flex;
-          gap: 16px;
-        }
-        [role="status"] {
-          color: rgb(71, 85, 105);
-          min-height: 24px;
-        }
-      </style>
       <main>
         <section data-view="account">
           <h1>Create your account</h1>
@@ -89,7 +44,7 @@ test("turns meaningful Playwright steps into readable video captions", async ({
         </section>
         <section data-view="plan" hidden>
           <h1>Choose a plan</h1>
-          <div class="plans">
+          <div>
             <button data-plan="Starter">Starter</button>
             <button data-plan="Pro">Pro</button>
           </div>
@@ -245,14 +200,7 @@ test("keeps captions aligned through trimming and dead-air compression", async (
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-          background: rgb(30, 40, 80);
-        }
-      </style>
+      <main style="position: fixed; inset: 0; background: rgb(30, 40, 80)"></main>
     `);
 
     await plugged.videoMode.caption("Process account data", async () => {
@@ -307,9 +255,9 @@ test("writes a rendered video with dead air sped up and highlights added in post
   });
   await plugged.setViewportSize({ width: 800, height: 600 });
   await plugged.setContent(`
-    <main style="display: flex; flex-direction: column; gap: 16px">
-      <div data-spinner="true" style="visibility: hidden;">Loading...</div>
-      <div class="stages" style="display: flex; gap: 16px;">
+    <main>
+      <div data-spinner="true" hidden>Loading...</div>
+      <div>
         <button data-stage-index="0">Start import</button>
         <button data-stage-index="1">Review records</button>
         <button data-stage-index="2">Approve import</button>
@@ -330,7 +278,7 @@ test("writes a rendered video with dead air sped up and highlights added in post
       ];
 
       function setActiveStage(index) {
-        spinner.style.visibility = 'hidden';
+        spinner.hidden = true;
         buttons.forEach((button, buttonIndex) => {
           button.disabled = buttonIndex !== index;
         });
@@ -341,14 +289,14 @@ test("writes a rendered video with dead air sped up and highlights added in post
           buttons.forEach((button) => {
             button.disabled = true;
           });
-          spinner.style.visibility = 'visible';
+          spinner.hidden = false;
 
           const index = Number(button.dataset.stageIndex);
           const stage = stages[index];
           await sleep(stage.delay);
 
           if (stage.done) {
-            spinner.style.visibility = 'hidden';
+            spinner.hidden = true;
             result.textContent = 'Receipt ready';
             return;
           }
@@ -512,23 +460,7 @@ test("speeds dead air up instead of cutting through it", async ({ page }, testIn
     });
     await plugged.setViewportSize({ width: 400, height: 300 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 400px;
-          height: 300px;
-          background: rgb(255, 255, 255);
-        }
-        #progress {
-          position: absolute;
-          left: 120px;
-          top: 90px;
-          width: 160px;
-          height: 120px;
-          background: rgb(255, 0, 0);
-        }
-      </style>
-      <div id="progress"></div>
+      <div id="progress" style="position: absolute; left: 120px; top: 90px; width: 160px; height: 120px; background: rgb(255, 0, 0)"></div>
     `);
 
     await plugged.videoMode.deadAir(async () => {
@@ -581,9 +513,7 @@ test("renders only the selected video source range", async ({ page }, testInfo) 
       testInfo,
       plugins: [video],
     });
-    await plugged.setContent(`
-      <main style="font: 24px sans-serif">source range</main>
-    `);
+    await plugged.setContent("<main>source range</main>");
 
     await plugged.waitForTimeout(700);
     plugged.videoMode.setStartTime();
@@ -626,9 +556,7 @@ test("skips rendering an empty selected video source range", async ({ page }, te
         testInfo,
         plugins: [video],
       });
-      await plugged.setContent(`
-        <main style="font: 24px sans-serif">empty source range</main>
-      `);
+      await plugged.setContent("<main>empty source range</main>");
 
       plugged.videoMode.setStartTime(0);
       plugged.videoMode.setEndTime(0);
@@ -675,23 +603,7 @@ test("renders calibrated highlight boxes on a paused pre-click frame", async ({ 
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-          background: rgb(255, 255, 255);
-        }
-        #target {
-          position: absolute;
-          left: 120px;
-          top: 80px;
-          width: 160px;
-          height: 90px;
-          background: rgb(0, 80, 255);
-        }
-      </style>
-      <div id="target" onclick="this.style.background = 'rgb(255, 0, 0)'"></div>
+      <div id="target" style="position: absolute; left: 120px; top: 80px; width: 160px; height: 90px; background: rgb(0, 80, 255)" onclick="this.style.background = 'rgb(255, 0, 0)'"></div>
     `);
 
     await plugged.locator("#target").click();
@@ -774,24 +686,7 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-          background: rgb(17, 24, 39);
-        }
-        button {
-          margin: 80px;
-          padding: 14px 20px;
-        }
-        #result {
-          display: block;
-          margin: 0 80px;
-          color: rgb(255, 255, 255);
-          font: 700 32px system-ui;
-        }
-      </style>
+      <body style="margin: 0; background: rgb(17, 24, 39)">
       <button id="discard">Discard file</button>
       <output id="result"></output>
       <script>
@@ -801,6 +696,7 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
             : "Kept";
         });
       </script>
+      </body>
     `);
     plugged.once("dialog", (dialog) => dialog.accept());
 
@@ -920,26 +816,7 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-          background: rgb(255, 255, 255);
-        }
-        #target {
-          position: absolute;
-          left: 180px;
-          top: 120px;
-          width: 180px;
-          height: 120px;
-          background: rgb(0, 80, 255);
-        }
-        #target.clicked {
-          background: rgb(0, 190, 0);
-        }
-      </style>
-      <div id="target" onclick="this.classList.add('clicked')"></div>
+      <div id="target" style="width: 180px; height: 120px; background: rgb(0, 80, 255)" onclick="this.classList.add('clicked')"></div>
     `);
 
     await plugged.locator("#target").click();
@@ -993,35 +870,8 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-          background: rgb(210, 210, 210);
-        }
-        #ready {
-          visibility: hidden;
-          position: absolute;
-          left: 80px;
-          top: 140px;
-          width: 140px;
-          height: 100px;
-          background: rgb(0, 80, 255);
-        }
-        #run {
-          position: absolute;
-          left: 560px;
-          top: 140px;
-          width: 140px;
-          height: 100px;
-          border: 0;
-          padding: 0;
-          background: rgb(0, 190, 0);
-        }
-      </style>
-      <div id="ready"></div>
-      <button id="run" onclick="document.body.dataset.clicked = 'true'"></button>
+      <div id="ready" style="visibility: hidden; position: absolute; left: 80px; top: 140px; width: 140px; height: 100px; background: rgb(0, 80, 255)"></div>
+      <button id="run" style="position: absolute; left: 560px; top: 140px; width: 140px; height: 100px; border: 0; padding: 0; background: rgb(0, 190, 0)" onclick="document.body.dataset.clicked = 'true'"></button>
       <script>
         setTimeout(() => {
           document.querySelector('#ready').style.visibility = 'visible';
@@ -1085,44 +935,8 @@ test("uses a normal pointer tail after text cursor holds", async ({
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-          background: rgb(210, 210, 210);
-        }
-        input,
-        textarea {
-          border: 0;
-          box-sizing: border-box;
-          caret-color: transparent;
-          color: inherit;
-          font: 32px sans-serif;
-          outline: 0;
-          padding: 0;
-          position: absolute;
-          resize: none;
-        }
-        #name {
-          background: rgb(0, 80, 255);
-          color: rgb(0, 80, 255);
-          height: 120px;
-          left: 560px;
-          top: 80px;
-          width: 160px;
-        }
-        #notes {
-          background: rgb(0, 190, 0);
-          color: rgb(0, 190, 0);
-          height: 120px;
-          left: 80px;
-          top: 360px;
-          width: 180px;
-        }
-      </style>
-      <input id="name" aria-label="name" />
-      <textarea id="notes" aria-label="notes"></textarea>
+      <input id="name" aria-label="name" style="border: 0; box-sizing: border-box; caret-color: transparent; font: 32px sans-serif; outline: 0; padding: 0; position: absolute; background: rgb(0, 80, 255); color: rgb(0, 80, 255); height: 120px; left: 560px; top: 80px; width: 160px" />
+      <textarea id="notes" aria-label="notes" style="border: 0; box-sizing: border-box; caret-color: transparent; font: 32px sans-serif; outline: 0; padding: 0; position: absolute; resize: none; background: rgb(0, 190, 0); color: rgb(0, 190, 0); height: 120px; left: 80px; top: 360px; width: 180px"></textarea>
     `);
 
     await plugged.locator("#name").fill("Ada");
@@ -1189,38 +1003,7 @@ test("does not replay action frames when a hold overlaps the next highlight", as
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html,
-        body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-        }
-        body {
-          background: rgb(0, 180, 0);
-        }
-        body[data-phase="transient"] {
-          background: rgb(220, 0, 0);
-        }
-        input,
-        button {
-          border: 0;
-          box-sizing: border-box;
-          font: 24px sans-serif;
-          height: 70px;
-          position: absolute;
-          top: 60px;
-          width: 180px;
-        }
-        input {
-          left: 80px;
-        }
-        button {
-          background: rgb(0, 80, 255);
-          color: white;
-          left: 560px;
-        }
-      </style>
+      <body style="margin: 0; width: 800px; height: 600px; background: rgb(0, 180, 0)">
       <input id="name" aria-label="name" />
       <button id="run">run</button>
       <script>
@@ -1228,14 +1011,17 @@ test("does not replay action frames when a hold overlaps the next highlight", as
         document.querySelector("#name").addEventListener("input", () => {
           document.body.dataset.phase = "transient";
           document.body.dataset.transientSeen = "true";
+          document.body.style.background = "rgb(220, 0, 0)";
           setTimeout(() => {
             document.body.dataset.phase = "stable";
+            document.body.style.background = "rgb(0, 180, 0)";
           }, 260);
         });
         document.querySelector("#run").addEventListener("click", () => {
           document.body.dataset.clicked = "true";
         });
       </script>
+      </body>
     `);
 
     await plugged.locator("#name").fill("Ada");
@@ -1294,56 +1080,21 @@ test("does not linger on the unhighlighted post-wait state before a following hi
     });
     await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(`
-      <style>
-        html, body {
-          margin: 0;
-          width: 800px;
-          height: 600px;
-          background: rgb(0, 0, 0);
-        }
-        button {
-          border: 0;
-          color: rgb(0, 0, 0);
-          font: 20px sans-serif;
-          position: absolute;
-          top: 180px;
-          width: 180px;
-          height: 80px;
-        }
-        #start {
-          left: 80px;
-          background: rgb(0, 80, 255);
-        }
-        #next {
-          left: 340px;
-          background: rgb(0, 190, 0);
-        }
-        #next:disabled {
-          background: rgb(70, 70, 70);
-        }
-        [data-spinner="true"] {
-          position: absolute;
-          left: 340px;
-          top: 60px;
-          width: 180px;
-          height: 80px;
-          background: rgb(230, 0, 0);
-          visibility: hidden;
-        }
-      </style>
-      <button id="start">start</button>
-      <button id="next" disabled>next</button>
-      <div data-spinner="true"></div>
+      <button id="start" style="position: absolute; left: 80px; top: 180px; width: 180px; height: 80px">start</button>
+      <button id="next" disabled style="position: absolute; left: 340px; top: 180px; width: 180px; height: 80px; background: rgb(70, 70, 70)">next</button>
+      <div data-spinner="true" hidden>Loading</div>
       <div id="done"></div>
       <script>
         const spinner = document.querySelector('[data-spinner="true"]');
         const next = document.querySelector('#next');
         document.querySelector('#start').addEventListener('click', () => {
           next.disabled = true;
-          spinner.style.visibility = 'visible';
+          next.style.background = 'rgb(70, 70, 70)';
+          spinner.hidden = false;
           setTimeout(() => {
-            spinner.style.visibility = 'hidden';
+            spinner.hidden = true;
             next.disabled = false;
+            next.style.background = 'rgb(0, 190, 0)';
           }, 1250);
         });
         next.addEventListener('click', () => {
