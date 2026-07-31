@@ -1303,11 +1303,9 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
     `);
     await plugged.getByLabel("Notes").waitFor();
 
-    await plugged.videoMode.caption("Show the placeholder", async () => {
+    await plugged.videoMode.caption("Replace the placeholder", async () => {
       await plugged.getByLabel("Notes").click();
       await expect(plugged.getByLabel("Notes")).toBeFocused();
-    });
-    await plugged.videoMode.caption("Reveal a stable textarea fill", async () => {
       await plugged.getByLabel("Notes").fill("Ada notes");
       await expect(plugged.getByLabel("Notes")).toHaveValue("Ada notes");
       await expect(plugged.locator("body")).toHaveAttribute(
