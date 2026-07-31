@@ -261,6 +261,7 @@ type VideoFilter = {
 };
 
 type VideoPiece = {
+  addressBar?: VideoModeAddressBar;
   end: number;
   highlight?: VideoModeHighlight;
   speed: number;
@@ -600,12 +601,17 @@ const translateVideoSpan = (span: VideoModeSpan, offsetMs: number): VideoModeSpa
 };
 
 const translateVideoTimeline = (options: {
+  addressBars: VideoModeAddressBar[];
   captions: VideoModeCaption[];
   deadAir: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   offsetMs: number;
 }) => {
   return {
+    addressBars: options.addressBars.map((addressBar) => ({
+      ...translateVideoSpan(addressBar, options.offsetMs),
+      url: addressBar.url,
+    })),
     captions: options.captions.map((caption) => ({
       ...translateVideoSpan(caption, options.offsetMs),
       text: caption.text,
@@ -1289,18 +1295,41 @@ const escapeAssText = (text: string) => {
     .replace(/\r?\n/g, "\\N");
 };
 
-const assCaptions = (
-  captions: VideoModeCaption[],
-  video: { height: number; width: number },
-) => {
+const assAnnotations = (options: {
+  addressBars: VideoModeAddressBar[];
+  captions: VideoModeCaption[];
+  video: { height: number; width: number };
+}) => {
+  const { addressBars, captions, video } = options;
   const fontSize = Math.max(24, Math.round(video.height * 0.06));
   const margin = Math.max(24, Math.round(video.height * 0.06));
-  const events = captions
+  const captionEvents = captions
     .map(
       (caption) =>
         `Dialogue: 0,${formatAssTime(caption.start)},${formatAssTime(caption.end)},Caption,,0,0,0,,${escapeAssText(caption.text)}`,
     )
     .join("\n");
+  const addressBarHeight = Math.max(58, Math.round(video.height * 0.12));
+  const pillX = Math.max(12, Math.round(video.width * 0.017));
+  const pillY = Math.max(9, Math.round(addressBarHeight * 0.18));
+  const pillWidth = video.width - pillX * 2;
+  const pillHeight = addressBarHeight - pillY * 2;
+  const addressFontSize = Math.max(15, Math.round(video.height * 0.034));
+  const addressMarginLeft = pillX + Math.round(pillHeight * 0.42);
+  const addressMarginTop = pillY + Math.round(pillHeight * 0.22);
+  const addressClipRight = pillX + pillWidth - Math.round(pillHeight * 0.35);
+  const addressEvents = addressBars
+    .flatMap((addressBar) => {
+      const start = formatAssTime(addressBar.start);
+      const end = formatAssTime(addressBar.end);
+      return [
+        `Dialogue: 0,${start},${end},AddressShape,,0,0,0,,{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\1c&H00343130&}m 0 0 l ${video.width} 0 l ${video.width} ${addressBarHeight} l 0 ${addressBarHeight}`,
+        `Dialogue: 1,${start},${end},AddressShape,,0,0,0,,{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\1c&H0068635F&}m ${pillX} ${pillY} l ${pillX + pillWidth} ${pillY} l ${pillX + pillWidth} ${pillY + pillHeight} l ${pillX} ${pillY + pillHeight}`,
+        `Dialogue: 2,${start},${end},Address,,0,0,0,,{\\clip(${addressMarginLeft},${pillY},${addressClipRight},${pillY + pillHeight})}●  ${escapeAssText(addressBar.url)}`,
+      ];
+    })
+    .join("\n");
+  const events = [captionEvents, addressEvents].filter(Boolean).join("\n");
 
   return [
     "[Script Info]",
@@ -1313,6 +1342,8 @@ const assCaptions = (
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
     `Style: Caption,Arial,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,0,0,0,0,100,100,0,0,3,1,0,2,${margin},${margin},${margin},1`,
+    "Style: AddressShape,Arial,1,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
+    `Style: Address,Arial,${addressFontSize},&H00F8F9FA,&H00F8F9FA,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,${addressMarginLeft},0,${addressMarginTop},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -1487,6 +1518,8 @@ const renderVideoSegments = (options: {
 };
 
 const videoPieces = (options: {
+  addressBars: VideoModeAddressBar[];
+  frameDurationMs: number;
   highlights: VideoModeHighlight[];
   segments: RenderVideoSegment[];
 }): VideoPiece[] => {
@@ -1497,10 +1530,40 @@ const videoPieces = (options: {
     const highlights = options.highlights.filter(
       (highlight) => highlight.start >= segment.start && highlight.start < segment.end,
     );
+    const addressBars = options.addressBars.filter(
+      (addressBar) => addressBar.start >= segment.start && addressBar.start < segment.end,
+    );
+    const annotations = [
+      ...highlights.map((highlight) => ({ highlight, start: highlight.start })),
+      ...addressBars.map((addressBar) => ({ addressBar, start: addressBar.start })),
+    ].sort(
+      (left, right) =>
+        left.start - right.start || Number("highlight" in left) - Number("highlight" in right),
+    );
 
-    for (let index = 0; index < highlights.length; index += 1) {
-      const highlight = highlights[index];
-      const nextHighlight = highlights[index + 1];
+    for (const annotation of annotations) {
+      if ("addressBar" in annotation) {
+        const { addressBar } = annotation;
+        if (addressBar.start > cursor) {
+          pieces.push({ end: addressBar.start, speed: segment.speed, start: cursor });
+        }
+
+        pieces.push({
+          addressBar,
+          end: Math.min(
+            segment.end,
+            addressBar.start + options.frameDurationMs,
+          ),
+          speed: 1,
+          start: addressBar.start,
+        });
+        cursor = Math.max(cursor, addressBar.start);
+        continue;
+      }
+
+      const highlight = annotation.highlight;
+      const highlightIndex = highlights.indexOf(highlight);
+      const nextHighlight = highlights[highlightIndex + 1];
 
       if (highlight.start > cursor) {
         pieces.push({ end: highlight.start, speed: segment.speed, start: cursor });
@@ -1581,6 +1644,10 @@ const drawboxFilter = (highlight: VideoModeHighlight, video: { width: number; he
 };
 
 const renderedPieceDuration = (piece: VideoPiece) => {
+  if (piece.addressBar) {
+    return piece.addressBar.end - piece.addressBar.start;
+  }
+
   const sourceDuration = (piece.end - piece.start) / piece.speed;
 
   if (!piece.highlight) {
@@ -1645,6 +1712,20 @@ const projectVideoCaptions = (
   });
 
   return normalizeVideoCaptions(projected);
+};
+
+const projectVideoAddressBars = (pieces: RenderedVideoPiece[]) => {
+  return pieces.flatMap((piece) =>
+    piece.addressBar
+      ? [
+          {
+            end: Math.round(piece.outputEnd),
+            start: Math.round(piece.outputStart),
+            url: piece.addressBar.url,
+          },
+        ]
+      : [],
+  );
 };
 
 const highlightCursorPoint = (
@@ -1930,6 +2011,7 @@ const videoSpanExpression = (spans: VideoModeSpan[]) => {
 };
 
 const renderedVideoFilter = (options: {
+  addressBars: VideoModeAddressBar[];
   captionFile?: string;
   clickPointerInput?: PointerInput;
   cursorPointerInput?: PointerInput;
@@ -1941,12 +2023,14 @@ const renderedVideoFilter = (options: {
   highlights: VideoModeHighlight[];
   segments: RenderVideoSegment[];
   textPointerInput?: PointerInput;
-  video: { width: number; height: number };
+  video: { frameDurationMs: number; width: number; height: number };
 }): VideoFilter | undefined => {
   const highlightInputByImage = new Map(
     options.highlightInputs.map((input) => [input.image, input]),
   );
   const pieces = videoPieces({
+    addressBars: options.addressBars,
+    frameDurationMs: options.video.frameDurationMs,
     highlights: options.highlights,
     segments: options.segments,
   });
@@ -1998,6 +2082,17 @@ const renderedVideoFilter = (options: {
         `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
       );
       operations.push(`setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`);
+    }
+
+    if (piece.addressBar) {
+      operations.push(
+        `tpad=stop_mode=clone:stop_duration=${formatSeconds(
+          Math.max(
+            0,
+            piece.addressBar.end - piece.addressBar.start - (piece.end - piece.start),
+          ),
+        )}`,
+      );
     }
 
     if (piece.highlight && !piece.highlight.image) {
@@ -2501,6 +2596,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
 };
 
 const renderVideo = async (options: {
+  addressBars: VideoModeAddressBar[];
   captions: VideoModeCaption[];
   dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
   dialogPostHoldMs: number;
@@ -2590,23 +2686,37 @@ const renderVideo = async (options: {
     start: rangeStart,
     thresholdMs: options.thresholdMs,
   });
+  const renderedPieces = renderedVideoPieces(
+    videoPieces({
+      addressBars: options.addressBars,
+      frameDurationMs: info.frameDurationMs,
+      highlights: options.highlights,
+      segments,
+    }),
+  );
+  const renderedAddressBars = projectVideoAddressBars(renderedPieces);
   const renderedCaptions = projectVideoCaptions(
     options.captions,
-    renderedVideoPieces(
-      videoPieces({
-        highlights: options.highlights,
-        segments,
-      }),
-    ),
+    renderedPieces,
   );
   const captionFile =
-    renderedCaptions.length > 0 ? join(options.outputDir, VIDEO_MODE_CAPTIONS_FILE) : undefined;
+    renderedAddressBars.length > 0 || renderedCaptions.length > 0
+      ? join(options.outputDir, VIDEO_MODE_CAPTIONS_FILE)
+      : undefined;
 
   if (captionFile) {
-    await writeFile(captionFile, assCaptions(renderedCaptions, info));
+    await writeFile(
+      captionFile,
+      assAnnotations({
+        addressBars: renderedAddressBars,
+        captions: renderedCaptions,
+        video: info,
+      }),
+    );
   }
 
   const filter = renderedVideoFilter({
+    addressBars: options.addressBars,
     captionFile,
     clickPointerInput,
     cursorPointerInput,
@@ -2997,6 +3107,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         await Promise.all(pendingDialogHighlights);
         const renderEndedAt = getVideoTimestamp();
         const metadataBeforeVideo = metadataFor(state);
+        const addressBars = metadataBeforeVideo.addressBars;
         const captions = metadataBeforeVideo.captions;
         const deadAir = metadataBeforeVideo.deadAir;
         const highlights = metadataBeforeVideo.highlights;
@@ -3036,6 +3147,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           let recordingEndedAt: number | undefined;
           if (!page.isClosed()) {
             const needsTimelineCalibration =
+              addressBars.length > 0 ||
               captions.length > 0 ||
               highlights.length > 0 ||
               deadAirThreshold !== undefined ||
@@ -3073,6 +3185,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             Math.floor(sourceOffset / rawVideoInfo.frameDurationMs) *
             rawVideoInfo.frameDurationMs;
           const renderTimeline = translateVideoTimeline({
+            addressBars,
             captions,
             deadAir,
             highlights,
@@ -3112,13 +3225,20 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
                 Math.max(end, candidate.start + 1, candidate.actionEnd || 0),
               0,
             );
+            const minimumAddressBarEnd = renderTimeline.addressBars.reduce(
+              (end, candidate) =>
+                Math.max(end, candidate.start + rawVideoInfo.frameDurationMs),
+              0,
+            );
             sourceRange.end = Math.max(
+              minimumAddressBarEnd,
               minimumHighlightEnd,
               Math.round(renderEndedAt + sourceOffset),
             );
           }
 
           if (
+            addressBars.length > 0 ||
             captions.length > 0 ||
             highlights.length > 0 ||
             deadAirThreshold !== undefined ||
@@ -3126,6 +3246,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             sourceRangeIsSet(state.sourceRange)
           ) {
             const wroteRenderedVideo = await renderVideo({
+              addressBars: renderTimeline.addressBars,
               captions: renderTimeline.captions,
               deadAir: renderTimeline.deadAir,
               dialogPostFrame,
