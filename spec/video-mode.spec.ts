@@ -3,6 +3,38 @@ import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
+test("shows the new address during goto, then removes it after the hold", async ({
+  page,
+}, testInfo) => {
+  const destination = "https://app.middlewright.test/reports?period=this-week";
+  await page.route(destination, async (route) => {
+    await route.fulfill({
+      body: "<main>Weekly reports</main>",
+      contentType: "text/html",
+    });
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [
+      videoMode({
+        addressBar: { holdMs: 100 },
+        finalHold: 0,
+        highlight: false,
+      }),
+    ],
+  });
+
+  const navigation = plugged.goto(destination);
+  const addressBar = plugged.getByRole("status", { name: "Current address" });
+
+  await expect(addressBar).toBeVisible();
+  await expect(addressBar).toHaveText(destination);
+  await navigation;
+  await expect(addressBar).toHaveCount(0);
+  await expect(plugged.getByRole("main")).toHaveText("Weekly reports");
+});
+
 test("records Playwright test steps as captions by default", async ({ page }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false });
   await using plugged = await addPlugins({

@@ -168,6 +168,11 @@ export type VideoModeHighlightOptions =
 
 export type VideoModeOptions = {
   /**
+   * Show the destination URL after `page.goto()` and hold it in the recorded
+   * page before the call completes. Default: `{ holdMs: 1000 }`
+   */
+  addressBar?: false | { holdMs: number };
+  /**
    * Caption source. `"test-step"` records Playwright `test.step` spans;
    * `"explicit"` records only `videoMode.caption()` spans. Default: `"test-step"`
    */
@@ -347,6 +352,20 @@ const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
 type ResolvedTrimStart = {
   selector?: string;
   detectBlank: boolean;
+};
+
+const resolveAddressBar = (value: VideoModeOptions["addressBar"]) => {
+  if (value === false) {
+    return undefined;
+  }
+
+  return {
+    holdMs: resolveNonNegativeNumber({
+      defaultValue: 1000,
+      name: "videoMode addressBar.holdMs",
+      value: value?.holdMs,
+    }),
+  };
 };
 
 // A `selector` falls back to blank detection if it never shows, so a bad
@@ -926,6 +945,77 @@ const installVideoModeDialogOverlay = () => {
     overlay.complete(result === null ? "dismiss" : "accept", result === null ? undefined : result);
     return result;
   };
+};
+
+const showVideoModeAddressBar = (url: string) => {
+  const attribute = "data-middlewright-video-mode-address-bar";
+  document.querySelector(`[${attribute}]`)?.remove();
+
+  const host = document.createElement("div");
+  host.setAttribute(attribute, "");
+  host.style.cssText = [
+    "position:fixed",
+    "inset:0 0 auto",
+    "z-index:2147483647",
+    "pointer-events:none",
+  ].join(";");
+
+  const shadow = host.attachShadow({ mode: "open" });
+  const browserBar = document.createElement("div");
+  browserBar.style.cssText = [
+    "box-sizing:border-box",
+    "width:100%",
+    "padding:12px 16px 14px",
+    "background:#303134",
+    "box-shadow:0 2px 8px rgba(0,0,0,.28)",
+    "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+  ].join(";");
+
+  const address = document.createElement("div");
+  address.style.cssText = [
+    "box-sizing:border-box",
+    "display:flex",
+    "align-items:center",
+    "gap:10px",
+    "height:44px",
+    "width:100%",
+    "border-radius:22px",
+    "background:#5f6368",
+    "color:#f8f9fa",
+    "font-size:17px",
+    "line-height:22px",
+    "padding:0 18px",
+  ].join(";");
+
+  const icon = document.createElement("span");
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = "●";
+  icon.style.cssText = [
+    "flex:none",
+    "color:#dfe1e5",
+    "font-size:10px",
+    "text-shadow:0 0 0 3px #dfe1e5",
+  ].join(";");
+
+  const text = document.createElement("span");
+  text.setAttribute("aria-label", "Current address");
+  text.setAttribute("role", "status");
+  text.textContent = url;
+  text.style.cssText = [
+    "min-width:0",
+    "overflow:hidden",
+    "text-overflow:ellipsis",
+    "white-space:nowrap",
+  ].join(";");
+
+  address.append(icon, text);
+  browserBar.append(address);
+  shadow.append(browserBar);
+  document.documentElement.append(host);
+};
+
+const removeVideoModeAddressBar = () => {
+  document.querySelector("[data-middlewright-video-mode-address-bar]")?.remove();
 };
 
 const videoModeDialogOverlaySnapshot = async (
@@ -2680,6 +2770,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     name: "videoMode finalHold",
     value: options.finalHold,
   });
+  const addressBar = resolveAddressBar(options.addressBar);
   const captionMode = options.captions || "test-step";
   const highlight = resolveVideoModeHighlight(options);
   const skipMethods = options.skipMethods || ["waitFor"];
@@ -2817,6 +2908,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
 
     testLifecycle: (emitter) => {
+      let addressBarOriginalGoto: Page["goto"] | undefined;
+      let addressBarPage: Page | undefined;
+      let addressBarGoto: Page["goto"] | undefined;
       let dialogPage: Page | undefined;
       let onDialog: ((dialog: Dialog) => void) | undefined;
       let stopObservingPlaywrightSteps = () => {};
@@ -2845,6 +2939,26 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             state,
             getVideoTimestamp,
           );
+        }
+
+        if (addressBar) {
+          const originalGoto = page.goto;
+          const goto: Page["goto"] = async (url, gotoOptions) => {
+            const response = await originalGoto.call(page, url, gotoOptions);
+            await page.evaluate(showVideoModeAddressBar, page.url());
+            try {
+              await page.waitForTimeout(addressBar.holdMs);
+            } finally {
+              if (!page.isClosed()) {
+                await page.evaluate(removeVideoModeAddressBar);
+              }
+            }
+            return response;
+          };
+          addressBarOriginalGoto = originalGoto;
+          addressBarPage = page;
+          addressBarGoto = goto;
+          Object.assign(page, { goto });
         }
 
         if (highlight.mode !== "off") {
@@ -3145,6 +3259,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         stopObservingPlaywrightSteps();
         offBeforeTest();
         offAfterTestFinalize();
+        if (
+          addressBarOriginalGoto &&
+          addressBarPage &&
+          addressBarGoto &&
+          addressBarPage.goto === addressBarGoto
+        ) {
+          Object.assign(addressBarPage, { goto: addressBarOriginalGoto });
+        }
         if (dialogPage && onDialog) {
           dialogPage.off("dialog", onDialog);
         }
