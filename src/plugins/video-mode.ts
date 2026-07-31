@@ -29,6 +29,7 @@ const VIDEO_MODE_POINTER_FILE = "video-mode-pointer.png";
 const VIDEO_MODE_CLICK_POINTER_FILE = "video-mode-click-pointer.png";
 const VIDEO_MODE_TEXT_POINTER_FILE = "video-mode-text-pointer.png";
 const VIDEO_MODE_DIALOG_POST_FRAME_FILE = "video-mode-dialog-post-frame.png";
+const VIDEO_MODE_FINAL_FRAME_FILE = "video-mode-final-frame.png";
 const VIDEO_MODE_CAPTIONS_FILE = "video-mode-captions.ass";
 const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
 // Playwright extends its final screencast frame by the Node-side time since
@@ -301,7 +302,6 @@ const CURSOR_REST_BEFORE_ACTION_MS = 200;
 const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
 const TEXT_CURSOR_HOLD_IDEAL_MS = 800;
 const TEXT_CURSOR_POINTER_TAIL_MS = 200;
-const FILL_REVEAL_POINTER_SETTLE_MS = 100;
 const DIALOG_POST_ROLL_MS = 1000;
 
 type HighlightInput = {
@@ -311,7 +311,7 @@ type HighlightInput = {
   path: string;
 };
 
-type DialogPostFrameInput = {
+type StillFrameInput = {
   inputIndex: number;
   path: string;
   viewport: VideoModeViewport;
@@ -466,6 +466,92 @@ const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undef
     if (hasChanged(index) && hasChanged(index + 1)) {
       return Math.round((index / AUTO_START_SAMPLE_FPS) * 1000);
     }
+  }
+
+  return undefined;
+};
+
+const FINAL_PAINT_SAMPLE_FPS = 25;
+const FINAL_PAINT_MAX_SCAN_MS = 30_000;
+const FINAL_PAINT_DIFF_THRESHOLD = 3;
+
+/**
+ * Find the last encoded frame matching the page's final live screenshot.
+ * Playwright can append a black close frame for the recorder settle period
+ * when a static page emits no more screencast frames.
+ */
+const detectFinalPaintEndMs = async (options: {
+  durationMs: number;
+  finalFramePath: string;
+  inputPath: string;
+}): Promise<number | undefined> => {
+  const size = AUTO_START_SAMPLE_SIZE;
+  const frameSize = size * size;
+  const sampleStart = Math.max(0, options.durationMs - FINAL_PAINT_MAX_SCAN_MS);
+
+  try {
+    const [finalFrameResult, videoResult] = await Promise.all([
+      execFile(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-i",
+          options.finalFramePath,
+          "-vf",
+          `scale=${size}:${size},format=gray`,
+          "-frames:v",
+          "1",
+          "-f",
+          "rawvideo",
+          "-pix_fmt",
+          "gray",
+          "pipe:1",
+        ],
+        { encoding: "buffer", maxBuffer: frameSize * 2 },
+      ),
+      execFile(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-i",
+          options.inputPath,
+          "-ss",
+          formatSeconds(sampleStart),
+          "-vf",
+          `fps=${FINAL_PAINT_SAMPLE_FPS},scale=${size}:${size},format=gray`,
+          "-f",
+          "rawvideo",
+          "-pix_fmt",
+          "gray",
+          "pipe:1",
+        ],
+        { encoding: "buffer", maxBuffer: 128 * 1024 * 1024 },
+      ),
+    ]);
+    const finalFrame = (finalFrameResult.stdout as Buffer).subarray(0, frameSize);
+    const videoFrames = videoResult.stdout as Buffer;
+    const frameCount = Math.floor(videoFrames.length / frameSize);
+
+    if (finalFrame.length < frameSize || frameCount === 0) {
+      return undefined;
+    }
+
+    for (let index = frameCount - 1; index >= 0; index -= 1) {
+      const frame = videoFrames.subarray(index * frameSize, (index + 1) * frameSize);
+      if (frameMeanAbsDiff(frame, finalFrame) <= FINAL_PAINT_DIFF_THRESHOLD) {
+        return Math.min(
+          options.durationMs,
+          Math.round(sampleStart + ((index + 1) / FINAL_PAINT_SAMPLE_FPS) * 1000),
+        );
+      }
+    }
+  } catch {
+    // Calibration is best-effort; retain endpoint calibration when no final
+    // page frame can be matched.
   }
 
   return undefined;
@@ -2061,8 +2147,9 @@ const renderedVideoFilter = (options: {
   captionFile?: string;
   clickPointerInput?: PointerInput;
   cursorPointerInput?: PointerInput;
-  dialogPostFrameInput: DialogPostFrameInput | undefined;
+  dialogPostFrameInput: StillFrameInput | undefined;
   dialogPostHoldMs: number;
+  finalFrameInput: StillFrameInput | undefined;
   finalHoldMs: number;
   highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
@@ -2132,15 +2219,18 @@ const renderedVideoFilter = (options: {
       const target = plan.targets.find(
         (candidate) => candidate.highlight === piece.highlight,
       );
-      const pointerRevealStart =
-        options.highlightMode === "pointer" && target
-          ? target.arriveAt - renderedPiece.outputStart + FILL_REVEAL_POINTER_SETTLE_MS
-          : 0;
-      const revealStart = Math.max(0, Math.min(duration, pointerRevealStart));
       const revealEnd =
         options.highlightMode === "pointer"
-          ? Math.max(revealStart, duration - TEXT_CURSOR_POINTER_TAIL_MS)
+          ? Math.max(0, duration - TEXT_CURSOR_POINTER_TAIL_MS)
           : duration;
+      const pointerArrival = target
+        ? Math.max(0, target.arriveAt - renderedPiece.outputStart)
+        : 0;
+      const pointerRevealStart =
+        options.highlightMode === "pointer"
+          ? pointerArrival + Math.max(0, revealEnd - pointerArrival) / 2
+          : 0;
+      const revealStart = Math.max(0, Math.min(revealEnd, pointerRevealStart));
       const baseLabel = `fillbase${index}`;
       const splitLabels = revealStops.map((_, stopIndex) => `fillpost${index}x${stopIndex}`);
 
@@ -2262,6 +2352,24 @@ const renderedVideoFilter = (options: {
     );
     filters.push(`[${concatLabel}][dialogpost]concat=n=2:v=1:a=0[renderdialogpost]`);
     concatLabel = "renderdialogpost";
+    remainingFinalHoldMs = 0;
+  }
+
+  if (remainingFinalHoldMs > 0 && options.finalFrameInput) {
+    const scaledViewport = scaledViewportSize(
+      options.finalFrameInput.viewport,
+      options.video,
+    );
+    filters.push(
+      [
+        `[${options.finalFrameInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+        `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+        `trim=start=0:end=${formatSeconds(remainingFinalHoldMs)}`,
+        "setpts=PTS-STARTPTS[finalhold]",
+      ].join(","),
+    );
+    filters.push(`[${concatLabel}][finalhold]concat=n=2:v=1:a=0[renderfinalhold]`);
+    concatLabel = "renderfinalhold";
     remainingFinalHoldMs = 0;
   }
 
@@ -2725,6 +2833,7 @@ const renderVideo = async (options: {
   captions: VideoModeCaption[];
   dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
   dialogPostHoldMs: number;
+  finalFrame: { path: string; viewport: VideoModeViewport } | undefined;
   finalHoldMs: number;
   highlightMode: "outline" | "pointer";
   highlights: VideoModeHighlight[];
@@ -2768,14 +2877,22 @@ const renderVideo = async (options: {
       inputIndex: index + 1,
       path: join(options.outputDir, input.image),
     }));
-  const dialogPostFrameInput: DialogPostFrameInput | undefined = options.dialogPostFrame
+  const dialogPostFrameInput: StillFrameInput | undefined = options.dialogPostFrame
     ? {
         inputIndex: highlightInputs.length + 1,
         path: options.dialogPostFrame.path,
         viewport: options.dialogPostFrame.viewport,
       }
     : undefined;
-  const pointerInputOffset = highlightInputs.length + (dialogPostFrameInput ? 1 : 0);
+  const finalFrameInput: StillFrameInput | undefined = options.finalFrame
+    ? {
+        inputIndex: highlightInputs.length + (dialogPostFrameInput ? 2 : 1),
+        path: options.finalFrame.path,
+        viewport: options.finalFrame.viewport,
+      }
+    : undefined;
+  const pointerInputOffset =
+    highlightInputs.length + (dialogPostFrameInput ? 1 : 0) + (finalFrameInput ? 1 : 0);
   const shouldRenderPointer = options.highlightMode === "pointer" && options.highlights.length > 0;
   const cursorPointerInput: PointerInput | undefined = shouldRenderPointer
     ? {
@@ -2841,6 +2958,7 @@ const renderVideo = async (options: {
     cursorPointerInput,
     dialogPostFrameInput,
     dialogPostHoldMs: options.dialogPostHoldMs,
+    finalFrameInput,
     finalHoldMs: options.finalHoldMs,
     highlightMode: options.highlightMode,
     highlightInputs,
@@ -2874,6 +2992,7 @@ const renderVideo = async (options: {
       ...(dialogPostFrameInput
         ? ["-loop", "1", "-i", dialogPostFrameInput.path]
         : []),
+      ...(finalFrameInput ? ["-loop", "1", "-i", finalFrameInput.path] : []),
       ...(cursorPointerInput ? ["-loop", "1", "-i", cursorPointerInput.path] : []),
       ...(clickPointerInput ? ["-loop", "1", "-i", clickPointerInput.path] : []),
       ...(textPointerInput ? ["-loop", "1", "-i", textPointerInput.path] : []),
@@ -3248,6 +3367,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const paths = videoModeOutputPaths(testInfo);
           await mkdir(testInfo.outputDir, { recursive: true });
           let dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
+          let finalFrame: { path: string; viewport: VideoModeViewport } | undefined;
 
           if (dialogPostHoldMs > 0 && !page.isClosed()) {
             const viewport = page.viewportSize();
@@ -3257,6 +3377,16 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             const path = join(testInfo.outputDir, VIDEO_MODE_DIALOG_POST_FRAME_FILE);
             await page.screenshot({ path, scale: "css" });
             dialogPostFrame = { path, viewport };
+          }
+
+          if (finalHold > 0 && !page.isClosed()) {
+            const viewport = page.viewportSize();
+            if (!viewport) {
+              throw new Error("videoMode cannot capture a final frame without a viewport");
+            }
+            const path = join(testInfo.outputDir, VIDEO_MODE_FINAL_FRAME_FILE);
+            await page.screenshot({ path, scale: "css" });
+            finalFrame = { path, viewport };
           }
 
           let recordingEndedAt: number | undefined;
@@ -3291,8 +3421,18 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
 
           const rawVideoInfo = await videoInfo(paths.raw);
+          const finalPaintEnd =
+            finalFrame === undefined
+              ? undefined
+              : await detectFinalPaintEndMs({
+                  durationMs: rawVideoInfo.durationMs,
+                  finalFramePath: finalFrame.path,
+                  inputPath: paths.raw,
+                });
           const sourceOffset =
-            recordingEndedAt === undefined
+            finalPaintEnd !== undefined
+              ? finalPaintEnd - renderEndedAt
+              : recordingEndedAt === undefined
               ? 0
               : rawVideoInfo.durationMs - recordingEndedAt;
           const timelineOffset =
@@ -3356,6 +3496,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               deadAir: renderTimeline.deadAir,
               dialogPostFrame,
               dialogPostHoldMs,
+              finalFrame,
               finalHoldMs: finalHold,
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights: renderTimeline.highlights,

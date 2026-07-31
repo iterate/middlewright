@@ -1042,9 +1042,9 @@ test("reveals complete glyphs instead of slicing through the next character", as
   const highlightDurationMs = 1000;
   const video = videoMode({
     captions: "explicit",
-    finalHold: 0,
+    finalHold: 1000,
     highlight: { mode: "outline", duration: highlightDurationMs },
-    trimStart: "never",
+    trimStart: ["selector", 'input[aria-label="Code"]'],
   });
   {
     await using plugged = await addPlugins({
@@ -1059,6 +1059,7 @@ test("reveals complete glyphs instead of slicing through the next character", as
         style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: white; color: black; caret-color: transparent; font: 54px monospace"
       />
     `);
+    await page.waitForTimeout(200);
 
     await plugged.videoMode.caption("Reveal complete glyphs", async () => {
       await plugged.getByLabel("Code").fill("A @ B");
@@ -1074,7 +1075,7 @@ test("reveals complete glyphs instead of slicing through the next character", as
 
   const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
   const frames = await videoFrames(paths.rendered);
-  const finalFrame = await videoFrame(paths.rendered, fillStart + 900);
+  const finalFrame = frames.at(-1)!;
   const scale = Math.min(
     finalFrame.width / fillHighlight.viewport.width,
     finalFrame.height / fillHighlight.viewport.height,
@@ -1120,9 +1121,9 @@ test("moves to the field and switches to the text cursor before revealing", asyn
   const highlightDurationMs = 1200;
   const video = videoMode({
     captions: "explicit",
-    finalHold: 0,
+    finalHold: 1000,
     highlight: { mode: "pointer", duration: highlightDurationMs },
-    trimStart: "never",
+    trimStart: ["selector", 'input[aria-label="Name"]'],
   });
   {
     await using plugged = await addPlugins({
@@ -1134,13 +1135,14 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     await plugged.setContent(`
       <input
         aria-label="Name"
-        style="position: absolute; box-sizing: border-box; left: 480px; top: 160px; width: 280px; height: 90px; border: 0; padding: 12px 20px; background: rgb(0, 80, 255); color: rgb(230, 0, 0); caret-color: transparent; font: 54px monospace"
+        style="position: absolute; box-sizing: border-box; left: 340px; top: 160px; width: 420px; height: 90px; border: 0; padding: 12px 20px; background: rgb(0, 80, 255); color: rgb(230, 0, 0); caret-color: transparent; font: 42px monospace"
       />
     `);
+    await page.waitForTimeout(200);
 
     await plugged.videoMode.caption("Move, switch cursor, then reveal", async () => {
-      await plugged.getByLabel("Name").fill("Ada");
-      await expect(plugged.getByLabel("Name")).toHaveValue("Ada");
+      await plugged.getByLabel("Name").fill("Ada Lovelace");
+      await expect(plugged.getByLabel("Name")).toHaveValue("Ada Lovelace");
       await page.waitForTimeout(150);
     });
   }
@@ -1187,7 +1189,15 @@ test("moves to the field and switches to the text cursor before revealing", asyn
   );
 
   expect(textCursorFrame).toBeGreaterThan(0);
-  expect(firstRevealFrame).toBeGreaterThan(textCursorFrame);
+  expect(firstRevealFrame - textCursorFrame).toBeGreaterThanOrEqual(7);
+  const boundaryColors = [frames[0], ...frames.slice(-10)].map((frame) =>
+    averagePixel(frame, { x: 30, y: 30 }),
+  );
+  expect(
+    boundaryColors.map(
+      ({ blue, green, red }) => blue > 220 && green > 220 && red > 220,
+    ),
+  ).toEqual(Array.from({ length: 11 }, () => true));
 });
 
 test("preserves gradient field pixels while revealing the filled text", async ({
@@ -1196,9 +1206,9 @@ test("preserves gradient field pixels while revealing the filled text", async ({
   const highlightDurationMs = 1000;
   const video = videoMode({
     captions: "explicit",
-    finalHold: 0,
+    finalHold: 1000,
     highlight: { mode: "outline", duration: highlightDurationMs },
-    trimStart: "never",
+    trimStart: ["selector", 'input[aria-label="Gradient"]'],
   });
   {
     await using plugged = await addPlugins({
@@ -1213,6 +1223,7 @@ test("preserves gradient field pixels while revealing the filled text", async ({
         style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: linear-gradient(90deg, rgb(240, 60, 40), rgb(30, 80, 230)); color: black; caret-color: transparent; font: 54px monospace"
       />
     `);
+    await page.waitForTimeout(200);
 
     await plugged.videoMode.caption("Preserve gradient pixels", async () => {
       await plugged.getByLabel("Gradient").fill("Ada");
@@ -1265,9 +1276,9 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
   const highlightDurationMs = 1000;
   const video = videoMode({
     captions: "explicit",
-    finalHold: 0,
+    finalHold: 1000,
     highlight: { mode: "outline", duration: highlightDurationMs },
-    trimStart: "never",
+    trimStart: ["selector", 'textarea[aria-label="Notes"]'],
   });
   {
     await using plugged = await addPlugins({
@@ -1290,6 +1301,7 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
         });
       </script>
     `);
+    await page.waitForTimeout(200);
 
     await plugged.videoMode.caption("Reveal a stable textarea fill", async () => {
       await plugged.getByLabel("Notes").fill("Ada notes");
@@ -1339,9 +1351,9 @@ test("falls back to a normal fill for a scrolling textarea", async ({
 }, testInfo) => {
   const video = videoMode({
     captions: "explicit",
-    finalHold: 250,
+    finalHold: 1000,
     highlight: { mode: "outline", duration: 800 },
-    trimStart: "never",
+    trimStart: ["selector", 'textarea[aria-label="Log"]'],
   });
   {
     await using plugged = await addPlugins({
@@ -1356,6 +1368,7 @@ test("falls back to a normal fill for a scrolling textarea", async ({
         style="position: absolute; box-sizing: border-box; left: 220px; top: 120px; width: 360px; height: 150px; padding: 14px; resize: none; background: white; color: black; font: 30px monospace"
       ></textarea>
     `);
+    await page.waitForTimeout(200);
 
     await plugged.videoMode.caption("Scrolling textarea: use a normal fill", async () => {
       await plugged
@@ -1409,9 +1422,9 @@ test("falls back to a normal fill when a textarea expands", async ({
 }, testInfo) => {
   const video = videoMode({
     captions: "explicit",
-    finalHold: 250,
+    finalHold: 1000,
     highlight: { mode: "outline", duration: 800 },
-    trimStart: "never",
+    trimStart: ["selector", 'textarea[aria-label="Summary"]'],
   });
   let initialHeight = 0;
   {
@@ -1434,6 +1447,7 @@ test("falls back to a normal fill when a textarea expands", async ({
         });
       </script>
     `);
+    await page.waitForTimeout(200);
     initialHeight = (await plugged.getByLabel("Summary").boundingBox())!.height;
 
     await plugged.videoMode.caption("Expanding textarea: use a normal fill", async () => {

@@ -233,7 +233,7 @@ videoMode({ trimStart: "never" });
 
 An explicit `setStartTime()` always wins over `trimStart`.
 
-`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
+`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. The final hold uses the last live page frame instead of extending recorder shutdown frames. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
 
 ```ts
 videoMode({
