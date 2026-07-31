@@ -12,6 +12,171 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
+test("renders a multi-navigation release flow without changing the live page", async ({
+  page,
+}, testInfo) => {
+  const urls = [
+    "https://dashboard.middlewright.test/runs",
+    "https://dashboard.middlewright.test/releases/2026.7",
+    "https://dashboard.middlewright.test/reports/128?browser=chromium",
+  ];
+  await page.route("https://dashboard.middlewright.test/**", async (route) => {
+    await route.fulfill({
+      body: releaseDemoPage(new URL(route.request().url()).pathname),
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 800 },
+    captions: "explicit",
+    finalHold: 800,
+    highlight: { mode: "pointer", duration: 500 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 960, height: 540 });
+
+    await plugged.goto(urls[0]);
+    await plugged.getByRole("textbox", { name: "Search releases" }).fill("2026.7");
+    await plugged.getByRole("button", { name: "Ready only" }).click();
+    await expect(plugged.getByText("Release 2026.8-beta")).toHaveCount(0);
+    await plugged.waitForTimeout(250);
+
+    await plugged.goto(urls[1]);
+    await plugged.getByRole("button", { name: "Chromium" }).click();
+    await expect(plugged.getByText("48 Chromium specs passed")).toBeVisible();
+    await plugged.waitForTimeout(250);
+
+    await plugged.goto(urls[2]);
+    await plugged.getByRole("button", { name: "Show slowest specs" }).click();
+    await expect(plugged.getByRole("table")).toBeVisible();
+    await plugged.waitForTimeout(400);
+    await expect(
+      plugged.locator("[data-middlewright-video-mode-address-bar]"),
+    ).toHaveCount(0);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  expect(metadata).toMatchObject({
+    addressBars: urls.map((url) => ({
+      end: expect.any(Number),
+      start: expect.any(Number),
+      url,
+    })),
+    outputs: {
+      raw: "video-raw.webm",
+      rendered: "video-rendered.webm",
+    },
+  });
+
+  const [rawFrames, renderedFrames] = await Promise.all([
+    videoFrames(paths.raw, 5),
+    videoFrames(paths.rendered, 5),
+  ]);
+  expect(rawFrames.filter(hasAddressBar).length).toBe(0);
+  expect(renderedFrames.filter(hasAddressBar).length).toBeGreaterThan(8);
+});
+
+test("renders navigation before clicking a control at the top edge", async ({
+  page,
+}, testInfo) => {
+  const url = "https://dashboard.middlewright.test/runs/128";
+  await page.route(url, async (route) => {
+    await route.fulfill({
+      body: topEdgeActionPage(),
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    captions: "explicit",
+    finalHold: 800,
+    highlight: { mode: "outline", duration: 900 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 960, height: 540 });
+
+    await plugged.goto(url);
+    await plugged.getByRole("button", { name: "Approve run" }).click();
+    await expect(plugged.getByRole("status")).toHaveText("Run approved");
+    await plugged.waitForTimeout(400);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const [topEdgeHighlight] = metadata.highlights;
+  expect(topEdgeHighlight).toMatchObject({
+    method: "click",
+    rect: {
+      y: expect.any(Number),
+    },
+  });
+  expect(topEdgeHighlight.rect.y + topEdgeHighlight.rect.height).toBeLessThan(65);
+
+  const [rawFrames, renderedFrames] = await Promise.all([
+    videoFrames(paths.raw, 10),
+    videoFrames(paths.rendered, 10),
+  ]);
+  const scale = Math.min(
+    renderedFrames[0].width / topEdgeHighlight.viewport.width,
+    renderedFrames[0].height / topEdgeHighlight.viewport.height,
+  );
+  const topEdgeBox = {
+    height: Math.round(topEdgeHighlight.rect.height * scale),
+    width: Math.round(topEdgeHighlight.rect.width * scale),
+    x: Math.round(topEdgeHighlight.rect.x * scale),
+    y: Math.round(topEdgeHighlight.rect.y * scale),
+  };
+  const addressBarFrames = renderedFrames.filter(hasAddressBar);
+  const highlightedFrames = renderedFrames.filter((frame) => hasYellow(frame, topEdgeBox));
+
+  expect(rawFrames.filter(hasAddressBar).length).toBe(0);
+  expect(addressBarFrames.length).toBeGreaterThan(8);
+  expect(highlightedFrames.length).toBeGreaterThan(5);
+  expect(
+    renderedFrames.filter(
+      (frame) => hasAddressBar(frame) && hasYellow(frame, topEdgeBox),
+    ).length,
+  ).toBe(0);
+});
+
+test("keeps a navigation caption visible throughout its address-bar hold", async ({
+  page,
+}, testInfo) => {
+  const url = "https://dashboard.middlewright.test/runs/128";
+  await page.route(url, async (route) => {
+    await route.fulfill({
+      body: '<main style="position: fixed; inset: 0; background: rgb(30, 40, 80)"></main>',
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+
+    await test.step("Open run 128", async () => {
+      await plugged.goto(url);
+    });
+  }
+
+  const paths = video.outputPaths();
+  const frames = await videoFrames(paths.rendered, 10);
+  const addressBarFrames = frames.filter(hasAddressBar);
+
+  expect(addressBarFrames.length).toBeGreaterThan(8);
+  expect(addressBarFrames.filter(hasWhiteCaption)).toHaveLength(addressBarFrames.length);
+});
+
 test("turns meaningful Playwright steps into readable video captions", async ({
   page,
 }, testInfo) => {
@@ -653,7 +818,7 @@ test("holds the pre-click state without flashing the completed action state firs
     y: Math.round(highlight.rect.y * expectedScale),
   };
   const yellowBox = yellowBoundingBox(pauseFrame);
-  const completedStateBeforeHold = (await videoFrames(renderedPath))
+  const completedStateBeforeHold = (await videoFrames(renderedPath, 25))
     .slice(0, Math.ceil(highlight.start / 40))
     .map((frame, index) => ({
       color: averagePixel(frame, centerOf(expectedBox)),
@@ -767,7 +932,7 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
   expect(panelCenter.blue).toBeGreaterThan(220);
   expect(pointerTailPixelCount(dialogFrame, buttonBox)).toBeGreaterThan(20);
 
-  const renderedFrames = await videoFrames(paths.rendered);
+  const renderedFrames = await videoFrames(paths.rendered, 25);
   const finalDarkFrameCount = [...renderedFrames]
     .reverse()
     .findIndex((frame) => {
@@ -826,7 +991,7 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
 
   const paths = video.outputPaths();
   await video.metadata();
-  const finalGreenFrameCount = [...(await videoFrames(paths.rendered))]
+  const finalGreenFrameCount = [...(await videoFrames(paths.rendered, 25))]
     .reverse()
     .findIndex((frame) => {
       const center = averagePixel(frame, {
@@ -1073,7 +1238,7 @@ test("reveals complete glyphs instead of slicing through the next character", as
   expect(fillHighlight).toBeDefined();
 
   const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
-  const frames = await videoFrames(paths.rendered);
+  const frames = await videoFrames(paths.rendered, 25);
   const finalFrame = frames.at(-1)!;
   const scale = Math.min(
     finalFrame.width / fillHighlight.viewport.width,
@@ -1151,7 +1316,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
   expect(fillHighlight).toBeDefined();
 
   const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
-  const frames = await videoFrames(paths.rendered);
+  const frames = await videoFrames(paths.rendered, 25);
   const fillFrames = frames.slice(
     Math.floor(fillStart / 40),
     Math.ceil((fillStart + highlightDurationMs) / 40),
@@ -1975,7 +2140,7 @@ test("does not linger on the unhighlighted post-wait state before a following hi
   expect(nextHighlight).toBeDefined();
 
   const renderedPath = paths.rendered;
-  const frames = await videoFrames(renderedPath);
+  const frames = await videoFrames(renderedPath, 25);
   const scale = Math.min(
     frames[0].width / nextHighlight.viewport.width,
     frames[0].height / nextHighlight.viewport.height,
@@ -2019,6 +2184,130 @@ type VideoFrame = {
   data: Buffer;
   height: number;
   width: number;
+};
+
+const releaseDemoPage = (path: string) => {
+  if (path === "/runs") {
+    return releaseDemoLayout(
+      "Recent runs",
+      `
+        <label>Search releases <input aria-label="Search releases" placeholder="Release name" /></label>
+        <button onclick="document.querySelector('[data-pending]').remove(); this.setAttribute('aria-pressed', 'true')">Ready only</button>
+        <section>
+          <article><b>Release 2026.7</b><span>Ready · 128 specs · 0 retries</span></article>
+          <article data-pending><b>Release 2026.8-beta</b><span>Running · 84 of 128 specs</span></article>
+        </section>
+      `,
+    );
+  }
+
+  if (path === "/releases/2026.7") {
+    return releaseDemoLayout(
+      "Everything is ready.",
+      `
+        <button onclick="this.setAttribute('aria-pressed', 'true'); document.querySelector('#browser').textContent = '48 Chromium specs passed'">Chromium</button>
+        <button>Firefox</button>
+        <button>WebKit</button>
+        <section>
+          <article><b id="browser">128 specs passed</b><span>Across all supported browsers</span></article>
+          <article><b>4m 12s</b><span>Total run time</span></article>
+          <article><b>0 retries</b><span>No flaky tests found</span></article>
+        </section>
+      `,
+    );
+  }
+
+  return releaseDemoLayout(
+    "48 specs passed",
+    `
+      <p>No retries, errors, or quarantined tests.</p>
+      <button onclick="document.querySelector('table').hidden = false; this.remove()">Show slowest specs</button>
+      <table hidden>
+        <thead><tr><th>Spec</th><th>Duration</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>checkout › applies annual discount</td><td>4.8s</td><td>Passed</td></tr>
+          <tr><td>reports › exports account summary</td><td>3.9s</td><td>Passed</td></tr>
+        </tbody>
+      </table>
+    `,
+  );
+};
+
+const releaseDemoLayout = (title: string, body: string) => `
+  <meta charset="utf-8" />
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: #f5f7fb; color: #182230; font: 16px Arial, sans-serif; }
+    nav { padding: 22px 40px; border-bottom: 1px solid #e3e8ef; background: white; font-weight: 700; }
+    main { max-width: 900px; margin: 0 auto; padding: 42px; }
+    h1 { margin: 0 0 24px; font-size: 38px; }
+    label { display: inline-grid; gap: 6px; margin-right: 10px; color: #4b5565; font-size: 13px; font-weight: 700; }
+    input, button { padding: 10px 14px; border: 1px solid #cdd5df; border-radius: 9px; background: white; font: inherit; }
+    button[aria-pressed="true"] { border-color: #3459db; background: #3459db; color: white; }
+    section { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 20px; }
+    article { display: grid; gap: 10px; min-height: 110px; padding: 22px; border: 1px solid #e3e8ef; border-radius: 14px; background: white; }
+    article span { color: #697586; }
+    table { width: 100%; margin-top: 18px; border-collapse: collapse; background: white; }
+    th, td { padding: 14px; border-bottom: 1px solid #e3e8ef; text-align: left; }
+  </style>
+  <nav>Middlewright · Release dashboard</nav>
+  <main><h1>${title}</h1>${body}</main>
+`;
+
+const topEdgeActionPage = () => `
+  <meta charset="utf-8" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f3f6fb; color: #172033; font: 16px Arial, sans-serif; }
+    header { height: 64px; padding: 9px 18px; border-bottom: 1px solid #d8deea; background: white; }
+    header b { display: inline-block; padding: 12px 0; }
+    button { float: right; padding: 10px 16px; border: 0; border-radius: 8px; background: #3157d5; color: white; font: inherit; font-weight: 700; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 36px; }
+    h1 { margin: 0 0 14px; font-size: 38px; }
+    p { color: #5d687c; }
+    article { margin-top: 28px; padding: 24px; border: 1px solid #d8deea; border-radius: 14px; background: white; }
+    [role="status"] { color: #16734a; font-weight: 700; }
+  </style>
+  <header>
+    <b>Middlewright · Run #128</b>
+    <button onclick="document.querySelector('[role=status]').textContent = 'Run approved'">Approve run</button>
+  </header>
+  <main>
+    <h1>Release checks passed</h1>
+    <p>All required browser and accessibility checks are green.</p>
+    <article>
+      <b>128 specs passed</b>
+      <p>No retries or quarantined tests.</p>
+      <span role="status">Waiting for approval</span>
+    </article>
+  </main>
+`;
+
+const hasAddressBar = (frame: VideoFrame) => {
+  const height = Math.min(70, frame.height);
+  const darkPixels = countPixels(
+    frame,
+    { height, width: frame.width, x: 0, y: 0 },
+    ({ blue, green, red }) => red > 30 && red < 125 && green > 30 && green < 125 && blue > 30 && blue < 125,
+  );
+
+  return darkPixels > frame.width * Math.min(40, height);
+};
+
+const hasWhiteCaption = (frame: VideoFrame) => {
+  const whitePixels = countPixels(
+    frame,
+    {
+      height: Math.round(frame.height * 0.3),
+      width: frame.width,
+      x: 0,
+      y: Math.round(frame.height * 0.7),
+    },
+    ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+  );
+
+  return whitePixels > 100;
 };
 
 type VideoSpan = {
@@ -2147,7 +2436,7 @@ const videoFrame = async (path: string, timestampMs: number): Promise<VideoFrame
   };
 };
 
-const videoFrames = async (path: string): Promise<VideoFrame[]> => {
+const videoFrames = async (path: string, framesPerSecond: number): Promise<VideoFrame[]> => {
   const info = await videoInfo(path);
   const { stdout } = await execFile(
     "ffmpeg",
@@ -2158,7 +2447,7 @@ const videoFrames = async (path: string): Promise<VideoFrame[]> => {
       "-i",
       path,
       "-vf",
-      "fps=25",
+      `fps=${framesPerSecond}`,
       "-f",
       "rawvideo",
       "-pix_fmt",

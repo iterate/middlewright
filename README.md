@@ -157,6 +157,7 @@ await using page = await addPlugins({
   testInfo,
   plugins: [
     videoMode({
+      addressBar: { holdMs: 1000 },
       highlight: { mode: "pointer", duration: 1000 },
       finalHold: 3000,
       deadAirThreshold: 300,
@@ -203,7 +204,9 @@ await page.videoMode.caption("Create an account", async () => {
 });
 ```
 
-Nested spans show the innermost caption, then resume their parent. When Playwright video recording is enabled, `videoMode` saves untouched `video-raw.webm`, uses `ffmpeg` to write captioned `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. Caption spans are recorded in `video-mode.json` and stay aligned through trimming and dead-air compression. The frame-stepper stores its active video and frame in the URL, so links like `video-mode.html?active=rendered&frame=28` reopen the same frame. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
+Nested spans show the innermost caption, then resume their parent. When Playwright video recording is enabled, `videoMode` saves untouched `video-raw.webm`, uses `ffmpeg` to write annotated `video-rendered.webm`, writes a sibling `video-mode.html` frame-stepper for inspecting both videos, and attaches all of them with `video-mode.json` to the test report. Caption and address-bar spans are recorded in `video-mode.json` and stay aligned through trimming, dead-air compression, and synthetic action holds. The frame-stepper stores its active video and frame in the URL, so links like `video-mode.html?active=rendered&frame=28` reopen the same frame. If `ffmpeg` or `ffprobe` is missing, the render step fails plainly so you know to install ffmpeg.
+
+Each successful `page.goto()` records the resolved destination in `addressBars` metadata. During post-rendering, ffmpeg adds a Chrome-style URL bar over a frozen destination frame; the default hold is 1000ms. The live page and `video-raw.webm` stay untouched, and navigation returns without waiting for the hold. Set `addressBar: { holdMs: 2000 }` to keep the rendered bar readable for longer, or `addressBar: false` to disable it.
 
 Highlighted non-empty `fill()` actions pause on the empty field, then reveal the completed text one whole glyph at a time during the rendered hold. The browser still runs one normal Playwright `fill()`; video mode captures the final field pixels and adds the typewriter-like effect in post, preserving backgrounds such as gradients. The surrounding frame stays at its pre-action state, and an opaque field background covers placeholder text before the value appears. Pointer highlights first move to the field and change to a text cursor; outline highlights use the same pre-reveal pause without a synthetic pointer.
 
