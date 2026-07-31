@@ -1928,19 +1928,24 @@ const projectVideoCaptions = (
   const projected = captions.flatMap((caption) => {
     return pieces.flatMap((piece) => {
       const overlap = clipVideoSpan(caption, piece);
+      const fillsSyntheticHold =
+        (piece.highlight !== undefined &&
+          caption.start <= piece.highlight.start &&
+          caption.end >= piece.highlight.start) ||
+        (piece.addressBar !== undefined &&
+          caption.start <= piece.addressBar.start &&
+          caption.end >= piece.addressBar.start);
 
-      if (!overlap || !Number.isFinite(piece.speed)) {
+      if ((!overlap && !fillsSyntheticHold) || !Number.isFinite(piece.speed)) {
         return [];
       }
 
-      const start = piece.outputStart + (overlap.start - piece.start) / piece.speed;
-      const mappedEnd = piece.outputStart + (overlap.end - piece.start) / piece.speed;
-      const end =
-        piece.highlight &&
-        caption.start <= piece.highlight.start &&
-        caption.end >= piece.highlight.start
-          ? piece.outputEnd
-          : mappedEnd;
+      const start = overlap
+        ? piece.outputStart + (overlap.start - piece.start) / piece.speed
+        : piece.outputStart;
+      const end = fillsSyntheticHold
+        ? piece.outputEnd
+        : piece.outputStart + (overlap!.end - piece.start) / piece.speed;
 
       return [
         {

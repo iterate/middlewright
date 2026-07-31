@@ -144,6 +144,39 @@ test("renders navigation before clicking a control at the top edge", async ({
   ).toBe(0);
 });
 
+test("keeps a navigation caption visible throughout its address-bar hold", async ({
+  page,
+}, testInfo) => {
+  const url = "https://dashboard.middlewright.test/runs/128";
+  await page.route(url, async (route) => {
+    await route.fulfill({
+      body: '<main style="position: fixed; inset: 0; background: rgb(30, 40, 80)"></main>',
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+
+    await test.step("Open run 128", async () => {
+      await plugged.goto(url);
+    });
+  }
+
+  const paths = video.outputPaths();
+  const frames = await videoFrames(paths.rendered, 10);
+  const addressBarFrames = frames.filter(hasAddressBar);
+
+  expect(addressBarFrames.length).toBeGreaterThan(8);
+  expect(addressBarFrames.filter(hasWhiteCaption)).toHaveLength(addressBarFrames.length);
+});
+
 test("turns meaningful Playwright steps into readable video captions", async ({
   page,
 }, testInfo) => {
@@ -1967,6 +2000,21 @@ const hasAddressBar = (frame: VideoFrame) => {
   );
 
   return darkPixels > frame.width * Math.min(40, height);
+};
+
+const hasWhiteCaption = (frame: VideoFrame) => {
+  const whitePixels = countPixels(
+    frame,
+    {
+      height: Math.round(frame.height * 0.3),
+      width: frame.width,
+      x: 0,
+      y: Math.round(frame.height * 0.7),
+    },
+    ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+  );
+
+  return whitePixels > 100;
 };
 
 type VideoSpan = {
