@@ -1014,8 +1014,11 @@ const showVideoModeAddressBar = (url: string) => {
   document.documentElement.append(host);
 };
 
-const removeVideoModeAddressBar = () => {
+const removeVideoModeAddressBar = async () => {
   document.querySelector("[data-middlewright-video-mode-address-bar]")?.remove();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
 };
 
 const videoModeDialogOverlaySnapshot = async (

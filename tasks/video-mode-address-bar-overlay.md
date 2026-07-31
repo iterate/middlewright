@@ -5,7 +5,7 @@ size: medium
 
 ## Status
 
-About 10% complete. The intended behavior and API are specified; implementation and tests remain.
+About 90% complete. The overlay, option, cleanup, docs, and regression spec are done; only the PR demo upload and final handoff remain.
 
 ## Goal
 
@@ -23,13 +23,15 @@ Make `videoMode` recordings show where `page.goto()` navigates. During navigatio
 
 ## Checklist
 
-- [ ] Add a public-behavior spec that navigates with a plugged page and observes the address bar during and after `goto()`.
-- [ ] Add a `videoMode` option for the default overlay, opt-out, and hold duration.
-- [ ] Render a fixed, Chrome-style top overlay with the destination URL without shifting page content.
-- [ ] Remove the overlay after navigation plus the configured hold, including when navigation throws.
-- [ ] Document the option and behavior.
-- [ ] Run focused and full verification.
+- [x] Add a public-behavior spec that navigates with a plugged page and observes the address bar during and after `goto()`. *`spec/video-mode.spec.ts` drives a routed navigation through the plugged page and observes the accessible status overlay.*
+- [x] Add a `videoMode` option for the default overlay, opt-out, and hold duration. *`addressBar` defaults to a 1000ms hold, accepts an explicit `holdMs`, and supports `false`.*
+- [x] Render a fixed, Chrome-style top overlay with the destination URL without shifting page content. *`video-mode.ts` mounts an isolated dark browser strip and rounded URL pill in a shadow root.*
+- [x] Remove the overlay after navigation plus the configured hold, including when navigation throws. *The overlay is added only after successful navigation, removed in a `finally`, and waits through two paint frames so the recorder sees the clean state.*
+- [x] Document the option and behavior. *The README configuration example and video-mode guide cover the default, custom hold, and opt-out.*
+- [x] Run focused and full verification. *`pnpm typecheck`, `pnpm build`, and all 79 Playwright specs pass (76 passed, 3 skipped).*
 
 ## Implementation log
 
 - 2026-07-31: Created the worktree task from the user request and reference screenshot. Chose a `videoMode`-owned overlay to preserve plugin boundaries.
+- 2026-07-31: Added the failing public-behavior spec, then implemented and documented the default overlay.
+- 2026-07-31: Generated a 960×540 demo recording and inspected frames with the overlay visible and removed.
