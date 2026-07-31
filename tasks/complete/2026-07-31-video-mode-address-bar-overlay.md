@@ -5,7 +5,7 @@ size: medium
 
 ## Status
 
-Complete. Navigation metadata drives synthetic ffmpeg holds without touching or slowing the live page. The full suite is green, and the PR demo is the rendered artifact from the checked-in multi-navigation regression.
+Complete. Navigation metadata drives synthetic ffmpeg holds without touching or slowing the live page. Checked-in video regressions now cover both a multi-navigation flow and a click in the top edge hidden by the transient bar.
 
 ## Goal
 
@@ -30,9 +30,10 @@ Make rendered `videoMode` recordings show where `page.goto()` navigates. Record 
 - [x] Burn timed Chrome-style address bars into `video-rendered.webm` with ffmpeg while leaving `video-raw.webm` untouched. *Synthetic destination-frame pieces and ASS annotations are composed only in the ffmpeg filter graph.*
 - [x] Keep navigation overlays aligned through existing timeline transforms. *Address-bar pieces share the same rendered-piece projection as captions and highlights.*
 - [x] Replace the ignored demo with a checked-in multi-navigation integration test containing visible interactions between navigations. *The release-flow test filters runs, selects Chromium, and reveals report details across three URLs.*
+- [x] Show how a top-edge click behaves when the address bar covers its target. *The regression proves the bar hold and click highlight do not overlap, while its rendered artifact exposes the target being hidden before the click.*
 - [x] Document the post-render behavior, metadata, and option. *README now distinguishes metadata, raw video, post-rendered holds, and live navigation behavior.*
-- [x] Run focused and full verification. *All 38 focused video specs pass serially; the full suite passes 76 tests with 3 provider-gated skips; typecheck, build, and publint pass.*
-- [x] Upload the checked-in integration test's rendered artifact as the PR demo. *The 5.6-second 960×540 release flow is the PR's sole inline video.*
+- [x] Run focused and full verification. *All 39 focused video specs pass serially; the full suite passes 77 tests with 3 provider-gated skips; typecheck, build, and publint pass.*
+- [x] Upload checked-in integration-test artifacts for PR review. *The 5.6-second release flow is the main demo; a 3.24-second top-edge clip exposes the overlay tradeoff.*
 
 ## Implementation log
 
@@ -45,3 +46,4 @@ Make rendered `videoMode` recordings show where `page.goto()` navigates. Record 
 - 2026-07-31: Replaced page injection with resolved-URL metadata and synthetic destination-frame pieces annotated by ffmpeg ASS rendering.
 - 2026-07-31: The checked-in release-flow regression passed three consecutive renders; all 38 focused video specs then passed serially.
 - 2026-07-31: Full validation passed with 76 tests and 3 provider-gated skips. Uploaded the checked-in test's rendered artifact and removed the ignored demo spec.
+- 2026-07-31: Added a top-edge click regression. The bar and click highlight remain sequenced, but visual review confirms the transient bar hides useful page chrome before the target appears; reserving stable browser chrome outside the page viewport is the suggested follow-up.

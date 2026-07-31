@@ -79,6 +79,71 @@ test("renders a multi-navigation release flow without changing the live page", a
   expect(renderedFrames.filter(hasAddressBar).length).toBeGreaterThan(8);
 });
 
+test("renders navigation before clicking a control at the top edge", async ({
+  page,
+}, testInfo) => {
+  const url = "https://dashboard.middlewright.test/runs/128";
+  await page.route(url, async (route) => {
+    await route.fulfill({
+      body: topEdgeActionPage(),
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    captions: "explicit",
+    finalHold: 800,
+    highlight: { mode: "outline", duration: 900 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 960, height: 540 });
+
+    await plugged.goto(url);
+    await plugged.getByRole("button", { name: "Approve run" }).click();
+    await expect(plugged.getByRole("status")).toHaveText("Run approved");
+    await plugged.waitForTimeout(400);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const [topEdgeHighlight] = metadata.highlights;
+  expect(topEdgeHighlight).toMatchObject({
+    method: "click",
+    rect: {
+      y: expect.any(Number),
+    },
+  });
+  expect(topEdgeHighlight.rect.y + topEdgeHighlight.rect.height).toBeLessThan(65);
+
+  const [rawFrames, renderedFrames] = await Promise.all([
+    videoFrames(paths.raw, 10),
+    videoFrames(paths.rendered, 10),
+  ]);
+  const scale = Math.min(
+    renderedFrames[0].width / topEdgeHighlight.viewport.width,
+    renderedFrames[0].height / topEdgeHighlight.viewport.height,
+  );
+  const topEdgeBox = {
+    height: Math.round(topEdgeHighlight.rect.height * scale),
+    width: Math.round(topEdgeHighlight.rect.width * scale),
+    x: Math.round(topEdgeHighlight.rect.x * scale),
+    y: Math.round(topEdgeHighlight.rect.y * scale),
+  };
+  const addressBarFrames = renderedFrames.filter(hasAddressBar);
+  const highlightedFrames = renderedFrames.filter((frame) => hasYellow(frame, topEdgeBox));
+
+  expect(rawFrames.filter(hasAddressBar).length).toBe(0);
+  expect(addressBarFrames.length).toBeGreaterThan(8);
+  expect(highlightedFrames.length).toBeGreaterThan(5);
+  expect(
+    renderedFrames.filter(
+      (frame) => hasAddressBar(frame) && hasYellow(frame, topEdgeBox),
+    ).length,
+  ).toBe(0);
+});
+
 test("turns meaningful Playwright steps into readable video captions", async ({
   page,
 }, testInfo) => {
@@ -1332,6 +1397,35 @@ const releaseDemoLayout = (title: string, body: string) => `
   </style>
   <nav>Middlewright · Release dashboard</nav>
   <main><h1>${title}</h1>${body}</main>
+`;
+
+const topEdgeActionPage = () => `
+  <meta charset="utf-8" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f3f6fb; color: #172033; font: 16px Arial, sans-serif; }
+    header { height: 64px; padding: 9px 18px; border-bottom: 1px solid #d8deea; background: white; }
+    header b { display: inline-block; padding: 12px 0; }
+    button { float: right; padding: 10px 16px; border: 0; border-radius: 8px; background: #3157d5; color: white; font: inherit; font-weight: 700; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 36px; }
+    h1 { margin: 0 0 14px; font-size: 38px; }
+    p { color: #5d687c; }
+    article { margin-top: 28px; padding: 24px; border: 1px solid #d8deea; border-radius: 14px; background: white; }
+    [role="status"] { color: #16734a; font-weight: 700; }
+  </style>
+  <header>
+    <b>Middlewright · Run #128</b>
+    <button onclick="document.querySelector('[role=status]').textContent = 'Run approved'">Approve run</button>
+  </header>
+  <main>
+    <h1>Release checks passed</h1>
+    <p>All required browser and accessibility checks are green.</p>
+    <article>
+      <b>128 specs passed</b>
+      <p>No retries or quarantined tests.</p>
+      <span role="status">Waiting for approval</span>
+    </article>
+  </main>
 `;
 
 const hasAddressBar = (frame: VideoFrame) => {
