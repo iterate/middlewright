@@ -1363,7 +1363,7 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
   expect(darkTextPixels[2]).toBeGreaterThan(300);
 });
 
-test("reveals the final visible portion of a scrolling textarea", async ({
+test("reveals a scrolling textarea one visible line at a time", async ({
   page,
 }, testInfo) => {
   const video = videoMode({
@@ -1386,7 +1386,7 @@ test("reveals the final visible portion of a scrolling textarea", async ({
       <textarea
         aria-label="Log"
         placeholder="Add log entries"
-        style="position: absolute; box-sizing: border-box; left: 220px; top: 120px; width: 360px; height: 150px; padding: 14px; resize: none; background: white; color: black; font: 30px monospace"
+        style="position: absolute; box-sizing: border-box; left: 220px; top: 120px; width: 360px; height: 136px; border: 0; padding: 14px; resize: none; background: white; color: black; font: 30px/36px monospace"
       ></textarea>
     `);
     await plugged.getByLabel("Log").waitFor();
@@ -1418,7 +1418,7 @@ test("reveals the final visible portion of a scrolling textarea", async ({
   );
   const frames = await videoFramesAt(
     video.outputPaths().rendered,
-    [fillStart + 100, fillStart + 400, fillStart + 700],
+    [fillStart + 120, fillStart + 400, fillStart + 700],
   );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
@@ -1442,6 +1442,28 @@ test("reveals the final visible portion of a scrolling textarea", async ({
   expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
   expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
   expect(darkTextPixels[2]).toBeGreaterThan(200);
+  const contentBox = {
+    height: Math.round((fillHighlight.rect.height - 28) * scale),
+    width: Math.round((fillHighlight.rect.width - 28) * scale),
+    x: Math.round((fillHighlight.rect.x + 14) * scale),
+    y: Math.round((fillHighlight.rect.y + 14) * scale),
+  };
+  const firstLineDarkPixels = countPixels(
+    frames[0],
+    { ...contentBox, height: Math.round(36 * scale) },
+    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+  );
+  const laterLinesDarkPixels = countPixels(
+    frames[0],
+    {
+      ...contentBox,
+      height: contentBox.height - Math.round(36 * scale),
+      y: contentBox.y + Math.round(36 * scale),
+    },
+    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+  );
+  expect(firstLineDarkPixels).toBeGreaterThan(50);
+  expect(laterLinesDarkPixels).toBeLessThan(10);
   expect(
     countPixels(
       frames[0],
@@ -1550,7 +1572,7 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
   ).toBeLessThan(10);
 });
 
-test("reveals an expanding textarea at its final geometry", async ({
+test("reveals an expanding textarea one line at a time at its final geometry", async ({
   page,
 }, testInfo) => {
   const video = videoMode({
@@ -1635,6 +1657,30 @@ test("reveals an expanding textarea at its final geometry", async ({
   expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
   expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
   expect(darkTextPixels[2]).toBeGreaterThan(200);
+  const contentRect = fillHighlight.fillReveal!.contentRect;
+  const contentBox = {
+    height: Math.round(contentRect.height * scale),
+    width: Math.round(contentRect.width * scale),
+    x: Math.round(contentRect.x * scale),
+    y: Math.round(contentRect.y * scale),
+  };
+  const firstLineHeight = Math.round(36 * scale);
+  const firstLineDarkPixels = countPixels(
+    frames[0],
+    { ...contentBox, height: firstLineHeight },
+    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+  );
+  const laterLinesDarkPixels = countPixels(
+    frames[0],
+    {
+      ...contentBox,
+      height: contentBox.height - firstLineHeight,
+      y: contentBox.y + firstLineHeight,
+    },
+    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+  );
+  expect(firstLineDarkPixels).toBeGreaterThan(50);
+  expect(laterLinesDarkPixels).toBeLessThan(10);
   expect(
     countPixels(
       frames[0],

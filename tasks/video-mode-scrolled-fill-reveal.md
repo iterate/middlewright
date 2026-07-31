@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. Scrolled and resized fields now reveal their final visible pixels over an assumed opaque background; all focused placeholder fixtures, rendered videos, full validation, and PR handoff are done.
+About 75% through the review follow-up. Scrolling and expanding textareas now reveal line-height-aligned raster bands in order, with rendered-frame regressions green. Stress/full validation and replacement PR videos remain.
 
 ## Goal
 
@@ -43,6 +43,9 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - [x] Stress the affected frame-level specs and run the full validation suite. *Focused scenarios pass 40/40; full suite passes 83 tests with 3 provider-gated skips; typecheck, build, and `publint` pass.*
 - [x] Generate, inspect, and upload current videos for every focused scenario. *The PR body has four inline GitHub players covering a placeholder, vertical scrolling, horizontal scrolling, and textarea expansion.*
 - [x] Update the PR body, resolve review feedback, and move this task to `tasks/complete/`. *PR #12 documents the fallback, limits, videos, and green validation; no review feedback is outstanding.*
+- [x] Add a rendered-video regression proving a later textarea line stays covered while the first visible line reveals. *The old column wipe exposed 1,005 dark pixels in later rows at the early sample; the regression now requires fewer than 10.*
+- [x] Reveal multiline final pixels one line-height band at a time while retaining the single-band input behavior. *Reveal metadata records visible bands aligned to the field's used line height and scroll offset; the renderer completes each band before advancing.*
+- [ ] Regenerate and inspect the affected videos, update PR #12, and return this task to `tasks/complete/` after green CI.
 
 ## Implementation log
 
@@ -51,3 +54,5 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: A combined run exposed inaccurate keyframe seeking in the new pixel assertions. They now sample the fully decoded 25fps stream; all 24 FFmpeg specs pass.
 - 2026-07-31: Inspected contact sheets for placeholder, scrolling textarea, horizontal input, and expanding textarea clips. The placeholder caption now spans both the click hold and reveal so it stays accurate under concurrent timing.
 - 2026-07-31: Uploaded all four clips as inline GitHub video players, updated PR #12, and confirmed its test and release checks are green before completing the task.
+- 2026-07-31: Review found the best-effort fallback visually read as a paragraph-wide column wipe. Reopened the task to use line-aligned raster bands without per-letter DOM measurement.
+- 2026-07-31: Completed the line-band RED→GREEN slice. Explicit and browser-default line heights work, all 24 FFmpeg specs pass, and contact sheets show ordered lines for scrolling and expanding textareas.

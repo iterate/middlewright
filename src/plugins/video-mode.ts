@@ -105,6 +105,7 @@ export type VideoModeFillReveal = {
   };
   contentRect: VideoModeRect;
   image: string;
+  revealBands: { height: number; y: number }[];
   revealStops: number[];
 };
 
@@ -1346,12 +1347,55 @@ const recordFillReveal = async (options: {
           return { ...geometry, kind: "fallback" as const };
         }
         const stopCount = Math.max(4, Math.min(12, Math.ceil(contentRect.width / 64)));
+        const revealBands = (() => {
+          if (!isTextarea) {
+            return [{ height: contentRect.height, y: 0 }];
+          }
+
+          let lineHeight = pixels(style.lineHeight);
+          if (lineHeight <= 0) {
+            const probe = document.createElement("span");
+            Object.assign(probe.style, {
+              display: "inline-block",
+              font: style.font,
+              lineHeight: style.lineHeight,
+              pointerEvents: "none",
+              position: "fixed",
+              visibility: "hidden",
+              whiteSpace: "pre",
+            });
+            probe.textContent = "M";
+            (document.body || document.documentElement).append(probe);
+            const oneLineHeight = probe.getBoundingClientRect().height;
+            probe.textContent = "M\nM";
+            lineHeight = probe.getBoundingClientRect().height - oneLineHeight;
+            probe.remove();
+          }
+          if (lineHeight <= 0) {
+            return [{ height: contentRect.height, y: 0 }];
+          }
+
+          const bands: { height: number; y: number }[] = [];
+          for (
+            let y = -(element.scrollTop % lineHeight);
+            y < contentRect.height;
+            y += lineHeight
+          ) {
+            const top = Math.max(0, y);
+            const bottom = Math.min(contentRect.height, y + lineHeight);
+            if (bottom > top) {
+              bands.push({ height: bottom - top, y: top });
+            }
+          }
+          return bands;
+        })();
         return {
           ...geometry,
           contentRect,
           cover: { color: backgroundColor, rect: geometry.rect },
           kind: "reveal" as const,
           replaceGeometry: true,
+          revealBands,
           revealStops: Array.from({ length: stopCount }, (_, index) =>
             Math.ceil((contentRect.width * (index + 1)) / stopCount),
           ),
@@ -1388,6 +1432,7 @@ const recordFillReveal = async (options: {
           : undefined,
         kind: "reveal" as const,
         replaceGeometry: false,
+        revealBands: [{ height: contentRect.height, y: 0 }],
         revealStops,
       };
     }, {
@@ -1420,6 +1465,7 @@ const recordFillReveal = async (options: {
       contentRect: snapshot.contentRect,
       cover: snapshot.cover,
       image,
+      revealBands: snapshot.revealBands,
       revealStops: snapshot.revealStops,
     };
   } catch {
@@ -2263,6 +2309,14 @@ const renderedVideoFilter = (options: {
       const revealStops = fillReveal.revealStops
         .map((stop) => Math.max(1, Math.min(contentRect.width, Math.round(stop * scale))))
         .filter((stop, stopIndex, stops) => stopIndex === 0 || stop !== stops[stopIndex - 1]);
+      const revealSteps = fillReveal.revealBands.flatMap((band) => {
+        const y = Math.max(0, Math.min(contentRect.height - 1, Math.round(band.y * scale)));
+        const height = Math.max(
+          1,
+          Math.min(contentRect.height - y, Math.round(band.height * scale)),
+        );
+        return revealStops.map((width) => ({ height, width, y }));
+      });
       const target = plan.targets.find(
         (candidate) => candidate.highlight === piece.highlight,
       );
@@ -2279,7 +2333,7 @@ const renderedVideoFilter = (options: {
           : 0;
       const revealStart = Math.max(0, Math.min(revealEnd, pointerRevealStart));
       const baseLabel = `fillbase${index}`;
-      const splitLabels = revealStops.map((_, stopIndex) => `fillpost${index}x${stopIndex}`);
+      const splitLabels = revealSteps.map((_, stepIndex) => `fillpost${index}x${stepIndex}`);
 
       filters.push(
         [
@@ -2301,30 +2355,31 @@ const renderedVideoFilter = (options: {
           `crop=w=${contentRect.width}:h=${contentRect.height}:x=${contentRect.x}:y=${contentRect.y}`,
           `trim=start=0:end=${durationSeconds}`,
           "setpts=PTS-STARTPTS",
-          `split=${revealStops.length}${splitLabels.map((splitLabel) => `[${splitLabel}]`).join("")}`,
+          `split=${revealSteps.length}${splitLabels.map((splitLabel) => `[${splitLabel}]`).join("")}`,
         ].join(","),
       );
 
       let composedLabel = baseLabel;
-      for (let stopIndex = 0; stopIndex < revealStops.length; stopIndex += 1) {
-        const cropLabel = `fillcrop${index}x${stopIndex}`;
-        const nextLabel = `fillcomposed${index}x${stopIndex}`;
+      for (let stepIndex = 0; stepIndex < revealSteps.length; stepIndex += 1) {
+        const step = revealSteps[stepIndex];
+        const cropLabel = `fillcrop${index}x${stepIndex}`;
+        const nextLabel = `fillcomposed${index}x${stepIndex}`;
         const showAt =
           revealStart +
-          ((revealEnd - revealStart) * (stopIndex + 1)) /
-            (revealStops.length + 1);
+          ((revealEnd - revealStart) * (stepIndex + 1)) /
+            (revealSteps.length + 1);
         filters.push(
           `${[
-            `[${splitLabels[stopIndex]}]crop=w=${revealStops[stopIndex]}`,
-            `h=${contentRect.height}`,
+            `[${splitLabels[stepIndex]}]crop=w=${step.width}`,
+            `h=${step.height}`,
             "x=0",
-            "y=0",
+            `y=${step.y}`,
           ].join(":")}[${cropLabel}]`,
         );
         filters.push(
           [
             `[${composedLabel}][${cropLabel}]overlay=x=${contentRect.x}`,
-            `y=${contentRect.y}`,
+            `y=${contentRect.y + step.y}`,
             `enable='gte(t\\,${formatSeconds(showAt)})'`,
             `shortest=1[${nextLabel}]`,
           ].join(":"),
