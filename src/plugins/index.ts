@@ -4,6 +4,7 @@ export {
   videoMode,
   type VideoModeCaption,
   type VideoModeControls,
+  type VideoModeFillReveal,
   type VideoModeHighlight,
   type VideoModeMetadata,
   type VideoModeOptions,
