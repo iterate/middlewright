@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Nearly done. Native-frame regressions now reject both boundary leaks, and raw gaps stabilize both the prior fill's final pixels and the next fill's pre-action pixels. The two affected cases pass 100/100 mixed stress plus the full suite; replacement media and remote CI remain.
+Done. Native-frame regressions reject both boundary leaks, raw gaps stabilize the prior fill's final pixels and the next fill's pre-action pixels, and PR #12 has clean replacement videos. The two affected cases pass 100/100 mixed stress plus the full suite.
 
 ## Goal
 
@@ -51,7 +51,7 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - [x] Replace affected PR videos again, validate, and complete the task after CI. *All four clips now show the full 800ms pause, a slower 800ms reveal, and a final hold; PR #12 has four inline players and both checks pass.*
 - [x] Reject pre-fill pixels after any revealed text has appeared. *The stable textarea spec decodes every frame after the first revealed glyph and reports any returning placeholder frame; the old clip fails at frame 81.*
 - [x] Reject completed target pixels before the synthetic fill hold begins. *The expanding spec scans every frame before the first small outline and reports completed-looking target pixels; the old clip fails at frames 2–3.*
-- [ ] Regenerate and inspect every native frame of the affected clips, replace PR media, and complete after CI.
+- [x] Regenerate and inspect every native frame of the affected clips, replace PR media, and complete after CI. *Native 25fps scans find no returning placeholder in 01 and no completed text before the empty hold in 04; both inline PR players were replaced.*
 
 ## Implementation log
 
@@ -71,3 +71,4 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: The placeholder came from the first stale raw frame after the synthetic reveal, so fill `actionEnd` now lands after its post-action screenshot. The expanding flash came from recorder-late pixels below the original field height; pre-action composition now covers the final footprint before restoring the initial field rectangle.
 - 2026-07-31: Both source WebMs are clean under native 25fps scans. The full 24-test FFmpeg suite passes, and the rare expanding case improved from 1/50 failing to 50/50 passing.
 - 2026-07-31: A mixed stress run exposed one remaining recorder-late placeholder frame after reveal. Raw gaps now compose both sides symmetrically: prior post-fill pixels first, then next pre-fill pixels. The cases pass 100/100; the full suite passes 83 tests with 3 provider-gated skips, plus typecheck, build, and `publint`.
+- 2026-07-31: Regenerated 01 and 04, decoded their full 25fps streams, reviewed contact sheets, replaced only those two inline players, and verified GitHub renders all four videos.
