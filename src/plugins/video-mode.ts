@@ -105,6 +105,7 @@ export type VideoModeFillReveal = {
   };
   contentRect: VideoModeRect;
   image: string;
+  initialRect: VideoModeRect;
   revealBands: { height: number; y: number }[];
   revealStops: number[];
 };
@@ -1258,6 +1259,7 @@ const recordFillReveal = async (options: {
   state: VideoModeState;
   testInfo: TestInfo;
 }) => {
+  const initialRect = { ...options.highlight.rect };
   try {
     const snapshot = await options.locator.evaluate((element, captureOptions) => {
       if (
@@ -1465,6 +1467,7 @@ const recordFillReveal = async (options: {
       contentRect: snapshot.contentRect,
       cover: snapshot.cover,
       image,
+      initialRect,
       revealBands: snapshot.revealBands,
       revealStops: snapshot.revealStops,
     };
@@ -1871,17 +1874,24 @@ const scaledViewportSize = (
   };
 };
 
-const drawboxFilter = (highlight: VideoModeHighlight, video: { width: number; height: number }) => {
-  const rect = scaleHighlight(highlight, video);
+const drawboxFilterForRect = (
+  highlight: VideoModeHighlight,
+  rect: VideoModeRect,
+  video: { width: number; height: number },
+) => {
+  const scaledRect = scaleVideoModeRect(rect, highlight.viewport, video);
   return [
-    `drawbox=x=${rect.x}`,
-    `y=${rect.y}`,
-    `w=${rect.width}`,
-    `h=${rect.height}`,
+    `drawbox=x=${scaledRect.x}`,
+    `y=${scaledRect.y}`,
+    `w=${scaledRect.width}`,
+    `h=${scaledRect.height}`,
     `color=${highlight.color}`,
     `t=${Math.max(1, Math.round(highlight.thickness))}`,
   ].join(":");
 };
+
+const drawboxFilter = (highlight: VideoModeHighlight, video: { width: number; height: number }) =>
+  drawboxFilterForRect(highlight, highlight.rect, video);
 
 const renderedPieceDuration = (piece: VideoPiece) => {
   const sourceDuration = (piece.end - piece.start) / piece.speed;
@@ -1954,7 +1964,9 @@ const highlightCursorPoint = (
   highlight: VideoModeHighlight,
   video: { width: number; height: number },
 ) => {
-  const rect = scaleHighlight(highlight, video);
+  const rect = highlight.fillReveal
+    ? scaleVideoModeRect(highlight.fillReveal.initialRect, highlight.viewport, video)
+    : scaleHighlight(highlight, video);
 
   return {
     x: Math.max(0, Math.min(video.width - 1, rect.x + rect.width / 2)),
@@ -2302,6 +2314,17 @@ const renderedVideoFilter = (options: {
       const coverRect = fillReveal.cover
         ? scaleVideoModeRect(fillReveal.cover.rect, piece.highlight.viewport, options.video)
         : undefined;
+      const initialRect = scaleVideoModeRect(
+        fillReveal.initialRect,
+        piece.highlight.viewport,
+        options.video,
+      );
+      const finalRect = scaleHighlight(piece.highlight, options.video);
+      const geometryChanged =
+        initialRect.height !== finalRect.height ||
+        initialRect.width !== finalRect.width ||
+        initialRect.x !== finalRect.x ||
+        initialRect.y !== finalRect.y;
       const scale = Math.min(
         options.video.width / piece.highlight.viewport.width,
         options.video.height / piece.highlight.viewport.height,
@@ -2327,11 +2350,15 @@ const renderedVideoFilter = (options: {
       const pointerArrival = target
         ? Math.max(0, target.arriveAt - renderedPiece.outputStart)
         : 0;
-      const pointerRevealStart =
-        options.highlightMode === "pointer"
-          ? pointerArrival + Math.max(0, revealEnd - pointerArrival) / 2
-          : 0;
-      const revealStart = Math.max(0, Math.min(revealEnd, pointerRevealStart));
+      const availableAfterArrival = Math.max(0, revealEnd - pointerArrival);
+      const preRevealHold = Math.min(
+        TEXT_CURSOR_HOLD_IDEAL_MS,
+        availableAfterArrival / 2,
+      );
+      const revealStart = Math.max(
+        0,
+        Math.min(revealEnd, pointerArrival + preRevealHold),
+      );
       const baseLabel = `fillbase${index}`;
       const splitLabels = revealSteps.map((_, stepIndex) => `fillpost${index}x${stepIndex}`);
 
@@ -2339,8 +2366,11 @@ const renderedVideoFilter = (options: {
         [
           `[${preFillInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
           `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          geometryChanged && fillReveal.cover
+            ? `drawbox=x=${initialRect.x}:y=${initialRect.y}:w=${initialRect.width}:h=${initialRect.height}:color=${fillReveal.cover.color}:t=fill`
+            : undefined,
           coverRect && fillReveal.cover
-            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${fillReveal.cover.color}:t=fill`
+            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${fillReveal.cover.color}:t=fill${geometryChanged ? `:enable='gte(t\\,${formatSeconds(revealStart)})'` : ""}`
             : undefined,
           `trim=start=0:end=${durationSeconds}`,
           `setpts=PTS-STARTPTS[${baseLabel}]`,
@@ -2387,11 +2417,20 @@ const renderedVideoFilter = (options: {
         composedLabel = nextLabel;
       }
 
-      filters.push(
-        options.highlightMode === "outline"
-          ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`
-          : `[${composedLabel}]null[${label}]`,
-      );
+      if (options.highlightMode === "outline" && geometryChanged) {
+        filters.push(
+          [
+            `[${composedLabel}]${drawboxFilterForRect(piece.highlight, fillReveal.initialRect, options.video)}:enable='lt(t\\,${formatSeconds(revealStart)})'`,
+            `${drawboxFilter(piece.highlight, options.video)}:enable='gte(t\\,${formatSeconds(revealStart)})'[${label}]`,
+          ].join(","),
+        );
+      } else {
+        filters.push(
+          options.highlightMode === "outline"
+            ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`
+            : `[${composedLabel}]null[${label}]`,
+        );
+      }
       continue;
     }
 

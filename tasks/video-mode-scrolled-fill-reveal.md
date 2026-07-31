@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. Scrolling and expanding textareas reveal line-height-aligned raster bands in order; the rendered-frame regressions, stress/full validation, and replacement PR videos are all green.
+Nearly done. Every fill reveal now pauses before text appears, and expanding textareas stay at their initial size until that pause ends. Local rendered-frame and 10× stress checks pass; replacement PR videos and remote CI remain.
 
 ## Goal
 
@@ -46,6 +46,9 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - [x] Add a rendered-video regression proving a later textarea line stays covered while the first visible line reveals. *The old column wipe exposed 1,005 dark pixels in later rows at the early sample; the regression now requires fewer than 10.*
 - [x] Reveal multiline final pixels one line-height band at a time while retaining the single-band input behavior. *Reveal metadata records visible bands aligned to the field's used line height and scroll offset; the renderer completes each band before advancing.*
 - [x] Regenerate and inspect the affected videos, update PR #12, and return this task to `tasks/complete/` after green CI. *The scrolling and expanding clips were replaced with line-by-line videos; 20/20 stress iterations, 83-test suite, build, typecheck, `publint`, and current PR checks pass.*
+- [x] Add rendered-frame regressions for a text-free pre-reveal pause in outline mode and initial textarea geometry during that pause. *The FFmpeg specs find a placeholder-free, text-free outlined frame and prove an expanding field's early outline is less than 75% of its final height.*
+- [x] Share the reveal pause budget across pointer and outline modes, and switch resized fields to final geometry only when reveal starts. *Both modes now spend up to the 800ms text-cursor pause budget before reveal; changed fields keep their pre-fill cover and outline until that boundary.*
+- [ ] Replace affected PR videos again, validate, and complete the task after CI.
 
 ## Implementation log
 
@@ -57,3 +60,5 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: Review found the best-effort fallback visually read as a paragraph-wide column wipe. Reopened the task to use line-aligned raster bands without per-letter DOM measurement.
 - 2026-07-31: Completed the line-band RED→GREEN slice. Explicit and browser-default line heights work, all 24 FFmpeg specs pass, and contact sheets show ordered lines for scrolling and expanding textareas.
 - 2026-07-31: Replaced the two affected inline PR videos, confirmed all four players render, and completed the review follow-up after green local and remote checks.
+- 2026-07-31: Review caught two related timeline gaps: outline mode bypassed the pre-reveal pause, and resized fields drew their final cover/outline from the first hold frame. Reopened for a timing/geometry regression slice.
+- 2026-07-31: Added rendered RED regressions, shared the pause calculation across highlight modes, and retained initial fill geometry until reveal. All 24 FFmpeg specs and 50/50 focused stress runs pass.

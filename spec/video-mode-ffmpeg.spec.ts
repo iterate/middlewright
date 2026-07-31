@@ -1005,7 +1005,7 @@ test("reveals filled text in post without changing the runtime fill", async ({
 
   const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
   const [earlyFrame, middleFrame, lateFrame] = await Promise.all(
-    [100, 500, 900].map((offset) => videoFrame(paths.rendered, fillStart + offset)),
+    [200, 700, 950].map((offset) => videoFrame(paths.rendered, fillStart + offset)),
   );
   const scale = Math.min(
     lateFrame.width / fillHighlight.viewport.width,
@@ -1026,6 +1026,7 @@ test("reveals filled text in post without changing the runtime fill", async ({
     ),
   );
 
+  expect(darkTextPixels[0]).toBeLessThan(10);
   expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
   expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
   expect(darkTextPixels[2]).toBeGreaterThan(300);
@@ -1326,11 +1327,9 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
     clickHighlight,
     metadata.highlights,
   );
-  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
-  const [placeholderFrame, earlyFrame, middleFrame, lateFrame] = await videoFramesAt(
-    paths.rendered,
-    [placeholderStart + 500, fillStart + 100, fillStart + 500, fillStart + 900],
-  );
+  const renderedFrames = await videoFrames(paths.rendered);
+  const [placeholderFrame] = await videoFramesAt(paths.rendered, [placeholderStart + 500]);
+  const lateFrame = renderedFrames.at(-1)!;
   const scale = Math.min(
     lateFrame.width / fillHighlight.viewport.width,
     lateFrame.height / fillHighlight.viewport.height,
@@ -1341,26 +1340,39 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
     x: Math.round((fillHighlight.rect.x + 20) * scale),
     y: Math.round((fillHighlight.rect.y + 18) * scale),
   };
-  const darkTextPixels = [earlyFrame, middleFrame, lateFrame].map((frame) =>
+  const darkTextPixels = renderedFrames.map((frame) =>
     countPixels(
       frame,
       textBox,
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
   );
-  const placeholderPixels = [placeholderFrame, earlyFrame].map((frame) =>
+  const placeholderPixels = renderedFrames.map((frame) =>
     countPixels(
       frame,
       textBox,
       ({ blue, green, red }) => red > 120 && green < 80 && blue > 120,
     ),
   );
+  const placeholderPixelCount = countPixels(
+    placeholderFrame,
+    textBox,
+    ({ blue, green, red }) => red > 120 && green < 80 && blue > 120,
+  );
 
-  expect(placeholderPixels[0]).toBeGreaterThan(100);
-  expect(placeholderPixels[1]).toBeLessThan(10);
-  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
-  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
-  expect(darkTextPixels[2]).toBeGreaterThan(300);
+  expect(placeholderPixelCount).toBeGreaterThan(100);
+  expect(
+    renderedFrames.some(
+      (_, index) => placeholderPixels[index] < 10 && darkTextPixels[index] < 10,
+    ),
+  ).toBe(true);
+  const completedTextPixels = Math.max(...darkTextPixels);
+  expect(completedTextPixels).toBeGreaterThan(300);
+  expect(
+    darkTextPixels.some(
+      (darkPixels) => darkPixels > 10 && darkPixels < completedTextPixels,
+    ),
+  ).toBe(true);
 });
 
 test("reveals a scrolling textarea one visible line at a time", async ({
@@ -1418,7 +1430,7 @@ test("reveals a scrolling textarea one visible line at a time", async ({
   );
   const frames = await videoFramesAt(
     video.outputPaths().rendered,
-    [fillStart + 120, fillStart + 400, fillStart + 700],
+    [200, 450, 500, 550, 600, 650, 700, 750, 790].map((offset) => fillStart + offset),
   );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
@@ -1439,31 +1451,33 @@ test("reveals a scrolling textarea one visible line at a time", async ({
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
   );
-  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
-  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
-  expect(darkTextPixels[2]).toBeGreaterThan(200);
+  expect(darkTextPixels[0]).toBeLessThan(10);
+  expect(darkTextPixels.at(-1)).toBeGreaterThan(200);
   const contentBox = {
     height: Math.round((fillHighlight.rect.height - 28) * scale),
     width: Math.round((fillHighlight.rect.width - 28) * scale),
     x: Math.round((fillHighlight.rect.x + 14) * scale),
     y: Math.round((fillHighlight.rect.y + 14) * scale),
   };
-  const firstLineDarkPixels = countPixels(
-    frames[0],
-    { ...contentBox, height: Math.round(36 * scale) },
-    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
-  );
-  const laterLinesDarkPixels = countPixels(
-    frames[0],
-    {
-      ...contentBox,
-      height: contentBox.height - Math.round(36 * scale),
-      y: contentBox.y + Math.round(36 * scale),
-    },
-    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
-  );
-  expect(firstLineDarkPixels).toBeGreaterThan(50);
-  expect(laterLinesDarkPixels).toBeLessThan(10);
+  expect(
+    frames.slice(1).some((frame) => {
+      const firstLineDarkPixels = countPixels(
+        frame,
+        { ...contentBox, height: Math.round(36 * scale) },
+        ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+      );
+      const laterLinesDarkPixels = countPixels(
+        frame,
+        {
+          ...contentBox,
+          height: contentBox.height - Math.round(36 * scale),
+          y: contentBox.y + Math.round(36 * scale),
+        },
+        ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+      );
+      return firstLineDarkPixels > 50 && laterLinesDarkPixels < 10;
+    }),
+  ).toBe(true);
   expect(
     countPixels(
       frames[0],
@@ -1531,7 +1545,7 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
   );
   const frames = await videoFramesAt(
     video.outputPaths().rendered,
-    [fillStart + 100, fillStart + 400, fillStart + 700],
+    [200, 450, 500, 550, 600, 650, 700, 750, 790].map((offset) => fillStart + offset),
   );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
@@ -1552,9 +1566,13 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
   );
-  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
-  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
-  expect(darkTextPixels[2]).toBeGreaterThan(100);
+  expect(darkTextPixels[0]).toBeLessThan(10);
+  expect(darkTextPixels.at(-1)).toBeGreaterThan(100);
+  expect(
+    darkTextPixels
+      .slice(1, -1)
+      .some((darkPixels) => darkPixels > 10 && darkPixels < darkTextPixels.at(-1)!),
+  ).toBe(true);
   expect(
     countPixels(
       frames[0],
@@ -1627,18 +1645,33 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
   expect(fillHighlight).toBeDefined();
   expect(fillHighlight.fillReveal).toBeDefined();
   expect(fillHighlight.rect.height).toBeGreaterThan(initialHeight);
-  const fillStart = renderedHighlightStartWithoutDeadAir(
-    fillHighlight,
-    metadata.highlights,
-  );
-  const frames = await videoFramesAt(
-    video.outputPaths().rendered,
-    [fillStart + 100, fillStart + 400, fillStart + 700],
-  );
+  const frames = await videoFrames(video.outputPaths().rendered);
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
     frames[0].height / fillHighlight.viewport.height,
   );
+  const outlinedFrames = frames.flatMap((frame) => {
+    const yellowPixels = countPixels(
+      frame,
+      { height: frame.height, width: frame.width, x: 0, y: 0 },
+      ({ blue, green, red }) => red > 180 && green > 160 && blue < 100,
+    );
+    return yellowPixels > 20 ? [{ frame, outline: yellowBoundingBox(frame) }] : [];
+  });
+  const earlyOutlinedFrame = outlinedFrames.find(
+    ({ outline }) => outline.height < Math.round(fillHighlight.rect.height * scale * 0.75),
+  );
+  const lateOutlinedFrame = outlinedFrames.find(
+    ({ outline }) => outline.height > Math.round(fillHighlight.rect.height * scale * 0.9),
+  );
+  expect(earlyOutlinedFrame).toBeDefined();
+  expect(lateOutlinedFrame).toBeDefined();
+  const earlyOutline = earlyOutlinedFrame!.outline;
+  const lateOutline = lateOutlinedFrame!.outline;
+  expect(earlyOutline.height).toBeLessThan(
+    Math.round(fillHighlight.rect.height * scale * 0.75),
+  );
+  expect(lateOutline.height).toBeGreaterThan(earlyOutline.height * 2);
   const darkTextPixels = frames.map((frame) =>
     countPixels(
       frame,
@@ -1654,9 +1687,28 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
   );
-  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
-  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
-  expect(darkTextPixels[2]).toBeGreaterThan(200);
+  expect(
+    countPixels(
+      earlyOutlinedFrame!.frame,
+      inset(
+        {
+          height: Math.round(fillHighlight.rect.height * scale),
+          width: Math.round(fillHighlight.rect.width * scale),
+          x: Math.round(fillHighlight.rect.x * scale),
+          y: Math.round(fillHighlight.rect.y * scale),
+        },
+        10,
+      ),
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  ).toBeLessThan(10);
+  const completedTextPixels = Math.max(...darkTextPixels);
+  expect(completedTextPixels).toBeGreaterThan(200);
+  expect(
+    darkTextPixels.some(
+      (darkPixels) => darkPixels > 10 && darkPixels < completedTextPixels,
+    ),
+  ).toBe(true);
   const contentRect = fillHighlight.fillReveal!.contentRect;
   const contentBox = {
     height: Math.round(contentRect.height * scale),
@@ -1665,25 +1717,27 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
     y: Math.round(contentRect.y * scale),
   };
   const firstLineHeight = Math.round(36 * scale);
-  const firstLineDarkPixels = countPixels(
-    frames[0],
-    { ...contentBox, height: firstLineHeight },
-    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
-  );
-  const laterLinesDarkPixels = countPixels(
-    frames[0],
-    {
-      ...contentBox,
-      height: contentBox.height - firstLineHeight,
-      y: contentBox.y + firstLineHeight,
-    },
-    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
-  );
-  expect(firstLineDarkPixels).toBeGreaterThan(50);
-  expect(laterLinesDarkPixels).toBeLessThan(10);
+  const showsOnlyTheFirstLine = frames.some((frame) => {
+    const firstLineDarkPixels = countPixels(
+      frame,
+      { ...contentBox, height: firstLineHeight },
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    );
+    const laterLinesDarkPixels = countPixels(
+      frame,
+      {
+        ...contentBox,
+        height: contentBox.height - firstLineHeight,
+        y: contentBox.y + firstLineHeight,
+      },
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    );
+    return firstLineDarkPixels > 50 && laterLinesDarkPixels < 10;
+  });
+  expect(showsOnlyTheFirstLine).toBe(true);
   expect(
     countPixels(
-      frames[0],
+      earlyOutlinedFrame!.frame,
       inset(
         {
           height: Math.round(fillHighlight.rect.height * scale),
