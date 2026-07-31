@@ -5,7 +5,7 @@ size: medium
 
 ## Status
 
-Complete. The overlay, option, cleanup, docs, regression spec, and PR demo are ready for review.
+Complete. The overlay, option, cleanup, docs, and regression spec are ready for review. The PR demo now uses a three-navigation release flow with visible interactions between pages.
 
 ## Goal
 
@@ -29,6 +29,7 @@ Make `videoMode` recordings show where `page.goto()` navigates. During navigatio
 - [x] Remove the overlay after navigation plus the configured hold, including when navigation throws. *The overlay is added only after successful navigation, removed in a `finally`, and waits through two paint frames so the recorder sees the clean state.*
 - [x] Document the option and behavior. *The README configuration example and video-mode guide cover the default, custom hold, and opt-out.*
 - [x] Run focused and full verification. *`pnpm typecheck`, `pnpm build`, and all 79 Playwright specs pass (76 passed, 3 skipped).*
+- [x] Expand the PR demo after review feedback. *The replacement clip filters release runs, selects a browser, and reveals report details across three navigations.*
 
 ## Implementation log
 
@@ -36,3 +37,4 @@ Make `videoMode` recordings show where `page.goto()` navigates. During navigatio
 - 2026-07-31: Added the failing public-behavior spec, then implemented and documented the default overlay.
 - 2026-07-31: Generated a 960×540 demo recording and inspected frames with the overlay visible and removed.
 - 2026-07-31: Uploaded the demo as an inline GitHub video for PR review.
+- 2026-07-31: Replaced the single-navigation demo with a 10-second multi-page flow and inspected the settled state after every interaction.
