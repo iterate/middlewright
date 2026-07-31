@@ -36,6 +36,7 @@ const VIDEO_MODE_DIALOG_ATTRIBUTE = "data-middlewright-video-mode-dialog";
 // stable beyond that minimum so raw duration and videoMode time share an
 // endpoint without depending on browser-frame delivery latency.
 const VIDEO_MODE_RECORDER_SETTLE_MS = 1100;
+const VIDEO_MODE_FILL_REVEAL_MAX_CHARACTERS = 100;
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -97,9 +98,9 @@ export type VideoModeViewport = {
 };
 
 export type VideoModeFillReveal = {
-  backgroundColor: string;
   contentRect: VideoModeRect;
   image: string;
+  revealStops: number[];
 };
 
 export type VideoModeHighlight = VideoModeSpan & {
@@ -275,6 +276,7 @@ type CursorWaypoint = {
 };
 
 type CursorTarget = {
+  highlight: VideoModeHighlight;
   method?: OverrideableMethod;
   outputEnd: number;
   outputStart: number;
@@ -299,6 +301,7 @@ const CURSOR_REST_BEFORE_ACTION_MS = 200;
 const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
 const TEXT_CURSOR_HOLD_IDEAL_MS = 800;
 const TEXT_CURSOR_POINTER_TAIL_MS = 200;
+const FILL_REVEAL_POINTER_SETTLE_MS = 100;
 const DIALOG_POST_ROLL_MS = 1000;
 
 type HighlightInput = {
@@ -1165,14 +1168,54 @@ const recordFillReveal = async (options: {
   testInfo: TestInfo;
 }) => {
   try {
-    const snapshot = await options.locator.evaluate((element) => {
-      if (!(element instanceof HTMLElement)) {
+    const snapshot = await options.locator.evaluate((element, captureOptions) => {
+      if (
+        !(element instanceof HTMLInputElement) &&
+        !(element instanceof HTMLTextAreaElement)
+      ) {
         return;
       }
 
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
       const pixels = (value: string) => Number.parseFloat(value) || 0;
+      const geometry = {
+        rect: {
+          height: rect.height,
+          width: rect.width,
+          x: rect.left,
+          y: rect.top,
+        },
+        viewport: {
+          height: window.innerHeight,
+          width: window.innerWidth,
+        },
+      };
+      const rectChanged =
+        Math.abs(rect.height - captureOptions.expectedRect.height) > 1 ||
+        Math.abs(rect.width - captureOptions.expectedRect.width) > 1 ||
+        Math.abs(rect.left - captureOptions.expectedRect.x) > 1 ||
+        Math.abs(rect.top - captureOptions.expectedRect.y) > 1;
+      const isTextarea = element instanceof HTMLTextAreaElement;
+      const value = element.value;
+
+      if (
+        rectChanged ||
+        value.length === 0 ||
+        value.length > captureOptions.maxCharacters ||
+        value.includes("\n") ||
+        style.direction === "rtl" ||
+        !["left", "start"].includes(style.textAlign) ||
+        element.scrollLeft > 0 ||
+        element.scrollTop > 0 ||
+        (isTextarea &&
+          (element.scrollHeight > element.clientHeight + 1 ||
+            element.scrollWidth > element.clientWidth + 1)) ||
+        (element instanceof HTMLInputElement && element.type === "password")
+      ) {
+        return { ...geometry, kind: "fallback" as const };
+      }
+
       const contentRect = {
         height:
           rect.height -
@@ -1191,64 +1234,41 @@ const recordFillReveal = async (options: {
       };
 
       if (contentRect.width <= 0 || contentRect.height <= 0) {
-        return;
+        return { ...geometry, kind: "fallback" as const };
       }
 
-      const parseColor = (value: string) => {
-        const channels = value.match(
-          /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/,
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) {
+        return { ...geometry, kind: "fallback" as const };
+      }
+      context.font = style.font;
+      const graphemes = Array.from(
+        new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value),
+        ({ segment }) => segment,
+      );
+      const letterSpacing = pixels(style.letterSpacing);
+      const textIndent = pixels(style.textIndent);
+      const revealStops = graphemes.map((_, index) => {
+        const prefix = graphemes.slice(0, index + 1).join("");
+        return Math.ceil(
+          textIndent +
+            context.measureText(prefix).width +
+            letterSpacing * index +
+            2,
         );
-        if (!channels) {
-          return;
-        }
-        const alphaText = channels[4] || "1";
-        const alpha = alphaText.endsWith("%")
-          ? Number.parseFloat(alphaText) / 100
-          : Number.parseFloat(alphaText);
-        return {
-          alpha,
-          blue: Number(channels[3]),
-          green: Number(channels[2]),
-          red: Number(channels[1]),
-        };
-      };
-      const layers = [];
-      let current: Element | null = element;
-      while (current) {
-        const color = parseColor(getComputedStyle(current).backgroundColor);
-        if (color && color.alpha > 0) {
-          layers.push(color);
-        }
-        current = current.parentElement;
-      }
-
-      let background = { alpha: 1, blue: 255, green: 255, red: 255 };
-      for (const layer of layers.reverse()) {
-        const alpha = layer.alpha + background.alpha * (1 - layer.alpha);
-        background = {
-          alpha,
-          blue:
-            (layer.blue * layer.alpha +
-              background.blue * background.alpha * (1 - layer.alpha)) /
-            alpha,
-          green:
-            (layer.green * layer.alpha +
-              background.green * background.alpha * (1 - layer.alpha)) /
-            alpha,
-          red:
-            (layer.red * layer.alpha +
-              background.red * background.alpha * (1 - layer.alpha)) /
-            alpha,
-        };
-      }
-      const hex = [background.red, background.green, background.blue]
-        .map((channel) => Math.round(channel).toString(16).padStart(2, "0"))
-        .join("");
+      });
+      revealStops[revealStops.length - 1] = Math.ceil(contentRect.width);
 
       return {
-        backgroundColor: `0x${hex}`,
+        ...geometry,
         contentRect,
+        kind: "reveal" as const,
+        revealStops,
       };
+    }, {
+      expectedRect: options.highlight.rect,
+      maxCharacters: VIDEO_MODE_FILL_REVEAL_MAX_CHARACTERS,
     });
 
     if (!snapshot) {
@@ -1262,10 +1282,16 @@ const recordFillReveal = async (options: {
       path: join(options.testInfo.outputDir, image),
       scale: "css",
     });
+    if (snapshot.kind === "fallback") {
+      options.highlight.image = image;
+      options.highlight.rect = snapshot.rect;
+      options.highlight.viewport = snapshot.viewport;
+      return;
+    }
     options.highlight.fillReveal = {
-      backgroundColor: snapshot.backgroundColor,
       contentRect: snapshot.contentRect,
       image,
+      revealStops: snapshot.revealStops,
     };
   } catch {
     // A disappearing target or failed post-action screenshot keeps the normal
@@ -1793,6 +1819,7 @@ const cursorTargets = (options: {
     }
 
     targets.push({
+      highlight,
       method: highlight.method,
       outputEnd: piece.outputEnd,
       outputStart: piece.outputStart,
@@ -2074,6 +2101,7 @@ const renderedVideoFilter = (options: {
 
   for (let index = 0; index < pieces.length; index += 1) {
     const piece = pieces[index];
+    const renderedPiece = renderedPieces[index];
     const label = `render${index}`;
     labels.push(`[${label}]`);
 
@@ -2088,30 +2116,34 @@ const renderedVideoFilter = (options: {
 
     if (piece.highlight && fillReveal && preFillInput && postFillInput) {
       const scaledViewport = scaledViewportSize(piece.highlight.viewport, options.video);
-      const fieldRect = scaleHighlight(piece.highlight, options.video);
       const contentRect = scaleVideoModeRect(
         fillReveal.contentRect,
         piece.highlight.viewport,
         options.video,
       );
-      const contentX = Math.max(0, contentRect.x - fieldRect.x);
-      const contentY = Math.max(0, contentRect.y - fieldRect.y);
-      const contentWidth = Math.max(
-        1,
-        Math.min(contentRect.width, fieldRect.width - contentX),
-      );
-      const contentHeight = Math.max(
-        1,
-        Math.min(contentRect.height, fieldRect.height - contentY),
-      );
       const duration = renderedPieceDuration(piece);
       const durationSeconds = formatSeconds(duration);
+      const scale = Math.min(
+        options.video.width / piece.highlight.viewport.width,
+        options.video.height / piece.highlight.viewport.height,
+      );
+      const revealStops = fillReveal.revealStops
+        .map((stop) => Math.max(1, Math.min(contentRect.width, Math.round(stop * scale))))
+        .filter((stop, stopIndex, stops) => stopIndex === 0 || stop !== stops[stopIndex - 1]);
+      const target = plan.targets.find(
+        (candidate) => candidate.highlight === piece.highlight,
+      );
+      const pointerRevealStart =
+        options.highlightMode === "pointer" && target
+          ? target.arriveAt - renderedPiece.outputStart + FILL_REVEAL_POINTER_SETTLE_MS
+          : 0;
+      const revealStart = Math.max(0, Math.min(duration, pointerRevealStart));
+      const revealEnd =
+        options.highlightMode === "pointer"
+          ? Math.max(revealStart, duration - TEXT_CURSOR_POINTER_TAIL_MS)
+          : duration;
       const baseLabel = `fillbase${index}`;
-      const postFieldLabel = `fillpost${index}`;
-      const coverFieldLabel = `fillcoverfield${index}`;
-      const coverLabel = `fillcover${index}`;
-      const revealLabel = `fillreveal${index}`;
-      const composedLabel = `fillcomposed${index}`;
+      const splitLabels = revealStops.map((_, stopIndex) => `fillpost${index}x${stopIndex}`);
 
       filters.push(
         [
@@ -2125,29 +2157,40 @@ const renderedVideoFilter = (options: {
         [
           `[${postFillInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
           `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
-          `crop=w=${fieldRect.width}:h=${fieldRect.height}:x=${fieldRect.x}:y=${fieldRect.y}`,
+          `crop=w=${contentRect.width}:h=${contentRect.height}:x=${contentRect.x}:y=${contentRect.y}`,
           `trim=start=0:end=${durationSeconds}`,
           "setpts=PTS-STARTPTS",
-          `split=2[${postFieldLabel}][${coverFieldLabel}]`,
+          `split=${revealStops.length}${splitLabels.map((splitLabel) => `[${splitLabel}]`).join("")}`,
         ].join(","),
       );
-      filters.push(
-        [
-          `[${coverFieldLabel}]crop=w=${contentWidth}:h=${contentHeight}:x=${contentX}:y=${contentY}`,
-          `drawbox=x=0:y=0:w=iw:h=ih:color=${fillReveal.backgroundColor}:t=fill[${coverLabel}]`,
-        ].join(","),
-      );
-      filters.push(
-        [
-          `[${postFieldLabel}][${coverLabel}]overlay=x='${contentX}+${contentWidth}*t/${durationSeconds}'`,
-          `y=${contentY}`,
-          "eval=frame",
-          `shortest=1[${revealLabel}]`,
-        ].join(":"),
-      );
-      filters.push(
-        `[${baseLabel}][${revealLabel}]overlay=x=${fieldRect.x}:y=${fieldRect.y}:shortest=1[${composedLabel}]`,
-      );
+
+      let composedLabel = baseLabel;
+      for (let stopIndex = 0; stopIndex < revealStops.length; stopIndex += 1) {
+        const cropLabel = `fillcrop${index}x${stopIndex}`;
+        const nextLabel = `fillcomposed${index}x${stopIndex}`;
+        const showAt =
+          revealStart +
+          ((revealEnd - revealStart) * (stopIndex + 1)) /
+            (revealStops.length + 1);
+        filters.push(
+          `${[
+            `[${splitLabels[stopIndex]}]crop=w=${revealStops[stopIndex]}`,
+            `h=${contentRect.height}`,
+            "x=0",
+            "y=0",
+          ].join(":")}[${cropLabel}]`,
+        );
+        filters.push(
+          [
+            `[${composedLabel}][${cropLabel}]overlay=x=${contentRect.x}`,
+            `y=${contentRect.y}`,
+            `enable='gte(t\\,${formatSeconds(showAt)})'`,
+            `shortest=1[${nextLabel}]`,
+          ].join(":"),
+        );
+        composedLabel = nextLabel;
+      }
+
       filters.push(
         options.highlightMode === "outline"
           ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`

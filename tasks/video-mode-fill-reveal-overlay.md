@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. Runtime-safe capture, progressive FFmpeg composition, fallback coverage, docs, direct comparison media, stress coverage, and the full local validation suite are green.
+Implementation and local validation are complete. Reveals now advance by whole glyphs after pointer arrival, preserve gradient pixels, support stable textareas, and hold the final state for scrolling or expanding textarea fallbacks. Missing: refreshed PR media and CI confirmation.
 
 ## Goal
 
@@ -20,8 +20,8 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - Apply the effect to highlighted, non-empty `fill()` actions on visible editable elements.
 - Capture the field geometry and visual context around the normal action.
 - Render the stable pre-action screenshot outside the field.
-- Place the final field pixels over that screenshot, then shrink a computed-background-colour cover from left to right during the existing highlight hold.
-- If the field cannot be captured safely, keep the ordinary stable highlight rather than changing runtime behavior or failing the test.
+- Place final content pixels over that screenshot at measured grapheme boundaries during the existing highlight hold.
+- If a field is not safe to animate, hold its final post-fill screenshot rather than changing runtime behavior or failing the test.
 
 ## Acceptance
 
@@ -40,6 +40,11 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - [x] Generate and inspect comparison media for the PR. *The account-flow render was reviewed frame by frame and uploaded as a GitHub inline video asset.*
 - [x] Run focused stress coverage, the full suite, typecheck, build, and `publint`. *The reveal spec passed 10/10 with two workers; the full suite passed 76 tests with 3 provider-gated skips.*
 - [x] Move this task to `tasks/complete/` and update the draft PR body. *Completed on the feature branch; PR #10 describes the net effect, comparison, media, and validation.*
+- [x] Reveal only complete glyphs; never expose a thin slice of the next character. *The renderer advances through measured grapheme stops; the frame-level `@` regression rejects partial glyph pixels.*
+- [x] Move the pointer to the field and switch to the text cursor before revealing text. *Pointer-mode reveals begin 100ms after cursor arrival; a frame-level regression checks that the text cursor precedes the first glyph.*
+- [x] Cover gradient-backed fields without a mismatched solid-colour wipe. *Each completed content crop comes from post-fill pixels, preserving gradients and image-backed backgrounds.*
+- [x] Support ordinary textareas and test scrolling and expanding textarea fallbacks. *Stable single-line textareas animate; scrolling and geometry-changing textareas hold a captured final state.*
+- [ ] Refresh PR media and rerun stress, full validation, and CI. *Six captioned clips were inspected; 60/60 stress runs and all local checks pass. Remaining: publish the clips and confirm CI on the pushed revision.*
 
 ## Implementation log
 
@@ -48,3 +53,7 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - 2026-07-31: Inspected early, middle, and late native frames. They show `ada`, `ada@example`, then `ada@example.com` over the unchanged blue pre-action page.
 - 2026-07-31: Full suite: 76 passed, 3 provider-gated tests skipped. Typecheck, build, and `publint` pass. The reveal regression passed 10 repeated runs with 2 workers.
 - 2026-07-31: Uploaded the 6.8-second account-flow render to `github.com/user-attachments/assets/211cc473-5a55-44a2-987d-23ffcd6f3404`.
+- 2026-07-31: Reopened from review feedback. The current continuous cover clips through glyphs, pointer motion overlaps the reveal, and textarea/gradient behavior needs explicit decisions and regression coverage.
+- 2026-07-31: Replaced the moving solid cover with grapheme-width content crops, sequenced pointer arrival before reveal, and added gradient plus three textarea scenarios.
+- 2026-07-31: Visual review exposed blank fallback holds. Scrolling and expanding textareas now replace the pre-action hold with a captured post-fill frame and updated geometry.
+- 2026-07-31: Full suite: 82 passed, 3 provider-gated tests skipped. Six focused scenarios passed 60/60 with two workers; typecheck, build, and `publint` pass.

@@ -1036,6 +1036,450 @@ test("reveals filled text in post without changing the runtime fill", async ({
   expect(outsideField.red).toBeLessThan(80);
 });
 
+test("reveals complete glyphs instead of slicing through the next character", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 0,
+    highlight: { mode: "outline", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <input
+        aria-label="Code"
+        style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: white; color: black; caret-color: transparent; font: 54px monospace"
+      />
+    `);
+
+    await plugged.videoMode.caption("Reveal complete glyphs", async () => {
+      await plugged.getByLabel("Code").fill("A @ B");
+      await expect(plugged.getByLabel("Code")).toHaveValue("A @ B");
+      await page.waitForTimeout(150);
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight).toBeDefined();
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
+  const frames = await videoFrames(paths.rendered);
+  const finalFrame = await videoFrame(paths.rendered, fillStart + 900);
+  const scale = Math.min(
+    finalFrame.width / fillHighlight.viewport.width,
+    finalFrame.height / fillHighlight.viewport.height,
+  );
+  const textBox = {
+    height: Math.round(66 * scale),
+    width: Math.round(500 * scale),
+    x: Math.round((fillHighlight.rect.x + 20) * scale),
+    y: Math.round((fillHighlight.rect.y + 12) * scale),
+  };
+  const glyphs = darkColumnRuns(finalFrame, textBox);
+  expect(glyphs).toHaveLength(3);
+  const atGlyph = glyphs[1];
+  const finalAtPixels = countPixels(
+    finalFrame,
+    atGlyph,
+    ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+  );
+  const fillFrames = frames.slice(
+    Math.floor(fillStart / 40),
+    Math.ceil((fillStart + highlightDurationMs) / 40),
+  );
+  const partialAtFrames = fillFrames
+    .map((frame, index) => ({
+      darkPixels: countPixels(
+        frame,
+        atGlyph,
+        ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+      ),
+      index,
+    }))
+    .filter(
+      ({ darkPixels }) =>
+        darkPixels > 5 && darkPixels < finalAtPixels * 0.85,
+    );
+
+  expect(partialAtFrames).toEqual([]);
+});
+
+test("moves to the field and switches to the text cursor before revealing", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1200;
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <input
+        aria-label="Name"
+        style="position: absolute; box-sizing: border-box; left: 480px; top: 160px; width: 280px; height: 90px; border: 0; padding: 12px 20px; background: rgb(0, 80, 255); color: rgb(230, 0, 0); caret-color: transparent; font: 54px monospace"
+      />
+    `);
+
+    await plugged.videoMode.caption("Move, switch cursor, then reveal", async () => {
+      await plugged.getByLabel("Name").fill("Ada");
+      await expect(plugged.getByLabel("Name")).toHaveValue("Ada");
+      await page.waitForTimeout(150);
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight).toBeDefined();
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
+  const frames = await videoFrames(paths.rendered);
+  const fillFrames = frames.slice(
+    Math.floor(fillStart / 40),
+    Math.ceil((fillStart + highlightDurationMs) / 40),
+  );
+  const scale = Math.min(
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
+  );
+  const fillBox = {
+    height: Math.round(fillHighlight.rect.height * scale),
+    width: Math.round(fillHighlight.rect.width * scale),
+    x: Math.round(fillHighlight.rect.x * scale),
+    y: Math.round(fillHighlight.rect.y * scale),
+  };
+  const textBox = {
+    height: Math.round(66 * scale),
+    width: Math.round(120 * scale),
+    x: Math.round((fillHighlight.rect.x + 20) * scale),
+    y: Math.round((fillHighlight.rect.y + 12) * scale),
+  };
+  const textCursorFrame = fillFrames.findIndex(
+    (frame) =>
+      textCursorPixelCount(frame, fillBox) > 35 &&
+      pointerTailPixelCount(frame, fillBox) < 10,
+  );
+  const firstRevealFrame = fillFrames.findIndex(
+    (frame) =>
+      countPixels(
+        frame,
+        textBox,
+        ({ blue, green, red }) => red > 150 && green < 80 && blue < 80,
+      ) > 30,
+  );
+
+  expect(textCursorFrame).toBeGreaterThan(0);
+  expect(firstRevealFrame).toBeGreaterThan(textCursorFrame);
+});
+
+test("preserves gradient field pixels while revealing the filled text", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 0,
+    highlight: { mode: "outline", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <input
+        aria-label="Gradient"
+        style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: linear-gradient(90deg, rgb(240, 60, 40), rgb(30, 80, 230)); color: black; caret-color: transparent; font: 54px monospace"
+      />
+    `);
+
+    await plugged.videoMode.caption("Preserve gradient pixels", async () => {
+      await plugged.getByLabel("Gradient").fill("Ada");
+      await expect(plugged.getByLabel("Gradient")).toHaveValue("Ada");
+      await page.waitForTimeout(150);
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight).toBeDefined();
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
+  const [earlyFrame, lateFrame] = await Promise.all([
+    videoFrame(paths.rendered, fillStart + 100),
+    videoFrame(paths.rendered, fillStart + 900),
+  ]);
+  const scale = Math.min(
+    earlyFrame.width / fillHighlight.viewport.width,
+    earlyFrame.height / fillHighlight.viewport.height,
+  );
+  const leftGradient = averagePixel(earlyFrame, {
+    x: Math.round((fillHighlight.rect.x + 60) * scale),
+    y: Math.round((fillHighlight.rect.y + 70) * scale),
+  });
+  const rightGradient = averagePixel(earlyFrame, {
+    x: Math.round((fillHighlight.rect.x + fillHighlight.rect.width - 60) * scale),
+    y: Math.round((fillHighlight.rect.y + 70) * scale),
+  });
+  const textBox = {
+    height: Math.round(66 * scale),
+    width: Math.round(140 * scale),
+    x: Math.round((fillHighlight.rect.x + 20) * scale),
+    y: Math.round((fillHighlight.rect.y + 12) * scale),
+  };
+
+  expect(leftGradient.red).toBeGreaterThan(leftGradient.blue + 80);
+  expect(rightGradient.blue).toBeGreaterThan(rightGradient.red + 80);
+  expect(
+    countPixels(
+      lateFrame,
+      textBox,
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  ).toBeGreaterThan(300);
+});
+
+test("reveals a stable single-line textarea fill", async ({ page }, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 0,
+    highlight: { mode: "outline", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <textarea
+        aria-label="Notes"
+        style="position: absolute; box-sizing: border-box; left: 120px; top: 130px; width: 560px; height: 150px; border: 0; padding: 18px 20px; overflow: hidden; resize: none; background: white; color: black; caret-color: transparent; font: 48px monospace"
+      ></textarea>
+      <script>
+        const notes = document.querySelector("textarea");
+        const seenValues = [];
+        notes.addEventListener("input", () => {
+          seenValues.push(notes.value);
+          document.body.dataset.seenValues = JSON.stringify(seenValues);
+        });
+      </script>
+    `);
+
+    await plugged.videoMode.caption("Reveal a stable textarea fill", async () => {
+      await plugged.getByLabel("Notes").fill("Ada notes");
+      await expect(plugged.getByLabel("Notes")).toHaveValue("Ada notes");
+      await expect(plugged.locator("body")).toHaveAttribute(
+        "data-seen-values",
+        JSON.stringify(["Ada notes"]),
+      );
+      await page.waitForTimeout(150);
+    });
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight.fillReveal).toBeDefined();
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
+  const [earlyFrame, middleFrame, lateFrame] = await Promise.all(
+    [100, 500, 900].map((offset) => videoFrame(paths.rendered, fillStart + offset)),
+  );
+  const scale = Math.min(
+    lateFrame.width / fillHighlight.viewport.width,
+    lateFrame.height / fillHighlight.viewport.height,
+  );
+  const textBox = {
+    height: Math.round(62 * scale),
+    width: Math.round(500 * scale),
+    x: Math.round((fillHighlight.rect.x + 20) * scale),
+    y: Math.round((fillHighlight.rect.y + 18) * scale),
+  };
+  const darkTextPixels = [earlyFrame, middleFrame, lateFrame].map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  );
+
+  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
+  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
+  expect(darkTextPixels[2]).toBeGreaterThan(300);
+});
+
+test("falls back to a normal fill for a scrolling textarea", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 250,
+    highlight: { mode: "outline", duration: 800 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <textarea
+        aria-label="Log"
+        style="position: absolute; box-sizing: border-box; left: 220px; top: 120px; width: 360px; height: 150px; padding: 14px; resize: none; background: white; color: black; font: 30px monospace"
+      ></textarea>
+    `);
+
+    await plugged.videoMode.caption("Scrolling textarea: use a normal fill", async () => {
+      await plugged
+        .getByLabel("Log")
+        .fill("first line\nsecond line\nthird line\nfourth line\nfifth line");
+      await expect(plugged.getByLabel("Log")).toHaveValue(
+        "first line\nsecond line\nthird line\nfourth line\nfifth line",
+      );
+      await expect
+        .poll(() =>
+          plugged
+            .getByLabel("Log")
+            .evaluate((textarea) => textarea.scrollHeight > textarea.clientHeight),
+        )
+        .toBe(true);
+      await page.waitForTimeout(150);
+    });
+  }
+
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight).toBeDefined();
+  expect(fillHighlight).not.toHaveProperty("fillReveal");
+  const frame = await videoFrame(
+    video.outputPaths().rendered,
+    renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights) + 600,
+  );
+  const scale = Math.min(
+    frame.width / fillHighlight.viewport.width,
+    frame.height / fillHighlight.viewport.height,
+  );
+  expect(
+    countPixels(
+      frame,
+      inset(
+        {
+          height: Math.round(fillHighlight.rect.height * scale),
+          width: Math.round(fillHighlight.rect.width * scale),
+          x: Math.round(fillHighlight.rect.x * scale),
+          y: Math.round(fillHighlight.rect.y * scale),
+        },
+        10,
+      ),
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  ).toBeGreaterThan(200);
+});
+
+test("falls back to a normal fill when a textarea expands", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    captions: "explicit",
+    finalHold: 250,
+    highlight: { mode: "outline", duration: 800 },
+    trimStart: "never",
+  });
+  let initialHeight = 0;
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <textarea
+        aria-label="Summary"
+        style="position: absolute; box-sizing: border-box; left: 240px; top: 100px; width: 320px; height: 70px; padding: 12px; overflow: hidden; resize: none; background: white; color: black; font: 30px sans-serif"
+      ></textarea>
+      <script>
+        const summary = document.querySelector("textarea");
+        summary.addEventListener("input", () => {
+          summary.style.height = "auto";
+          summary.style.height = summary.scrollHeight + "px";
+        });
+      </script>
+    `);
+    initialHeight = (await plugged.getByLabel("Summary").boundingBox())!.height;
+
+    await plugged.videoMode.caption("Expanding textarea: use a normal fill", async () => {
+      await plugged
+        .getByLabel("Summary")
+        .fill("This textarea grows to fit a longer summary without scrolling.");
+      await expect(plugged.getByLabel("Summary")).toHaveValue(
+        "This textarea grows to fit a longer summary without scrolling.",
+      );
+      await expect
+        .poll(async () => (await plugged.getByLabel("Summary").boundingBox())!.height)
+        .toBeGreaterThan(initialHeight);
+      await page.waitForTimeout(150);
+    });
+  }
+
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight).toBeDefined();
+  expect(fillHighlight).not.toHaveProperty("fillReveal");
+  expect(fillHighlight.rect.height).toBeGreaterThan(initialHeight);
+  const frame = await videoFrame(
+    video.outputPaths().rendered,
+    renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights) + 600,
+  );
+  const scale = Math.min(
+    frame.width / fillHighlight.viewport.width,
+    frame.height / fillHighlight.viewport.height,
+  );
+  expect(
+    countPixels(
+      frame,
+      inset(
+        {
+          height: Math.round(fillHighlight.rect.height * scale),
+          width: Math.round(fillHighlight.rect.width * scale),
+          x: Math.round(fillHighlight.rect.x * scale),
+          y: Math.round(fillHighlight.rect.y * scale),
+        },
+        10,
+      ),
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  ).toBeGreaterThan(200);
+});
+
 test("uses a normal pointer tail after text cursor holds", async ({
   page,
 }, testInfo) => {
@@ -1512,6 +1956,47 @@ const inset = (rect: { height: number; width: number; x: number; y: number }, am
   x: rect.x + amount,
   y: rect.y + amount,
 });
+
+const darkColumnRuns = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+) => {
+  const runs: { height: number; width: number; x: number; y: number }[] = [];
+  let start: number | undefined;
+
+  for (let x = rect.x; x < rect.x + rect.width; x += 1) {
+    const hasDarkPixel =
+      countPixels(
+        frame,
+        { height: rect.height, width: 1, x, y: rect.y },
+        ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+      ) > 0;
+
+    if (hasDarkPixel && start === undefined) {
+      start = x;
+    }
+    if (!hasDarkPixel && start !== undefined) {
+      runs.push({
+        height: rect.height,
+        width: x - start,
+        x: start,
+        y: rect.y,
+      });
+      start = undefined;
+    }
+  }
+
+  if (start !== undefined) {
+    runs.push({
+      height: rect.height,
+      width: rect.x + rect.width - start,
+      x: start,
+      y: rect.y,
+    });
+  }
+
+  return runs;
+};
 
 const hasYellow = (
   frame: VideoFrame,
