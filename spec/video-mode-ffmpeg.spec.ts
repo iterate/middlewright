@@ -996,7 +996,6 @@ test("reveals filled text in post without changing the runtime fill", async ({
       "data-seen-values",
       JSON.stringify(["ada@example.com"]),
     );
-    await page.waitForTimeout(150);
   }
 
   const paths = video.outputPaths();
@@ -1059,12 +1058,11 @@ test("reveals complete glyphs instead of slicing through the next character", as
         style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: white; color: black; caret-color: transparent; font: 54px monospace"
       />
     `);
-    await page.waitForTimeout(200);
+    await plugged.getByLabel("Code").waitFor();
 
     await plugged.videoMode.caption("Reveal complete glyphs", async () => {
       await plugged.getByLabel("Code").fill("A @ B");
       await expect(plugged.getByLabel("Code")).toHaveValue("A @ B");
-      await page.waitForTimeout(150);
     });
   }
 
@@ -1138,12 +1136,11 @@ test("moves to the field and switches to the text cursor before revealing", asyn
         style="position: absolute; box-sizing: border-box; left: 340px; top: 160px; width: 420px; height: 90px; border: 0; padding: 12px 20px; background: rgb(0, 80, 255); color: rgb(230, 0, 0); caret-color: transparent; font: 42px monospace"
       />
     `);
-    await page.waitForTimeout(200);
+    await plugged.getByLabel("Name").waitFor();
 
     await plugged.videoMode.caption("Move, switch cursor, then reveal", async () => {
       await plugged.getByLabel("Name").fill("Ada Lovelace");
       await expect(plugged.getByLabel("Name")).toHaveValue("Ada Lovelace");
-      await page.waitForTimeout(150);
     });
   }
 
@@ -1223,12 +1220,11 @@ test("preserves gradient field pixels while revealing the filled text", async ({
         style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: linear-gradient(90deg, rgb(240, 60, 40), rgb(30, 80, 230)); color: black; caret-color: transparent; font: 54px monospace"
       />
     `);
-    await page.waitForTimeout(200);
+    await plugged.getByLabel("Gradient").waitFor();
 
     await plugged.videoMode.caption("Preserve gradient pixels", async () => {
       await plugged.getByLabel("Gradient").fill("Ada");
       await expect(plugged.getByLabel("Gradient")).toHaveValue("Ada");
-      await page.waitForTimeout(150);
     });
   }
 
@@ -1301,7 +1297,7 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
         });
       </script>
     `);
-    await page.waitForTimeout(200);
+    await plugged.getByLabel("Notes").waitFor();
 
     await plugged.videoMode.caption("Reveal a stable textarea fill", async () => {
       await plugged.getByLabel("Notes").fill("Ada notes");
@@ -1310,7 +1306,6 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
         "data-seen-values",
         JSON.stringify(["Ada notes"]),
       );
-      await page.waitForTimeout(150);
     });
   }
 
@@ -1368,7 +1363,7 @@ test("falls back to a normal fill for a scrolling textarea", async ({
         style="position: absolute; box-sizing: border-box; left: 220px; top: 120px; width: 360px; height: 150px; padding: 14px; resize: none; background: white; color: black; font: 30px monospace"
       ></textarea>
     `);
-    await page.waitForTimeout(200);
+    await plugged.getByLabel("Log").waitFor();
 
     await plugged.videoMode.caption("Scrolling textarea: use a normal fill", async () => {
       await plugged
@@ -1384,7 +1379,6 @@ test("falls back to a normal fill for a scrolling textarea", async ({
             .evaluate((textarea) => textarea.scrollHeight > textarea.clientHeight),
         )
         .toBe(true);
-      await page.waitForTimeout(150);
     });
   }
 
@@ -1447,7 +1441,7 @@ test("falls back to a normal fill when a textarea expands", async ({
         });
       </script>
     `);
-    await page.waitForTimeout(200);
+    await plugged.getByLabel("Summary").waitFor();
     initialHeight = (await plugged.getByLabel("Summary").boundingBox())!.height;
 
     await plugged.videoMode.caption("Expanding textarea: use a normal fill", async () => {
@@ -1460,7 +1454,6 @@ test("falls back to a normal fill when a textarea expands", async ({
       await expect
         .poll(async () => (await plugged.getByLabel("Summary").boundingBox())!.height)
         .toBeGreaterThan(initialHeight);
-      await page.waitForTimeout(150);
     });
   }
 
@@ -1518,7 +1511,6 @@ test("uses a normal pointer tail after text cursor holds", async ({
     await expect(plugged.locator("#name")).toHaveValue("Ada");
     await plugged.locator("#notes").type("notes");
     await expect(plugged.locator("#notes")).toHaveValue("notes");
-    await page.waitForTimeout(200);
   }
 
   const paths = video.outputPaths();
