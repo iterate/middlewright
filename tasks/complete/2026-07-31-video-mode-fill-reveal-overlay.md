@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Final reviewability code is complete. Pointer-mode reveals now pause after arrival, selector-trimmed videos calibrate against live page pixels, and final holds use a clean screenshot. Missing: replace the six PR videos and confirm CI.
+Complete. Pointer-mode reveals pause after arrival, selector-trimmed videos calibrate against live page pixels, final holds use a clean screenshot, and six review-length videos are inline on PR #10. CI passes.
 
 ## Goal
 
@@ -48,7 +48,7 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - [x] Budget a stationary text-cursor pause before the first glyph, after pointer movement. *The remaining text-cursor budget is split evenly between a stationary pause and the glyph reveal, so mouse travel naturally consumes the configured hold.*
 - [x] Make the focused media fixtures start on meaningful content and end on the filled state. *All six use selector-based starts; endpoint calibration matches the final live screenshot instead of Playwright's black close frame.*
 - [x] Add a reviewable final-state hold without extending teardown black. *Final holds append the captured live-page frame for one second in the focused clips; the pointer regression checks the first and last ten frames.*
-- [ ] Replace PR media and rerun focused stress, full validation, and CI.
+- [x] Replace PR media and rerun focused stress, full validation, and CI. *PR #10 has six new inline players; local validation and CI pass on `22d92ec`.*
 
 ## Implementation log
 
@@ -66,3 +66,4 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - 2026-07-31: Reopened after review found the captioned clips too short, with real black startup/teardown frames. The current reveal uses a fixed 100ms settle after arrival; the media specs disable start trimming and mostly disable final holds.
 - 2026-07-31: Replaced the fixed settle with a budgeted pause, calibrated static recordings against the last live screenshot, and made `finalHold` append that clean frame. The full suite passes: 82 tests with 3 provider-gated skips.
 - 2026-07-31: Six fresh 2.1–2.5s clips start on page content and hold the final state for one second. A 60-run stress pass exposed one inaccurate keyframe sample in the glyph test; its final-hold assertion then passed 10/10 after correction.
+- 2026-07-31: Uploaded all six replacement clips and verified six rendered `<video>` players in the PR body. GitHub CI passes on `22d92ec`.
