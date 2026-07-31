@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Nearly done. Every fill reveal now pauses before text appears, and expanding textareas stay at their initial size until that pause ends. Local rendered-frame and 10× stress checks pass; replacement PR videos and remote CI remain.
+Done. Every fill reveal pauses before text appears, expanding textareas stay at their initial size until that pause ends, and multiline fallbacks reveal one visible line at a time. Four slower inline PR videos show the final behavior; local validation and remote CI pass.
 
 ## Goal
 
@@ -48,7 +48,7 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - [x] Regenerate and inspect the affected videos, update PR #12, and return this task to `tasks/complete/` after green CI. *The scrolling and expanding clips were replaced with line-by-line videos; 20/20 stress iterations, 83-test suite, build, typecheck, `publint`, and current PR checks pass.*
 - [x] Add rendered-frame regressions for a text-free pre-reveal pause in outline mode and initial textarea geometry during that pause. *The FFmpeg specs find a placeholder-free, text-free outlined frame and prove an expanding field's early outline is less than 75% of its final height.*
 - [x] Share the reveal pause budget across pointer and outline modes, and switch resized fields to final geometry only when reveal starts. *Both modes now spend up to the 800ms text-cursor pause budget before reveal; changed fields keep their pre-fill cover and outline until that boundary.*
-- [ ] Replace affected PR videos again, validate, and complete the task after CI.
+- [x] Replace affected PR videos again, validate, and complete the task after CI. *All four clips now show the full 800ms pause, a slower 800ms reveal, and a final hold; PR #12 has four inline players and both checks pass.*
 
 ## Implementation log
 
@@ -63,3 +63,4 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: Review caught two related timeline gaps: outline mode bypassed the pre-reveal pause, and resized fields drew their final cover/outline from the first hold frame. Reopened for a timing/geometry regression slice.
 - 2026-07-31: Added rendered RED regressions, shared the pause calculation across highlight modes, and retained initial fill geometry until reveal. All 24 FFmpeg specs and 50/50 focused stress runs pass.
 - 2026-07-31: Lengthened the four PR media fixtures to a 1.6s highlight so reviewers see the full 800ms pause and a slower 800ms reveal; the adjusted cases pass 20/20 repeated runs.
+- 2026-07-31: Inspected all four replacement contact sheets, uploaded fresh inline clips, verified GitHub rendered four video players, and completed the task with PR #12 clean and green.
