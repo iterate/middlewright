@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation and local validation are complete. Reveals now advance by whole glyphs after pointer arrival, preserve gradient pixels, support stable textareas, and hold the final state for scrolling or expanding textarea fallbacks. Missing: refreshed PR media and CI confirmation.
+Complete. Reveals advance by whole glyphs after pointer arrival, preserve gradient pixels, support stable textareas, and hold the final state for scrolling or expanding textarea fallbacks. Six captioned clips are on the PR and CI is green.
 
 ## Goal
 
@@ -44,7 +44,7 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - [x] Move the pointer to the field and switch to the text cursor before revealing text. *Pointer-mode reveals begin 100ms after cursor arrival; a frame-level regression checks that the text cursor precedes the first glyph.*
 - [x] Cover gradient-backed fields without a mismatched solid-colour wipe. *Each completed content crop comes from post-fill pixels, preserving gradients and image-backed backgrounds.*
 - [x] Support ordinary textareas and test scrolling and expanding textarea fallbacks. *Stable single-line textareas animate; scrolling and geometry-changing textareas hold a captured final state.*
-- [ ] Refresh PR media and rerun stress, full validation, and CI. *Six captioned clips were inspected; 60/60 stress runs and all local checks pass. Remaining: publish the clips and confirm CI on the pushed revision.*
+- [x] Refresh PR media and rerun stress, full validation, and CI. *Six captioned clips are inline in PR #10; 60/60 initial stress runs, 40/40 post-CI-fix runs, the full local suite, and CI pass.*
 
 ## Implementation log
 
@@ -58,3 +58,4 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - 2026-07-31: Visual review exposed blank fallback holds. Scrolling and expanding textareas now replace the pre-action hold with a captured post-fill frame and updated geometry.
 - 2026-07-31: Full suite: 82 passed, 3 provider-gated tests skipped. Six focused scenarios passed 60/60 with two workers; typecheck, build, and `publint` pass.
 - 2026-07-31: Linux CI exposed a font-dependent two-pixel leak before `@`. Reveal stops now use each prefix's actual ink boundary instead of its advance width plus a gutter; the four animated scenarios passed another 40/40 stress run.
+- 2026-07-31: Replaced the four affected media assets after the ink-boundary fix. PR #10 now contains six current captioned clips, and CI passed on `a622095`.
