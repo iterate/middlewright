@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. Pointer-mode reveals pause after arrival, selector-trimmed videos calibrate against live page pixels, final holds use a clean screenshot, and six review-length videos are inline on PR #10. CI passes.
+Complete. Pointer-mode reveals pause after arrival, selector-trimmed videos calibrate against live page pixels, final holds use a clean screenshot, and six review-length videos are inline on PR #10. Full local validation passes.
 
 ## Goal
 
@@ -67,3 +67,4 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - 2026-07-31: Replaced the fixed settle with a budgeted pause, calibrated static recordings against the last live screenshot, and made `finalHold` append that clean frame. The full suite passes: 82 tests with 3 provider-gated skips.
 - 2026-07-31: Six fresh 2.1–2.5s clips start on page content and hold the final state for one second. A 60-run stress pass exposed one inaccurate keyframe sample in the glyph test; its final-hold assertion then passed 10/10 after correction.
 - 2026-07-31: Uploaded all six replacement clips and verified six rendered `<video>` players in the PR body. GitHub CI passes on `22d92ec`.
+- 2026-07-31: A later Linux CI run exposed a static-recording edge case with only one page-content frame before the black close frame. Auto-start trimming now falls back to the matching final screenshot span; its focused suite passed 40/40 and the selected-range regression passed 10/10.
