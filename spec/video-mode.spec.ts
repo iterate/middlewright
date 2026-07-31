@@ -3,6 +3,45 @@ import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
+test("keeps a successful fill when its reveal target disappears", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "outline", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <input aria-label="Search" />
+    <output></output>
+    <script>
+      const input = document.querySelector("input");
+      input.addEventListener("input", () => {
+        document.querySelector("output").textContent = input.value;
+        input.remove();
+      });
+    </script>
+  `);
+
+  await plugged.getByLabel("Search").fill("middlewright");
+
+  await expect(plugged.locator("output")).toHaveText("middlewright");
+  const metadata = await video.metadata();
+  expect(metadata).toMatchObject({
+    highlights: [
+      {
+        method: "fill",
+      },
+    ],
+  });
+  expect(metadata.highlights[0]).not.toHaveProperty("fillReveal");
+});
+
 test("records Playwright test steps as captions by default", async ({ page }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false });
   await using plugged = await addPlugins({

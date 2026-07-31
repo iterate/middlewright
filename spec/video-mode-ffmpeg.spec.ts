@@ -956,6 +956,86 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
   expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
 });
 
+test("reveals filled text in post without changing the runtime fill", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "outline", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <body style="margin: 0; width: 800px; height: 450px; background: rgb(20, 70, 180)">
+        <input
+          aria-label="Work email"
+          style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 4px solid rgb(230, 120, 20); border-radius: 12px; padding: 12px 20px; background: rgb(245, 245, 245); color: rgb(20, 20, 20); caret-color: transparent; font: 42px sans-serif"
+        />
+        <script>
+          const input = document.querySelector("input");
+          const seenValues = [];
+          input.addEventListener("input", () => {
+            seenValues.push(input.value);
+            document.body.dataset.seenValues = JSON.stringify(seenValues);
+            document.body.style.background = "rgb(190, 20, 30)";
+          });
+        </script>
+      </body>
+    `);
+
+    await plugged.getByLabel("Work email").fill("ada@example.com");
+
+    await expect(plugged.locator("body")).toHaveAttribute(
+      "data-seen-values",
+      JSON.stringify(["ada@example.com"]),
+    );
+    await page.waitForTimeout(150);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(fillHighlight).toBeDefined();
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
+  const [earlyFrame, middleFrame, lateFrame] = await Promise.all(
+    [100, 500, 900].map((offset) => videoFrame(paths.rendered, fillStart + offset)),
+  );
+  const scale = Math.min(
+    lateFrame.width / fillHighlight.viewport.width,
+    lateFrame.height / fillHighlight.viewport.height,
+  );
+  const fillBox = {
+    height: Math.round(fillHighlight.rect.height * scale),
+    width: Math.round(fillHighlight.rect.width * scale),
+    x: Math.round(fillHighlight.rect.x * scale),
+    y: Math.round(fillHighlight.rect.y * scale),
+  };
+  const textBox = inset(fillBox, 16);
+  const darkTextPixels = [earlyFrame, middleFrame, lateFrame].map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  );
+
+  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
+  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
+  expect(darkTextPixels[2]).toBeGreaterThan(300);
+
+  const outsideField = averagePixel(lateFrame, { x: 30, y: 30 });
+  expect(outsideField.blue).toBeGreaterThan(120);
+  expect(outsideField.red).toBeLessThan(80);
+});
+
 test("uses a normal pointer tail after text cursor holds", async ({
   page,
 }, testInfo) => {

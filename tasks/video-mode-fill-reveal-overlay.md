@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Specified; implementation has not started. The comparison should keep Playwright's normal runtime behavior and add only a rendered-video effect. Missing: failing spec, metadata capture, FFmpeg composition, docs, demo media, and validation.
+About 75% complete. Runtime-safe capture, progressive FFmpeg composition, fallback coverage, and docs are implemented; focused video suites pass. Missing: full validation, PR media, final task/PR cleanup, and CI.
 
 ## Goal
 
@@ -32,11 +32,11 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 
 ## Checklist
 
-- [ ] Add a failing public-behavior FFmpeg spec for runtime event fidelity and progressive rendered reveal.
-- [ ] Capture the post-action field pixels and the cover geometry/colour without altering the action.
-- [ ] Compose the field crop and shrinking cover into the stable pre-action highlight frame.
-- [ ] Add a fallback spec for a fill target that cannot produce reveal metadata.
-- [ ] Document the post-production fill effect and its runtime semantics.
+- [x] Add a failing public-behavior FFmpeg spec for runtime event fidelity and progressive rendered reveal. *The spec first failed with zero text pixels throughout the hold, while already confirming one normal `input` event.*
+- [x] Capture the post-action field pixels and the cover geometry/colour without altering the action. *`recordFillReveal()` records the content box, composited background colour, and post-fill screenshot only after the original action succeeds.*
+- [x] Compose the field crop and shrinking cover into the stable pre-action highlight frame. *The renderer crops final field pixels onto the pre-action screenshot and moves a clipped background-colour cover across them.*
+- [x] Add a fallback spec for a fill target that cannot produce reveal metadata. *A fill whose input removes itself still succeeds and renders through the ordinary highlight path.*
+- [x] Document the post-production fill effect and its runtime semantics. *The README states the one-fill runtime behavior, stable surrounding frame, and fallback.*
 - [ ] Generate and inspect comparison media for the PR.
 - [ ] Run focused stress coverage, the full suite, typecheck, build, and `publint`.
 - [ ] Move this task to `tasks/complete/` and update the draft PR body.
@@ -44,3 +44,5 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 ## Implementation log
 
 - 2026-07-31: Chose a side-by-side branch from `origin/main` so this post-production approach can be reviewed independently of PR #8's runtime typing approach.
+- 2026-07-31: Completed two RED→GREEN slices. All 38 video-mode and FFmpeg specs pass.
+- 2026-07-31: Inspected early, middle, and late native frames. They show `ada`, `ada@example`, then `ada@example.com` over the unchanged blue pre-action page.

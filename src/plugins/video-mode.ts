@@ -96,10 +96,17 @@ export type VideoModeViewport = {
   height: number;
 };
 
+export type VideoModeFillReveal = {
+  backgroundColor: string;
+  contentRect: VideoModeRect;
+  image: string;
+};
+
 export type VideoModeHighlight = VideoModeSpan & {
   actionEnd?: number;
   color: string;
   dialog?: VideoModeDialogAnnotation;
+  fillReveal?: VideoModeFillReveal;
   image?: string;
   method?: OverrideableMethod;
   rect: VideoModeRect;
@@ -1151,6 +1158,121 @@ const recordHighlight = async (options: {
   }
 };
 
+const recordFillReveal = async (options: {
+  highlight: VideoModeHighlight;
+  locator: Locator;
+  state: VideoModeState;
+  testInfo: TestInfo;
+}) => {
+  try {
+    const snapshot = await options.locator.evaluate((element) => {
+      if (!(element instanceof HTMLElement)) {
+        return;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const pixels = (value: string) => Number.parseFloat(value) || 0;
+      const contentRect = {
+        height:
+          rect.height -
+          pixels(style.borderTopWidth) -
+          pixels(style.borderBottomWidth) -
+          pixels(style.paddingTop) -
+          pixels(style.paddingBottom),
+        width:
+          rect.width -
+          pixels(style.borderLeftWidth) -
+          pixels(style.borderRightWidth) -
+          pixels(style.paddingLeft) -
+          pixels(style.paddingRight),
+        x: rect.left + pixels(style.borderLeftWidth) + pixels(style.paddingLeft),
+        y: rect.top + pixels(style.borderTopWidth) + pixels(style.paddingTop),
+      };
+
+      if (contentRect.width <= 0 || contentRect.height <= 0) {
+        return;
+      }
+
+      const parseColor = (value: string) => {
+        const channels = value.match(
+          /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/,
+        );
+        if (!channels) {
+          return;
+        }
+        const alphaText = channels[4] || "1";
+        const alpha = alphaText.endsWith("%")
+          ? Number.parseFloat(alphaText) / 100
+          : Number.parseFloat(alphaText);
+        return {
+          alpha,
+          blue: Number(channels[3]),
+          green: Number(channels[2]),
+          red: Number(channels[1]),
+        };
+      };
+      const layers = [];
+      let current: Element | null = element;
+      while (current) {
+        const color = parseColor(getComputedStyle(current).backgroundColor);
+        if (color && color.alpha > 0) {
+          layers.push(color);
+        }
+        current = current.parentElement;
+      }
+
+      let background = { alpha: 1, blue: 255, green: 255, red: 255 };
+      for (const layer of layers.reverse()) {
+        const alpha = layer.alpha + background.alpha * (1 - layer.alpha);
+        background = {
+          alpha,
+          blue:
+            (layer.blue * layer.alpha +
+              background.blue * background.alpha * (1 - layer.alpha)) /
+            alpha,
+          green:
+            (layer.green * layer.alpha +
+              background.green * background.alpha * (1 - layer.alpha)) /
+            alpha,
+          red:
+            (layer.red * layer.alpha +
+              background.red * background.alpha * (1 - layer.alpha)) /
+            alpha,
+        };
+      }
+      const hex = [background.red, background.green, background.blue]
+        .map((channel) => Math.round(channel).toString(16).padStart(2, "0"))
+        .join("");
+
+      return {
+        backgroundColor: `0x${hex}`,
+        contentRect,
+      };
+    });
+
+    if (!snapshot) {
+      return;
+    }
+
+    const image = `video-mode-fill-${options.state.highlightImageIndex}.png`;
+    options.state.highlightImageIndex += 1;
+    await mkdir(options.testInfo.outputDir, { recursive: true });
+    await options.locator.page().screenshot({
+      path: join(options.testInfo.outputDir, image),
+      scale: "css",
+    });
+    options.highlight.fillReveal = {
+      backgroundColor: snapshot.backgroundColor,
+      contentRect: snapshot.contentRect,
+      image,
+    };
+  } catch {
+    // A disappearing target or failed post-action screenshot keeps the normal
+    // stable pre-action highlight.
+  }
+};
+
 const recordDeadAirSpan = (state: VideoModeState, span: VideoModeSpan) => {
   const start = Math.round(span.start);
   const end = Math.round(span.end);
@@ -1510,15 +1632,19 @@ const videoPieces = (options: {
   return pieces.filter((piece) => piece.end > piece.start);
 };
 
-const scaleHighlight = (highlight: VideoModeHighlight, video: { width: number; height: number }) => {
+const scaleVideoModeRect = (
+  rect: VideoModeRect,
+  viewport: VideoModeViewport,
+  video: { width: number; height: number },
+) => {
   const scale = Math.min(
-    video.width / highlight.viewport.width,
-    video.height / highlight.viewport.height,
+    video.width / viewport.width,
+    video.height / viewport.height,
   );
-  const x = Math.max(0, Math.round(highlight.rect.x * scale));
-  const y = Math.max(0, Math.round(highlight.rect.y * scale));
-  const width = Math.max(1, Math.round(highlight.rect.width * scale));
-  const height = Math.max(1, Math.round(highlight.rect.height * scale));
+  const x = Math.max(0, Math.round(rect.x * scale));
+  const y = Math.max(0, Math.round(rect.y * scale));
+  const width = Math.max(1, Math.round(rect.width * scale));
+  const height = Math.max(1, Math.round(rect.height * scale));
 
   return {
     height: Math.min(height, Math.max(1, video.height - y)),
@@ -1526,6 +1652,10 @@ const scaleHighlight = (highlight: VideoModeHighlight, video: { width: number; h
     x,
     y,
   };
+};
+
+const scaleHighlight = (highlight: VideoModeHighlight, video: { width: number; height: number }) => {
+  return scaleVideoModeRect(highlight.rect, highlight.viewport, video);
 };
 
 const scaledViewportSize = (
@@ -1948,6 +2078,83 @@ const renderedVideoFilter = (options: {
     labels.push(`[${label}]`);
 
     const operations: string[] = [];
+    const fillReveal = piece.highlight?.fillReveal;
+    const preFillInput = piece.highlight?.image
+      ? highlightInputByImage.get(piece.highlight.image)
+      : undefined;
+    const postFillInput = fillReveal
+      ? highlightInputByImage.get(fillReveal.image)
+      : undefined;
+
+    if (piece.highlight && fillReveal && preFillInput && postFillInput) {
+      const scaledViewport = scaledViewportSize(piece.highlight.viewport, options.video);
+      const fieldRect = scaleHighlight(piece.highlight, options.video);
+      const contentRect = scaleVideoModeRect(
+        fillReveal.contentRect,
+        piece.highlight.viewport,
+        options.video,
+      );
+      const contentX = Math.max(0, contentRect.x - fieldRect.x);
+      const contentY = Math.max(0, contentRect.y - fieldRect.y);
+      const contentWidth = Math.max(
+        1,
+        Math.min(contentRect.width, fieldRect.width - contentX),
+      );
+      const contentHeight = Math.max(
+        1,
+        Math.min(contentRect.height, fieldRect.height - contentY),
+      );
+      const duration = renderedPieceDuration(piece);
+      const durationSeconds = formatSeconds(duration);
+      const baseLabel = `fillbase${index}`;
+      const postFieldLabel = `fillpost${index}`;
+      const coverFieldLabel = `fillcoverfield${index}`;
+      const coverLabel = `fillcover${index}`;
+      const revealLabel = `fillreveal${index}`;
+      const composedLabel = `fillcomposed${index}`;
+
+      filters.push(
+        [
+          `[${preFillInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+          `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          `trim=start=0:end=${durationSeconds}`,
+          `setpts=PTS-STARTPTS[${baseLabel}]`,
+        ].join(","),
+      );
+      filters.push(
+        [
+          `[${postFillInput.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+          `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          `crop=w=${fieldRect.width}:h=${fieldRect.height}:x=${fieldRect.x}:y=${fieldRect.y}`,
+          `trim=start=0:end=${durationSeconds}`,
+          "setpts=PTS-STARTPTS",
+          `split=2[${postFieldLabel}][${coverFieldLabel}]`,
+        ].join(","),
+      );
+      filters.push(
+        [
+          `[${coverFieldLabel}]crop=w=${contentWidth}:h=${contentHeight}:x=${contentX}:y=${contentY}`,
+          `drawbox=x=0:y=0:w=iw:h=ih:color=${fillReveal.backgroundColor}:t=fill[${coverLabel}]`,
+        ].join(","),
+      );
+      filters.push(
+        [
+          `[${postFieldLabel}][${coverLabel}]overlay=x='${contentX}+${contentWidth}*t/${durationSeconds}'`,
+          `y=${contentY}`,
+          "eval=frame",
+          `shortest=1[${revealLabel}]`,
+        ].join(":"),
+      );
+      filters.push(
+        `[${baseLabel}][${revealLabel}]overlay=x=${fieldRect.x}:y=${fieldRect.y}:shortest=1[${composedLabel}]`,
+      );
+      filters.push(
+        options.highlightMode === "outline"
+          ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`
+          : `[${composedLabel}]null[${label}]`,
+      );
+      continue;
+    }
 
     if (piece.highlight?.image && highlightInputByImage.has(piece.highlight.image)) {
       const input = highlightInputByImage.get(piece.highlight.image)!;
@@ -2504,12 +2711,20 @@ const renderVideo = async (options: {
   }
 
   const highlightInputs = options.highlights
-    .filter((highlight) => highlight.image)
-    .map((highlight, index) => ({
-      durationMs: highlight.end - highlight.start,
-      image: highlight.image!,
+    .flatMap((highlight) => {
+      const images = [
+        highlight.image,
+        highlight.fillReveal?.image,
+      ].filter((image): image is string => Boolean(image));
+      return images.map((image) => ({
+        durationMs: highlight.end - highlight.start,
+        image,
+      }));
+    })
+    .map((input, index) => ({
+      ...input,
       inputIndex: index + 1,
-      path: join(options.outputDir, highlight.image!),
+      path: join(options.outputDir, input.image),
     }));
   const dialogPostFrameInput: DialogPostFrameInput | undefined = options.dialogPostFrame
     ? {
@@ -2754,7 +2969,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       return { videoMode: controls };
     },
 
-    middleware: async ({ locator, method, testInfo, timing }, next) => {
+    middleware: async ({ args, locator, method, testInfo, timing }, next) => {
       if (state.deadAirDepth > 0) return next();
 
       // Skip if called from internal helpers (navigation, login flows etc)
@@ -2798,13 +3013,35 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             });
 
       try {
-        return await next();
-      } finally {
+        const result = await next();
         if (recordedHighlight && state.startedAt !== undefined) {
           recordedHighlight.actionEnd = Math.max(
             recordedHighlight.start,
             Math.round(performance.now() - state.startedAt),
           );
+        }
+        if (
+          recordedHighlight &&
+          method === "fill" &&
+          typeof args[0] === "string" &&
+          args[0].length > 0
+        ) {
+          await recordFillReveal({
+            highlight: recordedHighlight,
+            locator,
+            state,
+            testInfo,
+          });
+        }
+        return result;
+      } finally {
+        if (recordedHighlight && state.startedAt !== undefined) {
+          recordedHighlight.actionEnd =
+            recordedHighlight.actionEnd ||
+            Math.max(
+              recordedHighlight.start,
+              Math.round(performance.now() - state.startedAt),
+            );
         }
         if (
           !recordedHighlight &&
