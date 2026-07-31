@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-About 90% complete. Implementation and validation are green, and four final clips have been inspected locally. Uploading those clips and completing the PR/task handoff remain.
+Complete. Scrolled and resized fields now reveal their final visible pixels over an assumed opaque background; all focused placeholder fixtures, rendered videos, full validation, and PR handoff are done.
 
 ## Goal
 
@@ -41,8 +41,8 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - [x] Add and pass a horizontally scrolling single-line input reveal spec. *The rendered hold exposes the final scrolled suffix progressively.*
 - [x] Add placeholders and placeholder-pixel assertions across the focused reveal fixtures. *All four focused fixtures have placeholders; the stable textarea video holds a visible magenta placeholder before proving it is absent from the reveal.*
 - [x] Stress the affected frame-level specs and run the full validation suite. *Focused scenarios pass 40/40; full suite passes 83 tests with 3 provider-gated skips; typecheck, build, and `publint` pass.*
-- [ ] Generate, inspect, and upload current videos for every focused scenario.
-- [ ] Update the PR body, resolve review feedback, and move this task to `tasks/complete/`.
+- [x] Generate, inspect, and upload current videos for every focused scenario. *The PR body has four inline GitHub players covering a placeholder, vertical scrolling, horizontal scrolling, and textarea expansion.*
+- [x] Update the PR body, resolve review feedback, and move this task to `tasks/complete/`. *PR #12 documents the fallback, limits, videos, and green validation; no review feedback is outstanding.*
 
 ## Implementation log
 
@@ -50,3 +50,4 @@ Keep `locator.fill()` as one normal runtime action while making more completed f
 - 2026-07-31: Completed the RED→GREEN scrolling tracer bullet, then covered expanded geometry and horizontal input scrolling through the same final-crop path.
 - 2026-07-31: A combined run exposed inaccurate keyframe seeking in the new pixel assertions. They now sample the fully decoded 25fps stream; all 24 FFmpeg specs pass.
 - 2026-07-31: Inspected contact sheets for placeholder, scrolling textarea, horizontal input, and expanding textarea clips. The placeholder caption now spans both the click hold and reveal so it stays accurate under concurrent timing.
+- 2026-07-31: Uploaded all four clips as inline GitHub video players, updated PR #12, and confirmed its test and release checks are green before completing the task.
