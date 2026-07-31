@@ -1,5 +1,5 @@
 ---
-status: ready
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-About 75% complete. Runtime-safe capture, progressive FFmpeg composition, fallback coverage, and docs are implemented; focused video suites pass. Missing: full validation, PR media, final task/PR cleanup, and CI.
+Complete. Runtime-safe capture, progressive FFmpeg composition, fallback coverage, docs, direct comparison media, stress coverage, and the full local validation suite are green.
 
 ## Goal
 
@@ -37,12 +37,14 @@ Offer an independent alternative to PR #8: make a completed `locator.fill()` dra
 - [x] Compose the field crop and shrinking cover into the stable pre-action highlight frame. *The renderer crops final field pixels onto the pre-action screenshot and moves a clipped background-colour cover across them.*
 - [x] Add a fallback spec for a fill target that cannot produce reveal metadata. *A fill whose input removes itself still succeeds and renders through the ordinary highlight path.*
 - [x] Document the post-production fill effect and its runtime semantics. *The README states the one-fill runtime behavior, stable surrounding frame, and fallback.*
-- [ ] Generate and inspect comparison media for the PR.
-- [ ] Run focused stress coverage, the full suite, typecheck, build, and `publint`.
-- [ ] Move this task to `tasks/complete/` and update the draft PR body.
+- [x] Generate and inspect comparison media for the PR. *The account-flow render was reviewed frame by frame and uploaded as a GitHub inline video asset.*
+- [x] Run focused stress coverage, the full suite, typecheck, build, and `publint`. *The reveal spec passed 10/10 with two workers; the full suite passed 76 tests with 3 provider-gated skips.*
+- [x] Move this task to `tasks/complete/` and update the draft PR body. *Completed on the feature branch; PR #10 describes the net effect, comparison, media, and validation.*
 
 ## Implementation log
 
 - 2026-07-31: Chose a side-by-side branch from `origin/main` so this post-production approach can be reviewed independently of PR #8's runtime typing approach.
 - 2026-07-31: Completed two RED→GREEN slices. All 38 video-mode and FFmpeg specs pass.
 - 2026-07-31: Inspected early, middle, and late native frames. They show `ada`, `ada@example`, then `ada@example.com` over the unchanged blue pre-action page.
+- 2026-07-31: Full suite: 76 passed, 3 provider-gated tests skipped. Typecheck, build, and `publint` pass. The reveal regression passed 10 repeated runs with 2 workers.
+- 2026-07-31: Uploaded the 6.8-second account-flow render to `github.com/user-attachments/assets/211cc473-5a55-44a2-987d-23ffcd6f3404`.
