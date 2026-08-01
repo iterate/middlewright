@@ -216,12 +216,16 @@ Stable, non-scrolling inputs and textareas use measured glyph stops. Scrolling a
 
 Chromium's native `alert`, `confirm`, and `prompt` UI is outside the page video surface. With highlighting enabled, `videoMode` observes the real Playwright dialog interaction and adds a synthetic dialog to the rendered video: the real message is readable, the chosen OK/Cancel button is held on screen, and the pointer clicks it. Accepted prompts first show a text-cursor hold over the default value, then the supplied prompt text and chosen button. The rendered video always includes at least one second after the final dialog; natural footage is left alone when it is long enough, otherwise the final clean page frame is extended. The test still handles the real Playwright `Dialog`; this only changes the rendered artifact. `beforeunload` dialogs are not synthesized.
 
-#### Trimming the blank startup lead-in (`trimStart`)
+#### Choosing where the rendered video starts (`trimStart`)
 
-Recording begins at browser-context creation, so a video usually opens with a few seconds of `about:blank` + loading shell before the app paints. `trimStart` finds where that lead-in ends and starts the video on real content — instead of calling `setStartTime()` by hand in every test.
+Recording begins at browser-context creation. By default, `videoMode` trims setup footage before the first locator action, including calls to `waitFor()`, `click()`, and `fill()`. The action's Playwright auto-wait stays in the clip.
 
 ```ts
-videoMode({ /* trimStart: "auto" is the default */ });
+const video = videoMode(); // trimStart: "auto" is the default
+await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+
+// The rendered video starts here, including this click's auto-wait.
+await plugged.getByRole("button", { name: "Create report" }).click();
 
 // start when a known "ready" element first becomes visible (falls back to
 // blank detection if it never appears):
@@ -233,7 +237,7 @@ videoMode({ trimStart: "never" });
 
 `trimStart` is one of:
 
-- **`"auto"`** (default) — pick a sensible strategy; currently the blank detector. Chosen so consumers get lead-in trimming just by upgrading.
+- **`"auto"`** (default) — start when the first locator method is invoked. If no locator is used, keep the natural recorder start.
 - **`"detect-blank"`** — decode a coarse strip of the opening seconds and find the first frame that *differs* from the opening frame (the moment the static blank lead-in ends), starting there only when the lead-in is long enough to be worth trimming. Keys on change-from-the-opening-frame, not how "busy" a frame is, so it's robust to letterbox bars and dark loading shells.
 - **`["selector", css]`** — start the moment `css` first becomes visible (waited for once, live); falls back to blank detection if it never appears.
 - **`"never"`** — don't trim.
