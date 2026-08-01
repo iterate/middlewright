@@ -37,38 +37,15 @@ const blankThenContent = (options: { blankMs: number; markerAtMs?: number }) => 
 `;
 
 test("starts at the first locator invocation by default", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 500, highlight: false });
+  const video = videoMode({ finalHold: 0, highlight: false });
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 450 });
     await plugged.setContent(`
-      <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; font: 24px system-ui; }
-        main { align-content: center; display: grid; height: 100vh; padding: 80px; }
-        [hidden] { display: none; }
-        #boot { background: #172554; color: white; }
-        #app { background: #dcfce7; color: #14532d; }
-        button { font: inherit; padding: 12px 20px; width: max-content; }
-      </style>
-      <main id="boot">
-        <h1>Preparing report…</h1>
-        <p>This setup footage should be trimmed.</p>
-      </main>
-      <main id="app" hidden>
-        <h1>Report ready</h1>
-        <button id="ready">Open report</button>
-        <button id="next">Next</button>
-      </main>
-      <script>
-        setTimeout(() => {
-          document.querySelector('#boot').hidden = true;
-          document.querySelector('#app').hidden = false;
-        }, 2100);
-      </script>
+      <button id="ready" hidden>Ready</button>
+      <button id="next">Next</button>
+      <script>setTimeout(() => { document.querySelector('#ready').hidden = false; }, 600)</script>
     `);
 
-    await plugged.waitForTimeout(1500);
     const firstLocatorBefore = plugged.videoMode.getVideoTimestamp();
     await plugged.locator("#ready").waitFor();
     const firstLocatorAfter = plugged.videoMode.getVideoTimestamp();

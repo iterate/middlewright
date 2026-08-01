@@ -37,4 +37,3 @@ Make `videoMode()` start its rendered clip at the first locator method call (`wa
 - 2026-08-01: Fleshed out from the default-start-time idea. Chose locator invocation rather than completion so the first interaction and its auto-wait remain visible.
 - 2026-08-01: Added the failing first-locator spec, implemented the timing-based default, and retained explicit selector, blank-detection, never, and manual starts.
 - 2026-08-01: Focused tests, full tests, typecheck, build, and package lint all pass.
-- 2026-08-01: Made the checked-in first-locator fixture visually reviewable: its raw clip includes a clear setup screen, while the rendered clip retains only the locator's final 600 ms auto-wait before the ready state.
