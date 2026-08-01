@@ -1492,7 +1492,7 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
     clickHighlight,
     metadata.highlights,
   );
-  const renderedFrames = await videoFrames(paths.rendered);
+  const renderedFrames = await videoFrames(paths.rendered, 25);
   const [placeholderFrame] = await videoFramesAt(paths.rendered, [placeholderStart + 500]);
   const lateFrame = renderedFrames.at(-1)!;
   const scale = Math.min(
@@ -1831,7 +1831,7 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
   expect(fillHighlight).toBeDefined();
   expect(fillHighlight.fillReveal).toBeDefined();
   expect(fillHighlight.rect.height).toBeGreaterThan(initialHeight);
-  const frames = await videoFrames(video.outputPaths().rendered);
+  const frames = await videoFrames(video.outputPaths().rendered, 25);
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
     frames[0].height / fillHighlight.viewport.height,
@@ -2474,7 +2474,8 @@ const videoFrames = async (path: string, framesPerSecond: number): Promise<Video
 };
 
 const videoFramesAt = async (path: string, timestampsMs: number[]) => {
-  const frames = await videoFrames(path);
+  // 25fps: one frame per 40ms, matching the index arithmetic below.
+  const frames = await videoFrames(path, 25);
   return timestampsMs.map((timestampMs) =>
     frames[Math.max(0, Math.min(frames.length - 1, Math.round(timestampMs / 40)))],
   );
