@@ -5,7 +5,7 @@ size: small
 
 ## Status
 
-Complete. Default video trimming now starts at the first eligible locator invocation while explicit modes retain precedence. Focused and full verification pass.
+Complete. Default video trimming starts at the first eligible locator invocation while explicit modes retain precedence. A five-case visual comparison covers every public start policy; focused and full verification pass.
 
 ## Goal
 
@@ -30,6 +30,7 @@ Make `videoMode()` start its rendered clip at the first locator method call (`wa
 - [x] Remove default reliance on blank-frame detection while preserving explicit `"detect-blank"` support. *Resolved auto mode selects first-locator timing, while the pixel detector remains available only for explicit blank detection and selector fallback.*
 - [x] Update the public `trimStart` docs and examples. *README and API docs show the first-action default and its retained auto-wait.*
 - [x] Run focused video-mode specs, typecheck, build, and the full suite. *All 27 focused specs pass; the full suite has 88 passes and 3 provider-gated skips; typecheck, build, and publint pass.*
+- [x] Add a like-for-like visual comparison of every start policy. *One timed page produces rendered artifacts for default first-locator, manual, selector, blank-detection, and never starts.*
 - [x] Move this task to `tasks/complete/` when the branch is done. *Moved with the 2026-08-01 completion date.*
 
 ## Implementation log
@@ -37,3 +38,4 @@ Make `videoMode()` start its rendered clip at the first locator method call (`wa
 - 2026-08-01: Fleshed out from the default-start-time idea. Chose locator invocation rather than completion so the first interaction and its auto-wait remain visible.
 - 2026-08-01: Added the failing first-locator spec, implemented the timing-based default, and retained explicit selector, blank-detection, never, and manual starts.
 - 2026-08-01: Focused tests, full tests, typecheck, build, and package lint all pass.
+- 2026-08-01: Added and visually inspected a five-video comparison spec using one shared startup timeline, so the start policy is the only variable between artifacts.
