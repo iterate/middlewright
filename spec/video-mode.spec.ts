@@ -1,4 +1,3 @@
-import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
@@ -263,7 +262,6 @@ test("records an accepted confirm as a synthetic dialog annotation", async ({
           message: "Discard unsaved changes to release-notes.md?",
           type: "confirm",
         },
-        image: expect.stringMatching(/\.png$/),
         method: "click",
       }),
     ]),
@@ -306,7 +304,6 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
         promptText: "release-notes.md",
         type: "prompt",
       },
-      image: expect.stringMatching(/\.png$/),
       method: "fill",
     },
     {
@@ -316,7 +313,62 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
         promptText: "release-notes.md",
         type: "prompt",
       },
-      image: expect.stringMatching(/\.png$/),
+      method: "click",
+    },
+  ]);
+});
+
+test("records an explicit empty prompt response separately from its default", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 300 },
+    trimStart: "never",
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <button id="rename">Rename file</button>
+    <output id="result"></output>
+    <script>
+      document.querySelector("#rename").addEventListener("click", () => {
+        document.querySelector("#result").textContent = JSON.stringify(
+          prompt("New file name", "draft-👩🏽‍💻.md"),
+        );
+      });
+    </script>
+  `);
+  plugged.once("dialog", (dialog) => dialog.accept(""));
+
+  await plugged.locator("#rename").click();
+
+  await expect(plugged.locator("#result")).toHaveText('""');
+  const dialogHighlights = (await video.metadata()).highlights.filter(
+    (candidate) => candidate.dialog?.type === "prompt",
+  );
+  expect(dialogHighlights).toMatchObject([
+    {
+      dialog: {
+        action: "accept",
+        defaultValue: "draft-👩🏽‍💻.md",
+        message: "New file name",
+        promptText: "",
+        type: "prompt",
+      },
+      method: "fill",
+    },
+    {
+      dialog: {
+        action: "accept",
+        defaultValue: "draft-👩🏽‍💻.md",
+        message: "New file name",
+        promptText: "",
+        type: "prompt",
+      },
       method: "click",
     },
   ]);
@@ -510,10 +562,7 @@ test("records back-to-back dialogs in order", async ({ page }, testInfo) => {
     { dialog: { action: "accept", message: "Discard unsaved changes?", type: "confirm" } },
     { dialog: { action: "accept", message: "Really discard this file?", type: "confirm" } },
   ]);
-  const imageSizes = await Promise.all(
-    dialogHighlights.map((highlight) => stat(join(testInfo.outputDir, highlight.image!))),
-  );
-  expect(Math.min(...imageSizes.map((image) => image.size))).toBeGreaterThan(10_000);
+  expect(dialogHighlights.map((highlight) => highlight.image)).toEqual([undefined, undefined]);
 });
 
 test("skipped methods are not highlighted", async ({ page }, testInfo) => {
