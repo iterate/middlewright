@@ -8,7 +8,7 @@ test.use({
 
 test("creates todos and reviews their details", async ({ page: basePage }, testInfo) => {
   const db = new TodoDB({ password: "hunter2" });
-  db.setDelay(2300);
+  db.setDelay(5000);
   await db.connect(basePage);
   await using page = await addPlugins({
     page: basePage,
@@ -22,7 +22,7 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   await page.getByRole("heading", { name: "Todo desk" }).waitFor();
   await page.getByText("No todos yet").waitFor();
 
-  db.setDelay(1100);
+  db.setDelay(700);
   await page.getByLabel("Title").fill("Review the demo recording");
   await page
     .getByLabel("Details")
@@ -30,7 +30,7 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   await page.getByRole("button", { name: "Add todo" }).click();
   await page.getByRole("button", { name: "Review the demo recording" }).waitFor();
 
-  db.setDelay(5000);
+  db.setDelay(3500);
   await page.getByLabel("Title").fill("Publish release notes");
   await page
     .getByLabel("Details")
@@ -38,12 +38,12 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   await page.getByRole("button", { name: "Add todo" }).click();
   await page.getByRole("button", { name: "Publish release notes" }).waitFor();
 
-  db.setDelay(2100);
+  db.setDelay(1400);
   await page.getByRole("button", { name: "Review the demo recording" }).click();
   await page.getByText("Check the demo pacing").waitFor();
   await page.getByRole("button", { name: "Close" }).click();
 
-  db.setDelay(1650);
+  db.setDelay(850);
   await page.getByRole("button", { name: "Publish release notes" }).click();
   await page.getByText("Write down the decisions").waitFor();
   await page.getByRole("button", { name: "Close" }).click();
