@@ -151,7 +151,7 @@ function getAppHtml() {
             <textarea name="body" required></textarea>
           </label>
           <button class="primary" type="submit">Add todo</button>
-          <div id="create-status" class="create-status"></div>
+          <div id="create-status" class="create-status" hidden></div>
         </form>
         <div id="todos"></div>
       </section>
@@ -234,20 +234,20 @@ function getAppHtml() {
       const submit = todoForm.querySelector<HTMLButtonElement>('[type="submit"]')!;
       const input = Object.fromEntries(new FormData(todoForm));
       submit.disabled = true;
-      createStatus.className = "status compact";
-      createStatus.setAttribute("data-spinner", "true");
-      createStatus.innerHTML = spinner("Creating todo…");
+      submit.textContent = "Creating…";
+      submit.setAttribute("data-spinner", "true");
+      createStatus.hidden = true;
       try {
         await app.todoDBCreate({ body: input.body, title: input.title });
         todoForm.reset();
         await loadTodos();
-        createStatus.className = "create-status";
-        createStatus.removeAttribute("data-spinner");
-        createStatus.replaceChildren();
       } catch (error) {
+        createStatus.hidden = false;
         showError(createStatus, error);
       } finally {
         submit.disabled = false;
+        submit.textContent = "Add todo";
+        submit.removeAttribute("data-spinner");
       }
     });
 
@@ -325,13 +325,11 @@ function getAppHtml() {
       }
       @keyframes spin { to { transform: rotate(360deg); } }
       .todo-form {
-        align-items: end;
         background: #fffaf1;
         border: 1px solid #ded3c0;
         border-radius: 18px;
         display: grid;
         gap: 14px;
-        grid-template-columns: 1fr 1.5fr auto;
         margin-bottom: 20px;
         padding: 18px;
       }
@@ -346,8 +344,9 @@ function getAppHtml() {
         padding: 11px 12px;
         resize: none;
       }
+      .todo-form textarea { height: 84px; line-height: 1.45; }
       .todo-form input:focus, .todo-form textarea:focus { border-color: #9d6f2f; outline: 2px solid #ead8ba; }
-      .create-status { grid-column: 1 / -1; }
+      .todo-form .primary { justify-self: start; min-width: 108px; }
       .todo-grid { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); }
       .todo-card {
         background: #fff;
@@ -387,7 +386,7 @@ function getAppHtml() {
       .close { margin-top: 28px; }
       .error { background: #fff0ed; border-color: #e4a69a; color: #8d3022; }
       @media (max-width: 760px) {
-        .todo-form, .todo-grid { grid-template-columns: 1fr; }
+        .todo-grid { grid-template-columns: 1fr; }
       }
     `;
   }
