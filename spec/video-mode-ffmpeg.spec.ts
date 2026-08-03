@@ -1088,8 +1088,6 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   expect(promptFill).toBeDefined();
   expect(promptClick).toBeDefined();
 
-  const fillStart = renderedHighlightStartWithoutDeadAir(promptFill, metadata.highlights);
-  const clickStart = renderedHighlightStartWithoutDeadAir(promptClick, metadata.highlights);
   const renderedFrames = await videoFrames(paths.rendered, 25);
   const scale = Math.min(
     renderedFrames[0].width / promptFill.viewport.width,
@@ -1117,9 +1115,13 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     x: Math.round(promptClick.rect.x * buttonScale),
     y: Math.round(promptClick.rect.y * buttonScale),
   };
-  const dialogFrames = renderedFrames.slice(
-    Math.floor(fillStart / 40),
-    Math.ceil((clickStart + highlightDurationMs) / 40),
+  const dialogFrames = renderedFrames.filter(
+    (frame) =>
+      countPixels(
+        frame,
+        inset(inputBox, 3),
+        ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+      ) > inputBox.width * inputBox.height * 0.5,
   );
   const darkTextPixels = dialogFrames.map((frame) =>
     countPixels(
@@ -1136,20 +1138,40 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   const completeFrame = darkTextPixels.findIndex(
     (count) => count >= completePixelCount * 0.95,
   );
-  const firstSelectedFrame = dialogFrames.findIndex(
-    (frame) =>
-      countPixels(
-        frame,
-        inset(okButtonBox, 6),
-        ({ blue, green, red }) => blue > 150 && blue > red * 1.4 && blue > green * 1.1,
-      ) > 100,
+  const selectedButtonPixels = dialogFrames.map((frame) =>
+    countPixels(
+      frame,
+      inset(okButtonBox, 6),
+      ({ blue, green, red }) => blue > 150 && blue > red * 1.4 && blue > green * 1.1,
+    ),
   );
+  const firstSelectedFrame = selectedButtonPixels.findIndex((count) => count > 100);
 
+  expect(dialogFrames.length).toBeGreaterThanOrEqual(Math.round((highlightDurationMs * 2) / 40));
   expect(completePixelCount).toBeGreaterThan(50);
   expect(blankFrame).toBeGreaterThanOrEqual(0);
   expect(partialFrame).toBeGreaterThan(blankFrame);
   expect(completeFrame).toBeGreaterThan(partialFrame);
   expect(firstSelectedFrame).toBeGreaterThan(completeFrame);
+  expect(selectedButtonPixels.slice(firstSelectedFrame).every((count) => count > 100)).toBe(true);
+
+  const rawFrames = await videoFrames(paths.raw, 25);
+  const center = {
+    height: Math.round(rawFrames[0].height * 0.5),
+    width: Math.round(rawFrames[0].width * 0.5),
+    x: Math.round(rawFrames[0].width * 0.125),
+    y: Math.round(rawFrames[0].height * 0.25),
+  };
+  const mostWhiteRawPixels = Math.max(
+    ...rawFrames.map((frame) =>
+      countPixels(
+        frame,
+        center,
+        ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+      ),
+    ),
+  );
+  expect(mostWhiteRawPixels).toBeLessThan(5_000);
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({

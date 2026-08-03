@@ -7,7 +7,7 @@ size: large
 
 ## Status
 
-The first frame-sequence regression is RED on `main`: the selected blue OK appears at frame 24, before typing completes at frame 49. ASS implementation and review videos are still missing.
+The tracer bullet is green: dialogs no longer touch page DOM, the renderer freezes the last clean raw frame and draws ASS phases before the pointer, and the 25 fps sequence now stays neutral through typing before selecting once. Edge coverage, full validation, docs, and review videos remain.
 
 ## Goal
 
@@ -26,9 +26,9 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 ## Checklist
 
 - [x] Add a failing public rendered-video regression for neutral white → progressive prompt text with white OK → blue OK, with no early selected frame. *The 25 fps decoded sequence fails because selected blue first appears at frame 24, before complete prompt text at frame 49.*
-- [ ] Replace in-page synthetic dialog capture with a clean-frame-plus-ASS dialog scene.
-- [ ] Add a public raw-video regression proving Middlewright dialog artwork never appears.
-- [ ] Cover alert and confirm accept/dismiss behavior without changing Playwright listener or automatic-dismiss semantics.
+- [x] Replace in-page synthetic dialog capture with a clean-frame-plus-ASS dialog scene. *The Playwright observer records dialog facts and layout targets; FFmpeg clones the last frame before open and burns the ASS scene before cursor overlays.*
+- [x] Add a public raw-video regression proving Middlewright dialog artwork never appears. *The prompt spec scans every raw frame over the panel area and rejects a white synthetic panel.*
+- [x] Cover alert and confirm accept/dismiss behavior without changing Playwright listener or automatic-dismiss semantics. *Existing public metadata and rendered confirm regressions are green with the prepended observer and no-listener auto-dismiss intact.*
 - [ ] Cover prompt default, empty, Unicode, and long/wrapped message/value cases where practical.
 - [ ] Preserve existing pointer motion, prompt/goto reveal behavior, dead-air timing, and clean post-dialog pacing.
 - [ ] Document the ASS approach and compare its code complexity, runtime overhead, layout limits, portability, and fidelity in the PR body.
@@ -40,3 +40,5 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 
 - 2026-08-03: Created `alternative/video-mode-ass-dialogs` from latest `origin/main` in a sibling worktree. Chose the rendered frame sequence as the first public-behavior feedback loop because it directly captures the reported one-frame state rewind at 25 fps.
 - 2026-08-03: The prompt regression reproduces the time-travel ordering deterministically: the current screenshot-backed renderer leaks a selected OK frame before the neutral/typing phase finishes.
+- 2026-08-03: Removed the page init-script and runtime DOM overlay. Dialog highlights now carry a clean-frame timestamp plus deterministic input/button geometry; a dedicated ASS pass draws the scene before pointer compositing.
+- 2026-08-03: The first ASS pass exposed letterboxing: an 800×600 page was scaled into 600×450 content inside an 800×450 video. Dialog layout now uses the same scaled viewport as screenshots and pointer targets. The frame-order, raw-cleanliness, rendered confirm, post-roll, metadata, listener-order, auto-dismiss, and back-to-back checks pass.
