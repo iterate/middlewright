@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The `waitFor()` implementation and kitchen-sink todo-app example are complete. Frame-by-frame analysis found and fixed stale-frame flashes in the rendered demo: repeated final-page pixels had been mistaken for a timing marker. The roughly 29-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 30 videos, including raw and before/fixed todo recordings, and draft PR #15 contains the branch. Only the user's pacing review remains.
+The `waitFor()` implementation and kitchen-sink todo-app example are complete. Frame-by-frame analysis found and fixed stale-frame flashes in the rendered demo: repeated final-page pixels had been mistaken for a timing marker. The roughly 25-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 30 videos, including raw and before/fixed todo recordings, and draft PR #15 contains the branch. Only the user's pacing review remains.
 
 ## Goal
 
@@ -41,6 +41,10 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - [x] Add todos one by one, then open each card and positively assert its body with `getByText(body).waitFor()`. *The test creates three records through the UI and reviews all three semantic cards and dialogs.*
 - [x] Add a prompt-based login so the video includes native dialog handling. *The Sign in action asks “Enter the password”, accepts the configured test password, and shows a slow authentication state.*
 - [x] Render, inspect, and add the kitchen-sink flow to the local review page. *The inspected render is 29.28s with 26 meaningful highlights, compressed slow spans, and no internal full-viewport wait highlight.*
+- [x] Make the test read as one explicit user journey rather than data-driven loops. *All three creates and all three detail reviews are written out, with choice body substrings used for visible-result waits.*
+- [x] Make fake database latency adjustable during the journey. *`TodoDB.setDelay(ms)` replaces the per-method constructor config, and the test selects seven different delays across login, creation, and detail loading.*
+- [x] Make the demo's pacing the default `videoMode()` experience. *The default dead-air cap is now 300ms and the default final hold is 1000ms; the existing auto trim replaces the fixture's selector override.*
+- [x] Preserve the todo demo as a pull-request visual baseline. *Repository agent guidance now requires the rendered todo video on every PR and the raw recording when recording/rendering changes.*
 
 ## Stale-frame flicker regression
 
@@ -70,3 +74,7 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - 2026-08-03: Diagnosed the reported flashes frame by frame. The rendered video replayed exact raw frames from the sign-in screen; the raw video itself remained monotonic. The final live todo-list paint was never encoded, causing final-screenshot pixel calibration to latch onto an earlier occurrence of the same state and shift every source cut backwards.
 - 2026-08-03: Removed final-page pixel matching as a timing heuristic and retained the settled recorder endpoint as the single calibration marker. Advanced post-resolution wait highlights past the conservative frame-floor boundary. A repeated-final-state regression now detects both the multi-second shift and the one-frame replay.
 - 2026-08-03: Clean validation passes 91 tests with 3 provider-gated skips, typecheck, build, and publint. Regenerated the todo demo last so the Playwright report contains its raw and rendered players, and preserved the old flickering render beside the fixed one for local comparison.
+- 2026-08-03: Unrolled the todo fixture's create/review loops so the test itself shows the whole journey, shortened body assertions to readable identifying text, and replaced fixed per-operation delays with imperative `TodoDB.setDelay()` calls between interactions.
+- 2026-08-03: Promoted the fixture's 300ms dead-air cap and 1000ms final hold to `videoMode()` defaults. Default-behavior renderer specs cover both values, while the fixture now uses `videoMode()` with no options and relies on the existing automatic startup trim.
+- 2026-08-03: Added repository guidance requiring the todo render in every PR body, plus the raw recording for changes to the recording/rendering path.
+- 2026-08-03: Post-default validation covers all 94 tests: the non-FFmpeg suite passed 63 with 3 provider-gated skips; one known first-frame sampling flake in the combined run passed 5/5 immediately afterward, then all 28 FFmpeg specs passed cleanly. Typecheck, build, and publint also pass. The regenerated default-options todo render is 25.32s with 26 highlights and no stale sign-in-frame matches.

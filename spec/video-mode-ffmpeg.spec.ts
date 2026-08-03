@@ -613,10 +613,12 @@ test("keeps the page open for later afterTest hooks", async ({ page }, testInfo)
   expect(afterTestEvents).toEqual(["open"]);
 });
 
-test("speeds dead air up instead of cutting through it", async ({ page }, testInfo) => {
-  const deadAirThresholdMs = 500;
-  const video = videoMode({ trimStart: "never",
-    deadAirThreshold: deadAirThresholdMs,
+test("speeds dead air to the default threshold instead of cutting through it", async ({
+  page,
+}, testInfo) => {
+  const deadAirThresholdMs = 300;
+  const video = videoMode({
+    trimStart: "never",
     finalHold: 0,
     highlight: { mode: "pointer", duration: 0 },
   });
@@ -1007,10 +1009,12 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
   expect(finalGreenFrameCount).toBeLessThan(40);
 });
 
-test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
+test("uses the default final hold without leaving the pointer visible", async ({
+  page,
+}, testInfo) => {
   const highlightDurationMs = 700;
-  const video = videoMode({ trimStart: "never",
-    finalHold: 900,
+  const video = videoMode({
+    trimStart: "never",
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
@@ -1059,6 +1063,11 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
   expect(cursorPixelCount(clickHoldFrame, targetBox)).toBeGreaterThan(40);
   expect(cursorPixelCount(pointerTailFrame, targetBox)).toBeGreaterThan(40);
   expect(cursorPixelCount(finalHoldFrame, targetBox)).toBeLessThan(10);
+  const cleanTailFrameCount = [...(await videoFrames(renderedPath, 25))]
+    .reverse()
+    .findIndex((frame) => cursorPixelCount(frame, targetBox) > 10);
+  expect(cleanTailFrameCount).toBeGreaterThanOrEqual(10);
+  expect(cleanTailFrameCount).toBeLessThan(40);
 });
 
 test("points at a visible result after waitFor without delaying the test", async ({

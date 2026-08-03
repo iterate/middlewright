@@ -155,15 +155,7 @@ For producing demo/debugging videos people can actually follow: marks pre-action
 await using page = await addPlugins({
   page: basePage,
   testInfo,
-  plugins: [
-    videoMode({
-      addressBar: { holdMs: 1000 },
-      highlight: { mode: "pointer", duration: 1000 },
-      finalHold: 3000,
-      deadAirThreshold: 300,
-      skipStackFrames: ["test-helpers.ts"], // don't annotate internal login/setup helpers
-    }),
-  ],
+  plugins: [videoMode()],
 });
 
 // Use page.videoMode for invisible setup/bookkeeping that should be marked as
@@ -239,7 +231,7 @@ videoMode({ trimStart: "never" });
 
 An explicit `setStartTime()` always wins over `trimStart`.
 
-`video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. The final hold uses the last live page frame instead of extending recorder shutdown frames. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
+`videoMode()` uses review-friendly pacing by default: dead-air spans are compressed to at most 300ms, pointer highlights hold for 1000ms, and the final frame holds for 1000ms. `video-mode.json` records raw dead-air spans and highlight rectangles. `deadAirThreshold` is applied only when writing the rendered video: dead-air spans longer than the threshold are sped up so they render within that duration. Spans at or below the threshold are left at normal speed. `highlight` duration and `finalHold` are also applied at render time, so they do not slow down the browser test. The final hold uses the last live page frame instead of extending recorder shutdown frames. `highlight: true` is equivalent to the default pointer mode, `{ mode: "pointer", duration: 1000 }`. For outline boxes, use a simple solid CSS-style string:
 
 ```ts
 videoMode({

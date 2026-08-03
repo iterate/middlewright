@@ -5,42 +5,16 @@ test.use({ video: "on" });
 
 test("creates todos and reviews their details", async ({ page: basePage }, testInfo) => {
   const password = "correct horse battery staple";
-  const todos = [
-    {
-      body: "Check the demo pacing, trim dead air, and keep every important state readable.",
-      title: "Review the demo recording",
-    },
-    {
-      body: "Write down the decisions that should survive beyond this release.",
-      title: "Publish release notes",
-    },
-    {
-      body: "Confirm the slow paths show honest progress instead of appearing stuck.",
-      title: "Check loading states",
-    },
-  ];
   const db = new TodoDB({
-    delays: {
-      authenticateMs: 1300,
-      createTodoMs: 1400,
-      getTodoMs: 1400,
-      listTodosMs: 1300,
-    },
     password,
     todos: [],
   });
+  db.setDelay(1300);
   await db.connect(basePage);
   await using page = await addPlugins({
     page: basePage,
     testInfo,
-    plugins: [
-      spinnerWaiter(),
-      videoMode({
-        deadAirThreshold: 300,
-        finalHold: 1000,
-        trimStart: ["selector", "[data-app-ready]"],
-      }),
-    ],
+    plugins: [spinnerWaiter(), videoMode()],
   });
   await page.setContent(getAppHtml());
 
@@ -49,18 +23,44 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   await page.getByRole("heading", { name: "Todo desk" }).waitFor();
   await page.getByText("No todos yet").waitFor();
 
-  for (const todo of todos) {
-    await page.getByLabel("Title").fill(todo.title);
-    await page.getByLabel("Details").fill(todo.body);
-    await page.getByRole("button", { name: "Add todo" }).click();
-    await page.getByRole("button", { name: todo.title }).waitFor();
-  }
+  db.setDelay(1100);
+  await page.getByLabel("Title").fill("Review the demo recording");
+  await page
+    .getByLabel("Details")
+    .fill("Check the demo pacing, trim dead air, and keep every important state readable.");
+  await page.getByRole("button", { name: "Add todo" }).click();
+  await page.getByRole("button", { name: "Review the demo recording" }).waitFor();
 
-  for (const todo of todos) {
-    await page.getByRole("button", { name: todo.title }).click();
-    await page.getByText(todo.body, { exact: true }).waitFor();
-    await page.getByRole("button", { name: "Close" }).click();
-  }
+  db.setDelay(1700);
+  await page.getByLabel("Title").fill("Publish release notes");
+  await page
+    .getByLabel("Details")
+    .fill("Write down the decisions that should survive beyond this release.");
+  await page.getByRole("button", { name: "Add todo" }).click();
+  await page.getByRole("button", { name: "Publish release notes" }).waitFor();
+
+  db.setDelay(1250);
+  await page.getByLabel("Title").fill("Check loading states");
+  await page
+    .getByLabel("Details")
+    .fill("Confirm the slow paths show honest progress instead of appearing stuck.");
+  await page.getByRole("button", { name: "Add todo" }).click();
+  await page.getByRole("button", { name: "Check loading states" }).waitFor();
+
+  db.setDelay(1600);
+  await page.getByRole("button", { name: "Review the demo recording" }).click();
+  await page.getByText("Check the demo pacing").waitFor();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  db.setDelay(1150);
+  await page.getByRole("button", { name: "Publish release notes" }).click();
+  await page.getByText("Write down the decisions").waitFor();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  db.setDelay(1450);
+  await page.getByRole("button", { name: "Check loading states" }).click();
+  await page.getByText("Confirm the slow paths").waitFor();
+  await page.getByRole("button", { name: "Close" }).click();
 });
 
 type Todo = {
@@ -70,47 +70,44 @@ type Todo = {
 };
 
 type TodoDBOptions = {
-  delays: {
-    authenticateMs: number;
-    createTodoMs: number;
-    getTodoMs: number;
-    listTodosMs: number;
-  };
   password: string;
   todos: Todo[];
 };
 
 class TodoDB {
-  #delays: TodoDBOptions["delays"];
+  #delayMs = 0;
   #password: string;
   #todos: Todo[];
   #todoSequence: number;
 
   constructor(options: TodoDBOptions) {
-    this.#delays = options.delays;
     this.#password = options.password;
     this.#todos = options.todos;
     this.#todoSequence = options.todos.length;
   }
 
+  setDelay(delayMs: number) {
+    this.#delayMs = delayMs;
+  }
+
   async connect(page: Page) {
     await page.exposeFunction("todoDBAuthenticate", async (password: string) => {
-      await wait(this.#delays.authenticateMs);
+      await wait(this.#delayMs);
       if (password !== this.#password) throw new Error("That password is not correct.");
     });
     await page.exposeFunction("todoDBList", async () => {
-      await wait(this.#delays.listTodosMs);
+      await wait(this.#delayMs);
       return this.#todos.map(({ id, title }) => ({ id, title }));
     });
     await page.exposeFunction("todoDBCreate", async (input: Omit<Todo, "id">) => {
-      await wait(this.#delays.createTodoMs);
+      await wait(this.#delayMs);
       this.#todoSequence += 1;
       const todo = { ...input, id: `todo-${this.#todoSequence}` };
       this.#todos.push(todo);
       return { ...todo };
     });
     await page.exposeFunction("todoDBGet", async (id: string) => {
-      await wait(this.#delays.getTodoMs);
+      await wait(this.#delayMs);
       const todo = this.#todos.find((candidate) => candidate.id === id);
       if (!todo) throw new Error(`Todo not found: ${id}`);
       return { ...todo };

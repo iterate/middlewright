@@ -207,7 +207,7 @@ export type VideoModeOptions = {
    * Default: true
    */
   highlight?: VideoModeHighlightOptions;
-  /** Final hold duration in the rendered video (ms). Default: 3000 */
+  /** Final hold duration in the rendered video (ms). Default: 1000 */
   finalHold?: number;
   /** Methods to skip highlighting. Default: [] */
   skipMethods?: OverrideableMethod[];
@@ -219,7 +219,7 @@ export type VideoModeOptions = {
   skipStackFrames?: string[];
   /**
    * Maximum rendered duration for each dead-air span. Longer spans are sped up
-   * so they fit within this duration.
+   * so they fit within this duration. Default: 300
    */
   deadAirThreshold?: number;
   /**
@@ -368,15 +368,13 @@ type ResolvedVideoModeHighlight =
     };
 
 const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
-  if (thresholdMs === undefined) {
-    return undefined;
-  }
+  const value = thresholdMs === undefined ? 300 : thresholdMs;
 
-  if (!Number.isFinite(thresholdMs) || thresholdMs < 0) {
+  if (!Number.isFinite(value) || value < 0) {
     throw new Error("videoMode deadAirThreshold must be a non-negative number");
   }
 
-  return thresholdMs;
+  return value;
 };
 
 type ResolvedTrimStart = {
@@ -3374,7 +3372,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   }
 
   const finalHold = resolveNonNegativeNumber({
-    defaultValue: 3000,
+    defaultValue: 1000,
     name: "videoMode finalHold",
     value: options.finalHold,
   });
