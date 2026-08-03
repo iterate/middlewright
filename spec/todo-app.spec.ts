@@ -31,7 +31,7 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   await page.getByRole("button", { name: "Add todo" }).click();
   await page.getByRole("button", { name: "Review the demo recording" }).waitFor();
 
-  db.setDelay(1700);
+  db.setDelay(10_000);
   await page.getByLabel("Title").fill("Publish release notes");
   await page
     .getByLabel("Details")
@@ -230,13 +230,13 @@ function getAppHtml() {
       event.preventDefault();
       const submit = todoForm.querySelector<HTMLButtonElement>('[type="submit"]')!;
       const input = Object.fromEntries(new FormData(todoForm));
+      todoForm.reset();
       submit.disabled = true;
       submit.textContent = "Creating…";
       submit.setAttribute("data-spinner", "true");
       createStatus.hidden = true;
       try {
         await app.todoDBCreate({ body: input.body, title: input.title });
-        todoForm.reset();
         await loadTodos();
       } catch (error) {
         createStatus.hidden = false;

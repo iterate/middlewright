@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The `waitFor()` implementation and kitchen-sink todo-app example are complete. Frame-by-frame analysis found and fixed stale-frame flashes in the rendered demo: repeated final-page pixels had been mistaken for a timing marker. The roughly 25-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 30 videos, including raw and before/fixed todo recordings, and draft PR #15 contains the branch. Only the user's pacing review remains.
+The `waitFor()` implementation and kitchen-sink todo-app example are complete. Frame-by-frame analysis found and fixed stale-frame flashes in the rendered demo: repeated final-page pixels had been mistaken for a timing marker. The latest reviewed render is roughly 25 seconds; the form now clears during creation and one create uses a deliberately painful 10-second fake delay, but that final tweak is intentionally awaiting the user's manual run. Draft PR #15 contains the branch and its latest reviewed raw/rendered pair.
 
 ## Goal
 
@@ -45,6 +45,7 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - [x] Make fake database latency adjustable during the journey. *`TodoDB.setDelay(ms)` replaces the per-method constructor config, and the test selects seven different delays across login, creation, and detail loading.*
 - [x] Make the demo's pacing the default `videoMode()` experience. *The default dead-air cap is now 300ms and the default final hold is 1000ms; the existing auto trim replaces the fixture's selector override.*
 - [x] Preserve the todo demo as a pull-request visual baseline. *Repository agent guidance now requires the rendered todo video on every PR and the raw recording when recording/rendering changes.*
+- [x] Make the raw creation wait visibly painful without hiding the submitted values in filled fields. *The form resets as soon as submission captures its values, and the second todo uses a 10-second fake database delay; this was intentionally not rerun at the user's request.*
 
 ## Stale-frame flicker regression
 
@@ -78,3 +79,4 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - 2026-08-03: Promoted the fixture's 300ms dead-air cap and 1000ms final hold to `videoMode()` defaults. Default-behavior renderer specs cover both values, while the fixture now uses `videoMode()` with no options and relies on the existing automatic startup trim.
 - 2026-08-03: Added repository guidance requiring the todo render in every PR body, plus the raw recording for changes to the recording/rendering path.
 - 2026-08-03: Post-default validation covers all 94 tests: the non-FFmpeg suite passed 63 with 3 provider-gated skips; one known first-frame sampling flake in the combined run passed 5/5 immediately afterward, then all 28 FFmpeg specs passed cleanly. Typecheck, build, and publint also pass. The regenerated default-options todo render is 25.32s with 26 highlights and no stale sign-in-frame matches.
+- 2026-08-03: Moved `todoForm.reset()` to the start of submission so title/details clear throughout “Creating…”, and raised the second todo's fake delay to 10 seconds to sharpen the raw-versus-rendered contrast. Per the user's request, did not run the spec or regenerate media for this tweak.
