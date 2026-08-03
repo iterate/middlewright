@@ -4,11 +4,7 @@ import { addPlugins, spinnerWaiter, videoMode } from "../src/index.ts";
 test.use({ video: "on" });
 
 test("creates todos and reviews their details", async ({ page: basePage }, testInfo) => {
-  const password = "correct horse battery staple";
-  const db = new TodoDB({
-    password,
-    todos: [],
-  });
+  const db = new TodoDB({ password: "hunter2" });
   db.setDelay(1300);
   await db.connect(basePage);
   await using page = await addPlugins({
@@ -18,7 +14,7 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   });
   await page.setContent(getAppHtml());
 
-  page.once("dialog", (dialog) => dialog.accept(password));
+  page.once("dialog", (dialog) => dialog.accept("hunter2"));
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Todo desk" }).waitFor();
   await page.getByText("No todos yet").waitFor();
@@ -31,7 +27,7 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   await page.getByRole("button", { name: "Add todo" }).click();
   await page.getByRole("button", { name: "Review the demo recording" }).waitFor();
 
-  db.setDelay(10_000);
+  db.setDelay(5000);
   await page.getByLabel("Title").fill("Publish release notes");
   await page
     .getByLabel("Details")
@@ -69,21 +65,16 @@ type Todo = {
   title: string;
 };
 
-type TodoDBOptions = {
-  password: string;
-  todos: Todo[];
-};
-
 class TodoDB {
   #delayMs = 0;
   #password: string;
   #todos: Todo[];
   #todoSequence: number;
 
-  constructor(options: TodoDBOptions) {
+  constructor(options: { password: string }) {
     this.#password = options.password;
-    this.#todos = options.todos;
-    this.#todoSequence = options.todos.length;
+    this.#todos = [];
+    this.#todoSequence = this.#todos.length;
   }
 
   setDelay(delayMs: number) {
