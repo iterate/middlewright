@@ -1816,7 +1816,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
   expect(textCursorFrame).toBeGreaterThan(0);
   expect(firstRevealFrame - textCursorFrame).toBeGreaterThanOrEqual(7);
   const boundaryColors = [frames[0], ...frames.slice(-10)].map((frame) =>
-    averagePixel(frame, { x: 30, y: 30 }),
+    averagePixel(frame, { x: 30, y: 420 }),
   );
   expect(
     boundaryColors.map(
