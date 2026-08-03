@@ -1748,6 +1748,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     captions: "explicit",
     finalHold: 1000,
     highlight: { mode: "pointer", duration: highlightDurationMs },
+    skipMethods: ["waitFor"],
     trimStart: ["selector", 'input[aria-label="Name"]'],
   });
   {
