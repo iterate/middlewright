@@ -1166,6 +1166,15 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   expect(selectedButtonStates[0]).toBe(false);
   expect(firstSelectedButton).toBeGreaterThan(0);
   expect(selectedButtonStates.slice(firstSelectedButton)).not.toContain(false);
+
+  const rawDialogFrames = (await videoFrames(paths.raw, 25)).filter((frame) => {
+    const panel = averagePixel(frame, {
+      x: Math.round(frame.width / 2),
+      y: Math.round(frame.height / 2),
+    });
+    return panel.red > 220 && panel.green > 220 && panel.blue > 220;
+  });
+  expect(rawDialogFrames).toHaveLength(0);
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({

@@ -243,6 +243,12 @@ test("records an accepted confirm as a synthetic dialog annotation", async ({
     <button id="discard">Discard file</button>
     <output id="result"></output>
     <script>
+      window.dialogEnteredPage = false;
+      new MutationObserver(() => {
+        if (document.querySelector('[data-middlewright-video-mode-dialog]')) {
+          window.dialogEnteredPage = true;
+        }
+      }).observe(document.documentElement, { childList: true, subtree: true });
       document.querySelector("#discard").addEventListener("click", () => {
         document.querySelector("#result").textContent = confirm(
           "Discard unsaved changes to release-notes.md?",
@@ -255,6 +261,7 @@ test("records an accepted confirm as a synthetic dialog annotation", async ({
   await plugged.locator("#discard").click();
 
   await expect(plugged.locator("#result")).toHaveText("discarded");
+  expect(await plugged.evaluate(() => (window as any).dialogEnteredPage)).toBe(false);
   await expect(video.metadata()).resolves.toMatchObject({
     highlights: expect.arrayContaining([
       expect.objectContaining({
