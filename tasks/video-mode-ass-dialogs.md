@@ -29,9 +29,9 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 - [x] Replace in-page synthetic dialog capture with a clean-frame-plus-ASS dialog scene. *The Playwright observer records dialog facts and layout targets; FFmpeg clones the last frame before open and burns the ASS scene before cursor overlays.*
 - [x] Add a public raw-video regression proving Middlewright dialog artwork never appears. *The prompt spec scans every raw frame over the panel area and rejects a white synthetic panel.*
 - [x] Cover alert and confirm accept/dismiss behavior without changing Playwright listener or automatic-dismiss semantics. *Existing public metadata and rendered confirm regressions are green with the prepended observer and no-listener auto-dismiss intact.*
-- [ ] Cover prompt default, empty, Unicode, and long/wrapped message/value cases where practical.
-- [ ] Preserve existing pointer motion, prompt/goto reveal behavior, dead-air timing, and clean post-dialog pacing.
-- [ ] Document the ASS approach and compare its code complexity, runtime overhead, layout limits, portability, and fidelity in the PR body.
+- [x] Cover prompt default, empty, Unicode, and long/wrapped message/value cases where practical. *Metadata distinguishes a Unicode default from an explicit empty acceptance; rendered coverage holds the default, clears it, keeps a long wrapped message readable, then selects OK.*
+- [x] Preserve existing pointer motion, prompt/goto reveal behavior, dead-air timing, and clean post-dialog pacing. *All 30 pre-existing FFmpeg specs pass alongside the new dialog sequences.*
+- [ ] Document the ASS approach and compare its code complexity, runtime overhead, layout limits, portability, and fidelity in the PR body. *README now documents the pure post-production path; reviewer comparison is pending final measurements.*
 - [ ] Run focused stress tests, FFmpeg specs, full suite, typecheck, build, and publint.
 - [ ] Generate and inspect focused rendered/raw prompt videos; add todo rendered/raw videos if the #15 fixture can be exercised without importing its code.
 - [ ] Upload native GitHub video players and complete the task file.
@@ -42,3 +42,4 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 - 2026-08-03: The prompt regression reproduces the time-travel ordering deterministically: the current screenshot-backed renderer leaks a selected OK frame before the neutral/typing phase finishes.
 - 2026-08-03: Removed the page init-script and runtime DOM overlay. Dialog highlights now carry a clean-frame timestamp plus deterministic input/button geometry; a dedicated ASS pass draws the scene before pointer compositing.
 - 2026-08-03: The first ASS pass exposed letterboxing: an 800×600 page was scaled into 600×450 content inside an 800×450 video. Dialog layout now uses the same scaled viewport as screenshots and pointer targets. The frame-order, raw-cleanliness, rendered confirm, post-roll, metadata, listener-order, auto-dismiss, and back-to-back checks pass.
+- 2026-08-03: Added explicit-empty coverage with a Unicode default and long message. Empty acceptance now holds the default briefly, clears the input during the fill phase, and keeps it empty when OK becomes selected. The full 30-spec FFmpeg file passes.

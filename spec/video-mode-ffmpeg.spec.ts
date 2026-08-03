@@ -1070,11 +1070,11 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
         </script>
       </body>
     `);
-    plugged.once("dialog", (dialog) => dialog.accept("correct horse battery staple"));
+    plugged.once("dialog", (dialog) => dialog.accept("correct 👩🏽‍💻 battery staple"));
 
     await plugged.locator("#sign-in").click();
 
-    await expect(plugged.locator("#result")).toHaveText("correct horse battery staple");
+    await expect(plugged.locator("#result")).toHaveText("correct 👩🏽‍💻 battery staple");
   }
 
   const paths = video.outputPaths();
@@ -1172,6 +1172,107 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     ),
   );
   expect(mostWhiteRawPixels).toBeLessThan(5_000);
+});
+
+test("clears a Unicode prompt default before selecting an explicit empty response", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <body style="margin: 0; background: rgb(17, 24, 39)">
+        <button id="rename">Rename</button>
+        <output id="result"></output>
+        <script>
+          document.querySelector("#rename").addEventListener("click", () => {
+            document.querySelector("#result").textContent = JSON.stringify(prompt(
+              "Choose a replacement name for the release note before publishing it to the entire engineering team.",
+              "draft-👩🏽‍💻.md",
+            ));
+          });
+        </script>
+      </body>
+    `);
+    plugged.once("dialog", (dialog) => dialog.accept(""));
+
+    await plugged.locator("#rename").click();
+
+    await expect(plugged.locator("#result")).toHaveText('""');
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const promptFill = metadata.highlights.find(
+    (highlight) => highlight.method === "fill" && highlight.dialog?.type === "prompt",
+  )!;
+  const promptClick = metadata.highlights.find(
+    (highlight) => highlight.method === "click" && highlight.dialog?.type === "prompt",
+  )!;
+  const frames = await videoFrames(paths.rendered, 25);
+  const scale = Math.min(
+    frames[0].width / promptFill.viewport.width,
+    frames[0].height / promptFill.viewport.height,
+  );
+  const inputBox = {
+    height: Math.round(promptFill.rect.height * scale),
+    width: Math.round(promptFill.rect.width * scale),
+    x: Math.round(promptFill.rect.x * scale),
+    y: Math.round(promptFill.rect.y * scale),
+  };
+  const buttonBox = {
+    height: Math.round(promptClick.rect.height * scale),
+    width: Math.round(promptClick.rect.width * scale),
+    x: Math.round(promptClick.rect.x * scale),
+    y: Math.round(promptClick.rect.y * scale),
+  };
+  const dialogFrames = frames.filter(
+    (frame) =>
+      countPixels(
+        frame,
+        inset(inputBox, 3),
+        ({ blue, green, red }) => red > 220 && green > 220 && blue > 220,
+      ) > inputBox.width * inputBox.height * 0.5,
+  );
+  const textBox = {
+    height: inputBox.height - 12,
+    width: Math.round(inputBox.width * 0.5),
+    x: inputBox.x + 8,
+    y: inputBox.y + 6,
+  };
+  const textPixels = dialogFrames.map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  );
+  const defaultFrame = textPixels.findIndex((count) => count > 30);
+  const firstBlankFrame = textPixels.findIndex(
+    (count, index) => index > defaultFrame && count < 25,
+  );
+  const firstSelectedFrame = dialogFrames.findIndex(
+    (frame) =>
+      countPixels(
+        frame,
+        inset(buttonBox, 6),
+        ({ blue, green, red }) => blue > 150 && blue > red * 1.4 && blue > green * 1.1,
+      ) > 100,
+  );
+
+  expect(defaultFrame).toBeGreaterThanOrEqual(0);
+  expect(firstBlankFrame).toBeGreaterThan(defaultFrame);
+  expect(firstSelectedFrame).toBeGreaterThan(firstBlankFrame);
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({

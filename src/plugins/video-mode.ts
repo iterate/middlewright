@@ -1751,7 +1751,28 @@ const assDialogAnnotations = (options: {
       revealStart,
       dialog.end - Math.min(200, (dialog.end - dialog.start) * 0.2),
     );
-    const states = [initialText, ...graphemes.map((_, index) => graphemes.slice(0, index + 1).join(""))];
+
+    if (graphemes.length === 0) {
+      textEvents.push(
+        assTextEvent({
+          alignment: 7,
+          clip: inputClip,
+          color: "#111827",
+          end: revealStart,
+          layer: 6,
+          position: inputPosition,
+          start: dialog.start,
+          style: "DialogInput",
+          text: initialText,
+        }),
+      );
+      return [...shapeEvents, ...textEvents];
+    }
+
+    const states = [
+      initialText,
+      ...graphemes.map((_, index) => graphemes.slice(0, index + 1).join("")),
+    ];
 
     for (let index = 0; index < states.length; index += 1) {
       const start =
