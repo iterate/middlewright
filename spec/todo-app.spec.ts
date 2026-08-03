@@ -1,7 +1,10 @@
 import { test, type Page } from "@playwright/test";
 import { addPlugins, spinnerWaiter, videoMode } from "../src/index.ts";
 
-test.use({ video: "on" });
+test.use({
+  video: "on",
+  viewport: { height: 720, width: 400 },
+});
 
 test("creates todos and reviews their details", async ({ page: basePage }, testInfo) => {
   const db = new TodoDB({ password: "hunter2" });
