@@ -22,8 +22,8 @@ Rendered video must never show a future input over an earlier page. Fill stabili
 
 ## Checklist
 
-- [ ] Commit this task specification before implementation. *Pending.*
-- [ ] Unskip the merged frame-level repro and confirm it fails with the impossible welcome-page/input combination. *Pending.*
+- [x] Commit this task specification before implementation. *Committed alone as `57007c2`, then opened draft PR #20.*
+- [x] Unskip the merged frame-level repro and confirm it fails with the impossible welcome-page/input combination. *The unchanged test finds 15 consecutive hybrid frames (35–49) in 5.7 seconds.*
 - [ ] Test whether removing future `preAction` stabilization alone makes the repro green. *Pending.*
 - [ ] Preserve scrolling, resizing, gradient, cursor, and text-reveal fill behavior. *Pending.*
 - [ ] If stabilization remains necessary, bind it to recorded capture timing rather than a guessed duration or page-specific heuristic. *Pending unless hypothesis 1 holds.*
@@ -34,3 +34,4 @@ Rendered video must never show a future input over an earlier page. Fill stabili
 ## Implementation log
 
 - 2026-08-03: Created from merged `main` immediately after #15. The new branch deliberately keeps the repro separate from `waitFor()` highlighting.
+- 2026-08-03: RED confirmed after unskipping: the renderer produces 15 frames containing both the Welcome marker and the future Title input crop.
