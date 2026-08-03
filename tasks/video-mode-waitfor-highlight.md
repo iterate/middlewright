@@ -1,5 +1,5 @@
 ---
-status: awaiting-video-review
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation and validation are complete. Visible `waitFor()` results now use the normal post-rendered highlight duration without delaying the test; invisible results and explicit skips remain unhighlighted. Twenty-seven local review videos are ready. No pull request has been opened; only the user's pacing decision remains.
+The `waitFor()` implementation and original 27-video review set are complete. A self-contained slow todo-app spec is now in progress so the pacing can be judged in a realistic test shaped by the draft middlewright guidelines. No pull request has been opened.
 
 ## Goal
 
@@ -32,6 +32,14 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - [x] Run focused tests, typecheck, build, and the full relevant video-mode suite. *All 27 FFmpeg specs pass serially; the full suite passes 89 tests with 3 provider-gated skips, plus typecheck, build, and publint.*
 - [x] Collect and inspect every rendered video-mode spec artifact for local review. *Twenty-five FFmpeg renders and two auto-start renders were sampled across five evenly-spaced frames and collected behind one local HTML player page.*
 - [x] Stop before opening a pull request and hand the local videos back to the user. *The branch is pushed, but no PR exists.*
+
+## Todo app review fixture
+
+- [ ] Add a readable `todo-app.spec.ts` whose test flow appears before all fixture/app code and uses locator actions instead of expect assertions or manual timeouts.
+- [ ] Back the client-only HTML app with a `TodoDB` whose list/detail delays and in-memory records are supplied by the test.
+- [ ] Show meaningful loading UI while the initial list and selected todo body are delayed, allowing `spinnerWaiter` to extend the normal short action timeout.
+- [ ] Open a todo card into a dialog and positively assert its body with `getByText(body).waitFor()`, producing a resolved-result video highlight.
+- [ ] Render, inspect, and add the todo flow to the local review page without opening a PR.
 
 ## Implementation log
 
