@@ -1177,6 +1177,88 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   expect(rawDialogFrames).toHaveLength(0);
 });
 
+test("renders a dismissed prompt with its default value and selected Cancel button", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <body style="margin: 0; background: rgb(17, 24, 39)">
+        <button id="rename">Rename file</button>
+        <output id="result"></output>
+        <script>
+          document.querySelector("#rename").addEventListener("click", () => {
+            const name = prompt("New file name", "draft.md");
+            document.querySelector("#result").textContent = name || "Cancelled";
+          });
+        </script>
+      </body>
+    `);
+    plugged.once("dialog", (dialog) => dialog.dismiss());
+
+    await plugged.locator("#rename").click();
+    await plugged.getByText("Cancelled", { exact: true }).waitFor();
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const promptDismiss = metadata.highlights.find(
+    (highlight) => highlight.method === "click" && highlight.dialog?.type === "prompt",
+  )!;
+  expect(promptDismiss).toMatchObject({
+    dialog: {
+      action: "dismiss",
+      message: "New file name",
+      type: "prompt",
+    },
+    method: "click",
+  });
+
+  const renderedStart = renderedHighlightStartWithoutDeadAir(
+    promptDismiss,
+    metadata.highlights,
+  );
+  const frame = await videoFrame(paths.rendered, renderedStart + highlightDurationMs - 100);
+  const scale = Math.min(
+    frame.width / promptDismiss.viewport.width,
+    frame.height / promptDismiss.viewport.height,
+  );
+  const cancelBox = {
+    height: Math.round(promptDismiss.rect.height * scale),
+    width: Math.round(promptDismiss.rect.width * scale),
+    x: Math.round(promptDismiss.rect.x * scale),
+    y: Math.round(promptDismiss.rect.y * scale),
+  };
+  const defaultValueBox = {
+    height: Math.round(22 * scale),
+    width: Math.round(120 * scale),
+    x: cancelBox.x - Math.round(253 * scale),
+    y: cancelBox.y - Math.round(52 * scale),
+  };
+
+  expect(
+    countPixels(
+      frame,
+      cancelBox,
+      ({ blue, green, red }) => blue > 150 && blue > red * 1.4 && blue > green * 1.1,
+    ),
+  ).toBeGreaterThan(200);
+  expect(
+    countPixels(
+      frame,
+      defaultValueBox,
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  ).toBeGreaterThan(20);
+});
+
 test("uses natural post-dialog footage without adding a synthetic hold", async ({
   page,
 }, testInfo) => {
