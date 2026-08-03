@@ -15,7 +15,7 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 
 ## Assumptions
 
-- This work stacks on PR #15 and preserves its wait highlights, first-locator automatic start, endpoint-only timeline calibration, and default pacing.
+- This work branches directly from `main` and preserves its first-locator automatic start and existing video rendering behavior.
 - Prompt and address-bar reveals are post-production effects. They must not dispatch browser input events or delay the live Playwright operation.
 - Reveals advance by Unicode grapheme, not UTF-16 code unit, so a visible glyph is never split.
 - Existing highlight/hold timing supplies the animation budget; no new public option is needed.
@@ -37,6 +37,6 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 
 ## Implementation log
 
-- 2026-08-03: Created `feature/video-mode-synthetic-text-reveal` from `origin/feature/video-mode-waitfor-highlight` in a sibling worktree. Chose a stacked draft PR so PR #15 remains independently reviewable.
+- 2026-08-03: Created the replacement `feature/video-mode-synthetic-text-reveal-main` from latest `origin/main` in a fresh sibling worktree so this independent feature can target `main` directly.
 - 2026-08-03: The prompt tracer bullet failed against the old all-at-once handoff, then passed after recording the accepted input as the post-fill frame for the existing grapheme-aware reveal renderer. The native prompt and live runtime remain untouched.
 - 2026-08-03: The address tracer bullet proved the old ASS annotation painted all 685 light URL pixels in every sampled hold frame. Successive grapheme-prefix annotations now produce a clear start, middle, and complete destination without extending navigation runtime.
