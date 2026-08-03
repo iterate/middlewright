@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The `waitFor()` implementation and realistic todo-app example are complete. The app demonstrates spinner-backed slow list/detail loading, a card click, and a positive body `waitFor()` in a 3.64-second rendered flow. The local review page now has 28 videos. No pull request has been opened; only the user's pacing decision remains.
+The `waitFor()` implementation and kitchen-sink todo-app example are complete. The 29.28-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 28 videos, and the independently opened draft PR #15 contains the branch. Only the user's pacing review remains.
 
 ## Goal
 
@@ -31,15 +31,16 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - [x] Update public documentation for the new default and opt-out. *The video-mode README now describes the shared duration and `skipMethods` escape hatch.*
 - [x] Run focused tests, typecheck, build, and the full relevant video-mode suite. *All 27 FFmpeg specs pass serially; the full suite passes 89 tests with 3 provider-gated skips, plus typecheck, build, and publint.*
 - [x] Collect and inspect every rendered video-mode spec artifact for local review. *Twenty-five FFmpeg renders and two auto-start renders were sampled across five evenly-spaced frames and collected behind one local HTML player page.*
-- [x] Stop before opening a pull request and hand the local videos back to the user. *The branch is pushed, but no PR exists.*
+- [x] Hand the local videos back to the user before asking for review. *The branch and local review page were prepared first; a separate agent subsequently opened draft PR #15.*
 
 ## Todo app review fixture
 
-- [x] Add a readable `todo-app.spec.ts` whose test flow appears before all fixture/app code and uses locator actions instead of expect assertions or manual timeouts. *The test has two user-level actions at the top; types, `TodoDB`, timing, and `getAppHtml()` follow below.*
-- [x] Back the client-only HTML app with a `TodoDB` whose list/detail delays and in-memory records are supplied by the test. *Two exposed functions connect the page-only app to configurable delayed list/detail reads without an HTTP server.*
-- [x] Show meaningful loading UI while the initial list and selected todo body are delayed, allowing `spinnerWaiter` to extend the normal short action timeout. *Both 1.6s list loading and 1.4s detail loading show `data-spinner` progress UI and pass under the project's 1s action timeout.*
-- [x] Open a todo card into a dialog and positively assert its body with `getByText(body).waitFor()`, producing a resolved-result video highlight. *The whole semantic card is clickable; the dialog body wait records the second full pointer hold.*
-- [x] Render, inspect, and add the todo flow to the local review page without opening a PR. *The inspected render is 3.64s: both slow spans compress to 300ms while click/body highlights remain 1000ms. It is first on the 28-video local page.*
+- [x] Add a readable `todo-app.spec.ts` whose test flow appears before all fixture/app code and uses locator actions instead of expect assertions or manual timeouts. *The top-level test reads as login, three creates, then three detail reviews; types, `TodoDB`, timing, and `getAppHtml()` follow below.*
+- [x] Back the client-only HTML app with a `TodoDB` whose auth/create/list/detail delays and in-memory records are supplied by the test. *Four exposed functions connect the page-only app to the configurable fake database without an HTTP server.*
+- [x] Show meaningful loading UI while authentication, list refreshes, creation, and selected todo bodies are delayed, allowing `spinnerWaiter` to extend the normal short action timeout. *Every fake database operation displays a labelled `data-spinner` state and passes under the project's 1s action timeout.*
+- [x] Add todos one by one, then open each card and positively assert its body with `getByText(body).waitFor()`. *The test creates three records through the UI and reviews all three semantic cards and dialogs.*
+- [x] Add a prompt-based login so the video includes native dialog handling. *The Sign in action asks “Enter the password”, accepts the configured test password, and shows a slow authentication state.*
+- [x] Render, inspect, and add the kitchen-sink flow to the local review page. *The inspected render is 29.28s with 26 meaningful highlights, compressed slow spans, and no internal full-viewport wait highlight.*
 
 ## Implementation log
 
@@ -50,4 +51,7 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - 2026-08-03: Generated and sampled all 27 available rendered fixtures. Static review-page verification found 27 valid video streams and no missing sources. The local browser connector was unavailable, so the HTML handoff page was validated by its files and streams rather than automated playback controls.
 - 2026-08-03: Read the root worktree's ignored draft middlewright guide and shaped the todo spec around it: no manual timeout, no expect visibility assertion, positive locator behavior, and real progress UI for every slow operation.
 - 2026-08-03: The todo tracer bullet failed after the detail spinner disappeared without the requested body, producing spinner-waiter's targeted failure. Rendering the body made the same public test pass without changing its timeout or adding a sleep.
-- 2026-08-03: The final todo video holds the loaded card click and dialog body while compressing 3s of fake database latency into 600ms. Full validation passes 90 tests with 3 provider-gated skips, plus typecheck, build, and publint.
+- 2026-08-03: The initial todo video held the loaded card click and dialog body while compressing 3s of fake database latency into 600ms. Full validation passed 90 tests with 3 provider-gated skips, plus typecheck, build, and publint.
+- 2026-08-03: Expanded the todo fixture into a kitchen-sink journey: native prompt login, three UI-created todos, and three slow-loaded detail dialogs. A prompt render exposed video mode's own overlay isolation `waitFor()` as a full-screen user highlight; that internal call now uses the original Playwright method, with a focused regression covering the action timeline.
+- 2026-08-03: Sampled the 29.28s kitchen-sink render across ten frames. Its 26 highlights cover only the user's click, fill, and visible-wait actions; the local review page keeps it first for pacing review.
+- 2026-08-03: Final kitchen-sink validation passes the full suite (90 passed, 3 provider-gated skips), typecheck, build, and publint.

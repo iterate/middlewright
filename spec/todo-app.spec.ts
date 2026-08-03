@@ -3,27 +3,31 @@ import { addPlugins, spinnerWaiter, videoMode } from "../src/index.ts";
 
 test.use({ video: "on" });
 
-test("opens a todo and shows its details", async ({ page: basePage }, testInfo) => {
-  const todo = {
-    body: "Check the demo pacing, trim dead air, and keep every important state readable.",
-    id: "review-demo",
-    title: "Review the demo recording",
-  };
+test("creates todos and reviews their details", async ({ page: basePage }, testInfo) => {
+  const password = "correct horse battery staple";
+  const todos = [
+    {
+      body: "Check the demo pacing, trim dead air, and keep every important state readable.",
+      title: "Review the demo recording",
+    },
+    {
+      body: "Write down the decisions that should survive beyond this release.",
+      title: "Publish release notes",
+    },
+    {
+      body: "Confirm the slow paths show honest progress instead of appearing stuck.",
+      title: "Check loading states",
+    },
+  ];
   const db = new TodoDB({
-    delays: { getTodoMs: 1400, listTodosMs: 1600 },
-    todos: [
-      todo,
-      {
-        body: "Write down the decisions that should survive beyond this release.",
-        id: "publish-notes",
-        title: "Publish release notes",
-      },
-      {
-        body: "Confirm the slow paths show honest progress instead of appearing stuck.",
-        id: "check-loading",
-        title: "Check loading states",
-      },
-    ],
+    delays: {
+      authenticateMs: 1300,
+      createTodoMs: 1400,
+      getTodoMs: 1400,
+      listTodosMs: 1300,
+    },
+    password,
+    todos: [],
   });
   await db.connect(basePage);
   await using page = await addPlugins({
@@ -40,8 +44,23 @@ test("opens a todo and shows its details", async ({ page: basePage }, testInfo) 
   });
   await page.setContent(getAppHtml());
 
-  await page.getByRole("button", { name: todo.title }).click();
-  await page.getByText(todo.body, { exact: true }).waitFor();
+  page.once("dialog", (dialog) => dialog.accept(password));
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("heading", { name: "Todo desk" }).waitFor();
+  await page.getByText("No todos yet").waitFor();
+
+  for (const todo of todos) {
+    await page.getByLabel("Title").fill(todo.title);
+    await page.getByLabel("Details").fill(todo.body);
+    await page.getByRole("button", { name: "Add todo" }).click();
+    await page.getByRole("button", { name: todo.title }).waitFor();
+  }
+
+  for (const todo of todos) {
+    await page.getByRole("button", { name: todo.title }).click();
+    await page.getByText(todo.body, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Close" }).click();
+  }
 });
 
 type Todo = {
@@ -52,25 +71,43 @@ type Todo = {
 
 type TodoDBOptions = {
   delays: {
+    authenticateMs: number;
+    createTodoMs: number;
     getTodoMs: number;
     listTodosMs: number;
   };
+  password: string;
   todos: Todo[];
 };
 
 class TodoDB {
   #delays: TodoDBOptions["delays"];
+  #password: string;
   #todos: Todo[];
+  #todoSequence: number;
 
   constructor(options: TodoDBOptions) {
     this.#delays = options.delays;
+    this.#password = options.password;
     this.#todos = options.todos;
+    this.#todoSequence = options.todos.length;
   }
 
   async connect(page: Page) {
+    await page.exposeFunction("todoDBAuthenticate", async (password: string) => {
+      await wait(this.#delays.authenticateMs);
+      if (password !== this.#password) throw new Error("That password is not correct.");
+    });
     await page.exposeFunction("todoDBList", async () => {
       await wait(this.#delays.listTodosMs);
       return this.#todos.map(({ id, title }) => ({ id, title }));
+    });
+    await page.exposeFunction("todoDBCreate", async (input: Omit<Todo, "id">) => {
+      await wait(this.#delays.createTodoMs);
+      this.#todoSequence += 1;
+      const todo = { ...input, id: `todo-${this.#todoSequence}` };
+      this.#todos.push(todo);
+      return { ...todo };
     });
     await page.exposeFunction("todoDBGet", async (id: string) => {
       await wait(this.#delays.getTodoMs);
@@ -99,11 +136,22 @@ function getAppHtml() {
       }
       * { box-sizing: border-box; }
       body { margin: 0; min-height: 100vh; }
-      button { font: inherit; }
+      button, input, textarea { font: inherit; }
       .shell { margin: 0 auto; max-width: 980px; padding: 54px 42px; }
       .eyebrow { color: #956d34; font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
       h1 { font-family: Georgia, serif; font-size: 46px; font-weight: 500; letter-spacing: -.03em; margin: 8px 0 12px; }
-      .intro { color: #716b61; font-size: 17px; margin: 0 0 34px; }
+      .intro { color: #716b61; font-size: 17px; margin: 0 0 28px; }
+      .login-panel { margin: 70px auto 0; max-width: 520px; text-align: center; }
+      .login-panel .status { margin-top: 18px; text-align: left; }
+      .primary, .close {
+        background: #25231f;
+        border: 0;
+        border-radius: 999px;
+        color: white;
+        cursor: pointer;
+        padding: 11px 20px;
+      }
+      .primary:disabled { cursor: wait; opacity: .55; }
       .status {
         align-items: center;
         background: #fffaf1;
@@ -115,6 +163,7 @@ function getAppHtml() {
         min-height: 74px;
         padding: 20px 22px;
       }
+      .status.compact { min-height: 50px; padding: 12px 16px; }
       .spinner {
         animation: spin .8s linear infinite;
         border: 3px solid #d8c9ae;
@@ -124,6 +173,30 @@ function getAppHtml() {
         width: 22px;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
+      .todo-form {
+        align-items: end;
+        background: #fffaf1;
+        border: 1px solid #ded3c0;
+        border-radius: 18px;
+        display: grid;
+        gap: 14px;
+        grid-template-columns: 1fr 1.5fr auto;
+        margin-bottom: 20px;
+        padding: 18px;
+      }
+      .todo-form label { color: #625a4f; display: grid; font-size: 12px; font-weight: 800; gap: 7px; letter-spacing: .08em; text-transform: uppercase; }
+      .todo-form input, .todo-form textarea {
+        background: white;
+        border: 1px solid #d7c9b4;
+        border-radius: 10px;
+        color: #25231f;
+        font-size: 15px;
+        height: 48px;
+        padding: 11px 12px;
+        resize: none;
+      }
+      .todo-form input:focus, .todo-form textarea:focus { border-color: #9d6f2f; outline: 2px solid #ead8ba; }
+      .create-status { grid-column: 1 / -1; }
       .todo-grid { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); }
       .todo-card {
         background: #fff;
@@ -131,7 +204,7 @@ function getAppHtml() {
         border-radius: 18px;
         box-shadow: 0 8px 28px rgb(74 60 39 / 8%);
         cursor: pointer;
-        min-height: 180px;
+        min-height: 140px;
         padding: 22px;
         text-align: left;
       }
@@ -140,9 +213,9 @@ function getAppHtml() {
         color: #25231f;
         display: block;
         font-family: Georgia, serif;
-        font-size: 24px;
+        font-size: 22px;
         line-height: 1.18;
-        margin: 28px 0 0;
+        margin: 22px 0 0;
         padding: 0;
         text-align: left;
       }
@@ -160,46 +233,74 @@ function getAppHtml() {
       dialog::backdrop { background: rgb(39 33 24 / 46%); backdrop-filter: blur(3px); }
       dialog h2 { font-family: Georgia, serif; font-size: 32px; font-weight: 500; margin: 0 0 16px; }
       dialog p { color: #625c53; font-size: 18px; line-height: 1.6; margin: 0; }
-      .close {
-        background: #25231f;
-        border: 0;
-        border-radius: 999px;
-        color: white;
-        cursor: pointer;
-        margin-top: 28px;
-        padding: 10px 18px;
-      }
+      .close { margin-top: 28px; }
       .error { background: #fff0ed; border-color: #e4a69a; color: #8d3022; }
-      @media (max-width: 760px) { .todo-grid { grid-template-columns: 1fr; } }
+      @media (max-width: 760px) {
+        .todo-form, .todo-grid { grid-template-columns: 1fr; }
+      }
     </style>
     <main class="shell" data-app-ready>
-      <div class="eyebrow">Monday · Focus list</div>
-      <h1>Todo desk</h1>
-      <p class="intro">A small place for work worth finishing.</p>
-      <div id="todos" class="status" data-spinner="true">
-        <span class="spinner" aria-hidden="true"></span>
-        <span>Loading todos…</span>
-      </div>
+      <section id="login-panel" class="login-panel">
+        <div class="eyebrow">Private workspace</div>
+        <h1>Welcome back</h1>
+        <p class="intro">Sign in to pick up where you left off.</p>
+        <button id="sign-in" class="primary" type="button">Sign in</button>
+        <div id="login-status"></div>
+      </section>
+      <section id="todo-app" hidden>
+        <div class="eyebrow">Monday · Focus list</div>
+        <h1>Todo desk</h1>
+        <p class="intro">A small place for work worth finishing.</p>
+        <form id="todo-form" class="todo-form">
+          <label>
+            Title
+            <input name="title" autocomplete="off" required />
+          </label>
+          <label>
+            Details
+            <textarea name="body" required></textarea>
+          </label>
+          <button class="primary" type="submit">Add todo</button>
+          <div id="create-status" class="create-status"></div>
+        </form>
+        <div id="todos"></div>
+      </section>
     </main>
     <dialog id="todo-dialog">
       <div id="todo-detail"></div>
       <button class="close" type="button">Close</button>
     </dialog>
     <script>
+      const loginPanel = document.querySelector("#login-panel");
+      const loginStatus = document.querySelector("#login-status");
+      const signIn = document.querySelector("#sign-in");
+      const todoApp = document.querySelector("#todo-app");
+      const todoForm = document.querySelector("#todo-form");
+      const createStatus = document.querySelector("#create-status");
       const todos = document.querySelector("#todos");
       const dialog = document.querySelector("#todo-dialog");
       const detail = document.querySelector("#todo-detail");
 
-      const showError = (error) => {
-        todos.className = "status error";
-        todos.removeAttribute("data-spinner");
-        todos.setAttribute("data-type", "error");
-        todos.textContent = error instanceof Error ? error.message : String(error);
+      const spinner = (label) => '<span class="spinner" aria-hidden="true"></span><span>' + label + '</span>';
+      const showError = (target, error) => {
+        target.className = "status error";
+        target.removeAttribute("data-spinner");
+        target.setAttribute("data-type", "error");
+        target.textContent = error instanceof Error ? error.message : String(error);
       };
 
-      window.todoDBList().then((items) => {
-        todos.className = "todo-grid";
+      const loadTodos = async () => {
+        todos.className = "status";
+        todos.setAttribute("data-spinner", "true");
+        todos.innerHTML = spinner("Loading todos…");
+        const items = await window.todoDBList();
         todos.removeAttribute("data-spinner");
+        if (items.length === 0) {
+          todos.className = "status";
+          todos.textContent = "No todos yet";
+          return;
+        }
+        todos.className = "todo-grid";
         todos.replaceChildren(...items.map((todo) => {
           const card = document.createElement("button");
           const title = document.createElement("span");
@@ -211,12 +312,52 @@ function getAppHtml() {
           card.append(title);
           return card;
         }));
-      }).catch(showError);
+      };
+
+      signIn.addEventListener("click", async () => {
+        const password = prompt("Enter the password");
+        if (password === null) return;
+        signIn.disabled = true;
+        loginStatus.className = "status compact";
+        loginStatus.setAttribute("data-spinner", "true");
+        loginStatus.innerHTML = spinner("Signing in…");
+        try {
+          await window.todoDBAuthenticate(password);
+          loginPanel.hidden = true;
+          todoApp.hidden = false;
+          await loadTodos();
+        } catch (error) {
+          showError(loginStatus, error);
+          signIn.disabled = false;
+        }
+      });
+
+      todoForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submit = todoForm.querySelector('[type="submit"]');
+        const input = Object.fromEntries(new FormData(todoForm));
+        submit.disabled = true;
+        createStatus.className = "status compact";
+        createStatus.setAttribute("data-spinner", "true");
+        createStatus.innerHTML = spinner("Creating todo…");
+        try {
+          await window.todoDBCreate({ body: input.body, title: input.title });
+          todoForm.reset();
+          await loadTodos();
+          createStatus.className = "create-status";
+          createStatus.removeAttribute("data-spinner");
+          createStatus.replaceChildren();
+        } catch (error) {
+          showError(createStatus, error);
+        } finally {
+          submit.disabled = false;
+        }
+      });
 
       todos.addEventListener("click", (event) => {
         const title = event.target.closest("[data-todo-id]");
         if (!title) return;
-        detail.innerHTML = '<div class="status" data-spinner="true"><span class="spinner" aria-hidden="true"></span><span>Loading todo details…</span></div>';
+        detail.innerHTML = '<div class="status" data-spinner="true">' + spinner("Loading todo details…") + '</div>';
         dialog.showModal();
         window.todoDBGet(title.dataset.todoId).then((todo) => {
           detail.replaceChildren();
@@ -227,7 +368,7 @@ function getAppHtml() {
           detail.append(heading, body);
         }).catch((error) => {
           detail.innerHTML = '<div class="status error" data-type="error"></div>';
-          detail.firstElementChild.textContent = error instanceof Error ? error.message : String(error);
+          showError(detail.firstElementChild, error);
         });
       });
 

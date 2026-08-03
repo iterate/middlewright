@@ -295,7 +295,8 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
   await plugged.locator("#rename").click();
 
   await expect(plugged.locator("#result")).toHaveText("release-notes.md");
-  const dialogHighlights = (await video.metadata()).highlights.filter(
+  const metadata = await video.metadata();
+  const dialogHighlights = metadata.highlights.filter(
     (candidate) => candidate.dialog?.type === "prompt",
   );
   expect(dialogHighlights).toMatchObject([
@@ -319,6 +320,11 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
       image: expect.stringMatching(/\.png$/),
       method: "click",
     },
+  ]);
+  expect(metadata.highlights.map((highlight) => highlight.method)).toEqual([
+    "click",
+    "fill",
+    "click",
   ]);
 });
 

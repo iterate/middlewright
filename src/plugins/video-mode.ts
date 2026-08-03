@@ -1104,8 +1104,10 @@ const videoModeDialogOverlaySnapshot = async (
 };
 
 const isolateNextVideoModeDialogOverlay = async (page: Page) => {
-  const host = page.locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}][data-dialog-resolved]`).first();
-  await host.waitFor({ state: "attached", timeout: 1000 });
+  const host = page
+    .locator(`[${VIDEO_MODE_DIALOG_ATTRIBUTE}][data-dialog-resolved]`)
+    .first() as LocatorWithOriginal;
+  await host.waitFor_original({ state: "attached", timeout: 1000 });
   await host.evaluate((selected, attribute) => {
     for (const candidate of document.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
       candidate.style.display = candidate === selected ? "grid" : "none";
