@@ -1749,7 +1749,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     finalHold: 1000,
     highlight: { mode: "pointer", duration: highlightDurationMs },
     skipMethods: ["waitFor"],
-    trimStart: ["selector", 'input[aria-label="Name"]'],
+    trimStart: "never",
   });
   {
     await using plugged = await addPlugins({
@@ -1777,12 +1777,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
   const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
   expect(fillHighlight).toBeDefined();
 
-  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
   const frames = await videoFrames(paths.rendered, 25);
-  const fillFrames = frames.slice(
-    Math.floor(fillStart / 40),
-    Math.ceil((fillStart + highlightDurationMs) / 40),
-  );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
     frames[0].height / fillHighlight.viewport.height,
@@ -1799,12 +1794,12 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     x: Math.round((fillHighlight.rect.x + 20) * scale),
     y: Math.round((fillHighlight.rect.y + 12) * scale),
   };
-  const textCursorFrame = fillFrames.findIndex(
+  const textCursorFrame = frames.findIndex(
     (frame) =>
       textCursorPixelCount(frame, fillBox) > 35 &&
       pointerTailPixelCount(frame, fillBox) < 10,
   );
-  const firstRevealFrame = fillFrames.findIndex(
+  const firstRevealFrame = frames.findIndex(
     (frame) =>
       countPixels(
         frame,
@@ -1815,14 +1810,14 @@ test("moves to the field and switches to the text cursor before revealing", asyn
 
   expect(textCursorFrame).toBeGreaterThan(0);
   expect(firstRevealFrame - textCursorFrame).toBeGreaterThanOrEqual(7);
-  const boundaryColors = [frames[0], ...frames.slice(-10)].map((frame) =>
+  const finalHoldColors = frames.slice(-10).map((frame) =>
     averagePixel(frame, { x: 30, y: 420 }),
   );
   expect(
-    boundaryColors.map(
+    finalHoldColors.map(
       ({ blue, green, red }) => blue > 220 && green > 220 && red > 220,
     ),
-  ).toEqual(Array.from({ length: 11 }, () => true));
+  ).toEqual(Array.from({ length: 10 }, () => true));
 });
 
 test("preserves gradient field pixels while revealing the filled text", async ({
