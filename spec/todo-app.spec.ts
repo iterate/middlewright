@@ -38,12 +38,12 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   await page.getByRole("button", { name: "Add todo" }).click();
   await page.getByRole("button", { name: "Publish release notes" }).waitFor();
 
-  db.setDelay(1600);
+  db.setDelay(2100);
   await page.getByRole("button", { name: "Review the demo recording" }).click();
   await page.getByText("Check the demo pacing").waitFor();
   await page.getByRole("button", { name: "Close" }).click();
 
-  db.setDelay(1150);
+  db.setDelay(1650);
   await page.getByRole("button", { name: "Publish release notes" }).click();
   await page.getByText("Write down the decisions").waitFor();
   await page.getByRole("button", { name: "Close" }).click();
