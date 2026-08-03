@@ -3,7 +3,7 @@ import { addPlugins, spinnerWaiter, videoMode } from "../src/index.ts";
 
 test.use({
   video: "on",
-  viewport: { height: 720, width: 400 },
+  viewport: { height: 720, width: 480 },
 });
 
 test("creates todos and reviews their details", async ({ page: basePage }, testInfo) => {
@@ -377,7 +377,25 @@ function getAppHtml() {
       .close { margin-top: 28px; }
       .error { background: #fff0ed; border-color: #e4a69a; color: #8d3022; }
       @media (max-width: 760px) {
-        .todo-grid { grid-template-columns: 1fr; }
+        .shell { padding: 24px 28px; }
+        h1 { font-size: 38px; margin: 4px 0 6px; }
+        .intro { font-size: 15px; margin-bottom: 14px; }
+        .login-panel { margin-top: 48px; }
+        .todo-form { gap: 8px; margin-bottom: 10px; padding: 12px; }
+        .todo-form label { gap: 4px; }
+        .todo-form input, .todo-form textarea { height: 40px; padding: 8px 10px; }
+        .todo-form textarea { height: 60px; }
+        .todo-grid { gap: 8px; grid-template-columns: 1fr; }
+        .todo-card {
+          align-items: center;
+          border-radius: 14px;
+          display: grid;
+          gap: 10px;
+          grid-template-columns: 48px 1fr;
+          min-height: 64px;
+          padding: 10px 14px;
+        }
+        .todo-title { font-size: 18px; margin: 0; }
       }
     `;
   }
