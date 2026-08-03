@@ -1652,7 +1652,7 @@ const assAnnotations = (options: {
   const pillY = Math.max(9, Math.round(addressBarHeight * 0.18));
   const pillWidth = video.width - pillX * 2;
   const pillHeight = addressBarHeight - pillY * 2;
-  const addressFontSize = Math.max(15, Math.round(video.height * 0.034));
+  const addressFontSize = Math.max(12, Math.round(video.height * 0.024));
   const addressMarginLeft = pillX + Math.round(pillHeight * 0.42);
   const addressMarginTop = pillY + Math.round(pillHeight * 0.22);
   const addressClipRight = pillX + pillWidth - Math.round(pillHeight * 0.35);
@@ -1667,9 +1667,11 @@ const assAnnotations = (options: {
         new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(addressBar.url),
         ({ segment }) => segment,
       );
-      const addressTextEvents = ["", ...graphemes.map((_, index) =>
-        graphemes.slice(0, index + 1).join(""),
-      )].flatMap((text, index, states) => {
+      const addressTextStates = [""];
+      for (const grapheme of graphemes) {
+        addressTextStates.push(`${addressTextStates[addressTextStates.length - 1]}${grapheme}`);
+      }
+      const addressTextEvents = addressTextStates.flatMap((text, index, states) => {
         const textStart =
           index === 0
             ? addressBar.start
@@ -1684,7 +1686,7 @@ const assAnnotations = (options: {
         }
 
         return [
-          `Dialogue: 2,${formatAssTime(textStart)},${formatAssTime(textEnd)},Address,,0,0,0,,{\\clip(${addressMarginLeft},${pillY},${addressClipRight},${pillY + pillHeight})}●  ${escapeAssText(text)}`,
+          `Dialogue: 2,${formatAssTime(textStart)},${formatAssTime(textEnd)},Address,,0,0,0,,{\\q2\\clip(${addressMarginLeft},${pillY},${addressClipRight},${pillY + pillHeight})}●  ${escapeAssText(text)}`,
         ];
       });
       return [

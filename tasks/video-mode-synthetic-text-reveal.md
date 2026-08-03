@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The prompt and navigation reveal slices are implemented through existing video-mode rendering paths. Next: add the public rendered-video regression for long-address containment, then regenerate review media and validate the full branch.
+All three implementation slices are complete: prompts and URLs reveal progressively, while long destinations stay as compact clipped single-line text. Next: run stress/full validation, regenerate review media, and finish the draft PR.
 
 ## Goal
 
@@ -28,9 +28,9 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 - [x] Implement prompt text reveal within video mode while preserving fake-dialog pointer and text-cursor behavior. *The accepted prompt state feeds the same screenshot-backed grapheme reveal as ordinary `fill()`, retaining the existing fill highlight and text cursor before the OK click.*
 - [x] Add a failing rendered-video spec proving a `page.goto()` destination advances through intermediate URL states. *Before implementation, early, middle, and late address-bar frames all contained the same 685 light text pixels; they now increase as the URL appears.*
 - [x] Implement the address-bar reveal with shared synthetic-text timing where that simplifies the renderer. *ASS events expose successive Unicode grapheme prefixes during the synthetic hold, with a short blank lead-in and settled full URL at the end.*
-- [ ] Add a failing rendered-video regression proving a long URL stays inside the address field and visible video bounds.
-- [ ] Reduce address-bar URL type size and enforce rendering containment without changing recorded URL metadata.
-- [ ] Document the default synthetic-text behavior.
+- [x] Add a failing rendered-video regression proving a long URL stays inside the address field and visible video bounds. *A repeated path wrapped to 24 pixels across two lines before the fix; the final rendered pixels now form one compact line inside the calculated address-field clip.*
+- [x] Reduce address-bar URL type size and enforce rendering containment without changing recorded URL metadata. *Address text scales from a 12px floor at 2.4% of video height, uses ASS no-wrap mode, and retains the existing right-edge clip.*
+- [x] Document the default synthetic-text behavior. *The video-mode README now describes glyph reveals for goto and prompt text plus compact clipping for long destinations.*
 - [ ] Run focused stress, the relevant/full suite, typecheck, build, and publint.
 - [ ] Generate and inspect the todo raw/rendered pair and a focused long-address render.
 - [ ] Upload native inline video players to the stacked draft PR and complete this task file.
@@ -40,3 +40,4 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 - 2026-08-03: Created the replacement `feature/video-mode-synthetic-text-reveal-main` from latest `origin/main` in a fresh sibling worktree so this independent feature can target `main` directly.
 - 2026-08-03: The prompt tracer bullet failed against the old all-at-once handoff, then passed after recording the accepted input as the post-fill frame for the existing grapheme-aware reveal renderer. The native prompt and live runtime remain untouched.
 - 2026-08-03: The address tracer bullet proved the old ASS annotation painted all 685 light URL pixels in every sampled hold frame. Successive grapheme-prefix annotations now produce a clear start, middle, and complete destination without extending navigation runtime.
+- 2026-08-03: The long-address regression exposed the reported overflow as ASS word wrapping: the clipped URL occupied two 12-pixel rows. `\\q2` keeps it on one line, and the smaller type remains within both horizontal clip edges in decoded output.

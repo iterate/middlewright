@@ -118,6 +118,54 @@ test("reveals a goto destination progressively in the rendered address bar", asy
   expect(lightTextPixels[2]).toBeGreaterThan(250);
 });
 
+test("keeps a long goto destination in a compact address field", async ({
+  page,
+}, testInfo) => {
+  const url = `https://dashboard.middlewright.test/releases/${"a-very-long-path-segment/".repeat(12)}report?browser=chromium&view=review`;
+  await page.route("https://dashboard.middlewright.test/**", async (route) => {
+    await route.fulfill({
+      body: '<main style="position: fixed; inset: 0; background: rgb(70, 30, 120)"></main>',
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 960, height: 540 });
+
+    await plugged.goto(url);
+  }
+
+  const frames = (await videoFrames(video.outputPaths().rendered, 25)).filter(hasAddressBar);
+  const finalAddressFrame = frames.at(-2)!;
+  const addressBarHeight = Math.max(58, Math.round(finalAddressFrame.height * 0.12));
+  const pillX = Math.max(12, Math.round(finalAddressFrame.width * 0.017));
+  const pillY = Math.max(9, Math.round(addressBarHeight * 0.18));
+  const pillHeight = addressBarHeight - pillY * 2;
+  const textLeft = pillX + Math.round(pillHeight * 0.42);
+  const textRight = finalAddressFrame.width - pillX - Math.round(pillHeight * 0.35);
+  const textBounds = pixelBoundingBox(
+    finalAddressFrame,
+    { height: addressBarHeight, width: finalAddressFrame.width, x: 0, y: 0 },
+    ({ blue, green, red }) => red > 210 && green > 210 && blue > 210,
+  )!;
+
+  expect(textBounds).toMatchObject({
+    height: expect.any(Number),
+    width: expect.any(Number),
+    x: expect.any(Number),
+    y: expect.any(Number),
+  });
+  expect(textBounds.height).toBeLessThanOrEqual(12);
+  expect(textBounds.x).toBeGreaterThanOrEqual(textLeft);
+  expect(textBounds.x + textBounds.width).toBeLessThanOrEqual(textRight + 1);
+});
+
 test("renders navigation before clicking a control at the top edge", async ({
   page,
 }, testInfo) => {
@@ -2821,4 +2869,48 @@ const countPixels = (
   }
 
   return count;
+};
+
+const pixelBoundingBox = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+  predicate: (pixel: { blue: number; green: number; red: number }) => boolean,
+) => {
+  let minX = rect.x + rect.width;
+  let minY = rect.y + rect.height;
+  let maxX = -1;
+  let maxY = -1;
+  const startX = Math.max(0, rect.x);
+  const endX = Math.min(frame.width, rect.x + rect.width);
+  const startY = Math.max(0, rect.y);
+  const endY = Math.min(frame.height, rect.y + rect.height);
+
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      const offset = (y * frame.width + x) * 3;
+      if (
+        predicate({
+          blue: frame.data[offset + 2],
+          green: frame.data[offset + 1],
+          red: frame.data[offset],
+        })
+      ) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return undefined;
+  }
+
+  return {
+    height: maxY - minY + 1,
+    width: maxX - minX + 1,
+    x: minX,
+    y: minY,
+  };
 };
