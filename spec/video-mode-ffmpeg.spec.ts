@@ -1107,6 +1107,16 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     x: inputBox.x + 8,
     y: inputBox.y + 6,
   };
+  const buttonScale = Math.min(
+    renderedFrames[0].width / promptClick.viewport.width,
+    renderedFrames[0].height / promptClick.viewport.height,
+  );
+  const okButtonBox = {
+    height: Math.round(promptClick.rect.height * buttonScale),
+    width: Math.round(promptClick.rect.width * buttonScale),
+    x: Math.round(promptClick.rect.x * buttonScale),
+    y: Math.round(promptClick.rect.y * buttonScale),
+  };
   const dialogFrames = renderedFrames.slice(
     Math.floor(fillStart / 40),
     Math.ceil((clickStart + highlightDurationMs) / 40),
@@ -1126,11 +1136,20 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   const completeFrame = darkTextPixels.findIndex(
     (count) => count >= completePixelCount * 0.95,
   );
+  const firstSelectedFrame = dialogFrames.findIndex(
+    (frame) =>
+      countPixels(
+        frame,
+        inset(okButtonBox, 6),
+        ({ blue, green, red }) => blue > 150 && blue > red * 1.4 && blue > green * 1.1,
+      ) > 100,
+  );
 
   expect(completePixelCount).toBeGreaterThan(50);
   expect(blankFrame).toBeGreaterThanOrEqual(0);
   expect(partialFrame).toBeGreaterThan(blankFrame);
   expect(completeFrame).toBeGreaterThan(partialFrame);
+  expect(firstSelectedFrame).toBeGreaterThan(completeFrame);
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({

@@ -7,7 +7,7 @@ size: large
 
 ## Status
 
-Started as an independent alternative on `main`. The first milestone is a frame-sequence regression for the blue → white prompt rewind; implementation and review videos are still missing.
+The first frame-sequence regression is RED on `main`: the selected blue OK appears at frame 24, before typing completes at frame 49. ASS implementation and review videos are still missing.
 
 ## Goal
 
@@ -25,7 +25,7 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 
 ## Checklist
 
-- [ ] Add a failing public rendered-video regression for neutral white → progressive prompt text with white OK → blue OK, with no early selected frame.
+- [x] Add a failing public rendered-video regression for neutral white → progressive prompt text with white OK → blue OK, with no early selected frame. *The 25 fps decoded sequence fails because selected blue first appears at frame 24, before complete prompt text at frame 49.*
 - [ ] Replace in-page synthetic dialog capture with a clean-frame-plus-ASS dialog scene.
 - [ ] Add a public raw-video regression proving Middlewright dialog artwork never appears.
 - [ ] Cover alert and confirm accept/dismiss behavior without changing Playwright listener or automatic-dismiss semantics.
@@ -39,3 +39,4 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 ## Implementation log
 
 - 2026-08-03: Created `alternative/video-mode-ass-dialogs` from latest `origin/main` in a sibling worktree. Chose the rendered frame sequence as the first public-behavior feedback loop because it directly captures the reported one-frame state rewind at 25 fps.
+- 2026-08-03: The prompt regression reproduces the time-travel ordering deterministically: the current screenshot-backed renderer leaks a selected OK frame before the neutral/typing phase finishes.
