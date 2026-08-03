@@ -79,6 +79,93 @@ test("renders a multi-navigation release flow without changing the live page", a
   expect(renderedFrames.filter(hasAddressBar).length).toBeGreaterThan(8);
 });
 
+test("reveals a goto destination progressively in the rendered address bar", async ({
+  page,
+}, testInfo) => {
+  const url = "https://dashboard.middlewright.test/releases/2026.8?view=review";
+  await page.route(url, async (route) => {
+    await route.fulfill({
+      body: '<main style="position: fixed; inset: 0; background: rgb(70, 30, 120)"></main>',
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+
+    await plugged.goto(url);
+  }
+
+  const frames = (await videoFrames(video.outputPaths().rendered, 25)).filter(hasAddressBar);
+  expect(frames.length).toBeGreaterThan(20);
+  const sampledFrames = [frames[2], frames[Math.floor(frames.length / 2)], frames.at(-3)!];
+  const lightTextPixels = sampledFrames.map((frame) =>
+    countPixels(
+      frame,
+      { height: 44, width: frame.width - 40, x: 20, y: 7 },
+      ({ blue, green, red }) => red > 210 && green > 210 && blue > 210,
+    ),
+  );
+
+  expect(lightTextPixels[0]).toBeLessThan(lightTextPixels[1]);
+  expect(lightTextPixels[1]).toBeLessThan(lightTextPixels[2]);
+  expect(lightTextPixels[2]).toBeGreaterThan(250);
+});
+
+test("keeps a long goto destination in a compact address field", async ({
+  page,
+}, testInfo) => {
+  const url = `https://dashboard.middlewright.test/releases/${"a-very-long-path-segment/".repeat(12)}report?browser=chromium&view=review`;
+  await page.route("https://dashboard.middlewright.test/**", async (route) => {
+    await route.fulfill({
+      body: '<main style="position: fixed; inset: 0; background: rgb(70, 30, 120)"></main>',
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 960, height: 540 });
+
+    await plugged.goto(url);
+  }
+
+  const frames = (await videoFrames(video.outputPaths().rendered, 25)).filter(hasAddressBar);
+  const finalAddressFrame = frames.at(-2)!;
+  const addressBarHeight = Math.max(58, Math.round(finalAddressFrame.height * 0.12));
+  const pillX = Math.max(12, Math.round(finalAddressFrame.width * 0.017));
+  const pillY = Math.max(9, Math.round(addressBarHeight * 0.18));
+  const pillHeight = addressBarHeight - pillY * 2;
+  const textLeft = pillX + Math.round(pillHeight * 0.42);
+  const textRight = finalAddressFrame.width - pillX - Math.round(pillHeight * 0.35);
+  const textBounds = pixelBoundingBox(
+    finalAddressFrame,
+    { height: addressBarHeight, width: finalAddressFrame.width, x: 0, y: 0 },
+    ({ blue, green, red }) => red > 210 && green > 210 && blue > 210,
+  )!;
+
+  expect(textBounds).toMatchObject({
+    height: expect.any(Number),
+    width: expect.any(Number),
+    x: expect.any(Number),
+    y: expect.any(Number),
+  });
+  expect(textBounds.height).toBeLessThanOrEqual(12);
+  expect(textBounds.x).toBeGreaterThanOrEqual(textLeft);
+  expect(textBounds.x + textBounds.width).toBeLessThanOrEqual(textRight + 1);
+});
+
 test("renders navigation before clicking a control at the top edge", async ({
   page,
 }, testInfo) => {
@@ -954,6 +1041,96 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
   expect(finalCenter.red).toBeLessThan(80);
   expect(finalCenter.green).toBeLessThan(80);
   expect(finalCenter.blue).toBeLessThan(80);
+});
+
+test("reveals accepted prompt text progressively in the rendered dialog", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <body style="margin: 0; background: rgb(17, 24, 39)">
+        <button id="sign-in" style="position: absolute; left: 370px; top: 460px">Sign in</button>
+        <output id="result"></output>
+        <script>
+          document.querySelector("#sign-in").addEventListener("click", () => {
+            document.querySelector("#result").textContent = prompt("Enter the password") || "";
+          });
+        </script>
+      </body>
+    `);
+    plugged.once("dialog", (dialog) => dialog.accept("correct horse battery staple"));
+
+    await plugged.locator("#sign-in").click();
+
+    await expect(plugged.locator("#result")).toHaveText("correct horse battery staple");
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const promptFill = metadata.highlights.find(
+    (highlight) => highlight.method === "fill" && highlight.dialog?.type === "prompt",
+  )!;
+  const promptClick = metadata.highlights.find(
+    (highlight) => highlight.method === "click" && highlight.dialog?.type === "prompt",
+  )!;
+  expect(promptFill).toBeDefined();
+  expect(promptClick).toBeDefined();
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(promptFill, metadata.highlights);
+  const clickStart = renderedHighlightStartWithoutDeadAir(promptClick, metadata.highlights);
+  const renderedFrames = await videoFrames(paths.rendered, 25);
+  const scale = Math.min(
+    renderedFrames[0].width / promptFill.viewport.width,
+    renderedFrames[0].height / promptFill.viewport.height,
+  );
+  const inputBox = {
+    height: Math.round(promptFill.rect.height * scale),
+    width: Math.round(promptFill.rect.width * scale),
+    x: Math.round(promptFill.rect.x * scale),
+    y: Math.round(promptFill.rect.y * scale),
+  };
+  const textBox = {
+    height: inputBox.height - 12,
+    width: Math.round(inputBox.width * 0.4),
+    x: inputBox.x + 8,
+    y: inputBox.y + 6,
+  };
+  const dialogFrames = renderedFrames.slice(
+    Math.floor(fillStart / 40),
+    Math.ceil((clickStart + highlightDurationMs) / 40),
+  );
+  const darkTextPixels = dialogFrames.map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  );
+  const completePixelCount = Math.max(...darkTextPixels);
+  const blankFrame = darkTextPixels.findIndex((count) => count < 20);
+  const partialFrame = darkTextPixels.findIndex(
+    (count) => count > 20 && count < completePixelCount * 0.8,
+  );
+  const completeFrame = darkTextPixels.findIndex(
+    (count) => count >= completePixelCount * 0.95,
+  );
+
+  expect(completePixelCount).toBeGreaterThan(50);
+  expect(blankFrame).toBeGreaterThanOrEqual(0);
+  expect(partialFrame).toBeGreaterThan(blankFrame);
+  expect(completeFrame).toBeGreaterThan(partialFrame);
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({
@@ -2707,4 +2884,48 @@ const countPixels = (
   }
 
   return count;
+};
+
+const pixelBoundingBox = (
+  frame: VideoFrame,
+  rect: { height: number; width: number; x: number; y: number },
+  predicate: (pixel: { blue: number; green: number; red: number }) => boolean,
+) => {
+  let minX = rect.x + rect.width;
+  let minY = rect.y + rect.height;
+  let maxX = -1;
+  let maxY = -1;
+  const startX = Math.max(0, rect.x);
+  const endX = Math.min(frame.width, rect.x + rect.width);
+  const startY = Math.max(0, rect.y);
+  const endY = Math.min(frame.height, rect.y + rect.height);
+
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      const offset = (y * frame.width + x) * 3;
+      if (
+        predicate({
+          blue: frame.data[offset + 2],
+          green: frame.data[offset + 1],
+          red: frame.data[offset],
+        })
+      ) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return undefined;
+  }
+
+  return {
+    height: maxY - minY + 1,
+    width: maxX - minX + 1,
+    x: minX,
+    y: minY,
+  };
 };

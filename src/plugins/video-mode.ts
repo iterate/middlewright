@@ -1193,6 +1193,7 @@ const recordDialogHighlights = async (options: {
         thickness: options.thickness,
         viewport: snapshot.viewport,
       });
+      return options.state.highlights.at(-1)!;
     };
 
     if (
@@ -1204,7 +1205,16 @@ const recordDialogHighlights = async (options: {
       await setVideoModeDialogOverlayState(host, {
         promptText: options.dialog.defaultValue(),
       });
-      await record("fill", snapshot.inputRect);
+      const fillHighlight = await record("fill", snapshot.inputRect);
+      await setVideoModeDialogOverlayState(host, {
+        promptText: options.promptText,
+      });
+      await recordFillReveal({
+        highlight: fillHighlight,
+        locator: host.locator("[data-dialog-input]"),
+        state: options.state,
+        testInfo: options.testInfo,
+      });
     }
 
     await setVideoModeDialogOverlayState(host, {
@@ -1642,7 +1652,7 @@ const assAnnotations = (options: {
   const pillY = Math.max(9, Math.round(addressBarHeight * 0.18));
   const pillWidth = video.width - pillX * 2;
   const pillHeight = addressBarHeight - pillY * 2;
-  const addressFontSize = Math.max(15, Math.round(video.height * 0.034));
+  const addressFontSize = Math.max(12, Math.round(video.height * 0.024));
   const addressMarginLeft = pillX + Math.round(pillHeight * 0.42);
   const addressMarginTop = pillY + Math.round(pillHeight * 0.22);
   const addressClipRight = pillX + pillWidth - Math.round(pillHeight * 0.35);
@@ -1650,10 +1660,39 @@ const assAnnotations = (options: {
     .flatMap((addressBar) => {
       const start = formatAssTime(addressBar.start);
       const end = formatAssTime(addressBar.end);
+      const duration = addressBar.end - addressBar.start;
+      const revealStart = addressBar.start + Math.min(120, duration * 0.15);
+      const revealEnd = Math.max(revealStart, addressBar.end - Math.min(200, duration * 0.2));
+      const graphemes = Array.from(
+        new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(addressBar.url),
+        ({ segment }) => segment,
+      );
+      const addressTextStates = [""];
+      for (const grapheme of graphemes) {
+        addressTextStates.push(`${addressTextStates[addressTextStates.length - 1]}${grapheme}`);
+      }
+      const addressTextEvents = addressTextStates.flatMap((text, index, states) => {
+        const textStart =
+          index === 0
+            ? addressBar.start
+            : revealStart + ((revealEnd - revealStart) * (index - 1)) / graphemes.length;
+        const textEnd =
+          index === states.length - 1
+            ? addressBar.end
+            : revealStart + ((revealEnd - revealStart) * index) / graphemes.length;
+
+        if (formatAssTime(textStart) === formatAssTime(textEnd)) {
+          return [];
+        }
+
+        return [
+          `Dialogue: 2,${formatAssTime(textStart)},${formatAssTime(textEnd)},Address,,0,0,0,,{\\q2\\clip(${addressMarginLeft},${pillY},${addressClipRight},${pillY + pillHeight})}●  ${escapeAssText(text)}`,
+        ];
+      });
       return [
         `Dialogue: 0,${start},${end},AddressShape,,0,0,0,,{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\1c&H00343130&}m 0 0 l ${video.width} 0 l ${video.width} ${addressBarHeight} l 0 ${addressBarHeight}`,
         `Dialogue: 1,${start},${end},AddressShape,,0,0,0,,{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\1c&H0068635F&}m ${pillX} ${pillY} l ${pillX + pillWidth} ${pillY} l ${pillX + pillWidth} ${pillY + pillHeight} l ${pillX} ${pillY + pillHeight}`,
-        `Dialogue: 2,${start},${end},Address,,0,0,0,,{\\clip(${addressMarginLeft},${pillY},${addressClipRight},${pillY + pillHeight})}●  ${escapeAssText(addressBar.url)}`,
+        ...addressTextEvents,
       ];
     })
     .join("\n");
