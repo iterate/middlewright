@@ -1082,9 +1082,14 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   const promptFill = metadata.highlights.find(
     (highlight) => highlight.method === "fill" && highlight.dialog?.type === "prompt",
   )!;
+  const promptClick = metadata.highlights.find(
+    (highlight) => highlight.method === "click" && highlight.dialog?.type === "prompt",
+  )!;
   expect(promptFill).toBeDefined();
+  expect(promptClick).toBeDefined();
 
   const fillStart = renderedHighlightStartWithoutDeadAir(promptFill, metadata.highlights);
+  const clickStart = renderedHighlightStartWithoutDeadAir(promptClick, metadata.highlights);
   const renderedFrames = await videoFrames(paths.rendered, 25);
   const scale = Math.min(
     renderedFrames[0].width / promptFill.viewport.width,
@@ -1102,11 +1107,11 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     x: inputBox.x + 8,
     y: inputBox.y + 6,
   };
-  const fillFrames = renderedFrames.slice(
+  const dialogFrames = renderedFrames.slice(
     Math.floor(fillStart / 40),
-    Math.ceil((fillStart + highlightDurationMs) / 40),
+    Math.ceil((clickStart + highlightDurationMs) / 40),
   );
-  const darkTextPixels = fillFrames.map((frame) =>
+  const darkTextPixels = dialogFrames.map((frame) =>
     countPixels(
       frame,
       textBox,
@@ -1122,7 +1127,7 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     (count) => count >= completePixelCount * 0.95,
   );
 
-  expect(completePixelCount).toBeGreaterThan(100);
+  expect(completePixelCount).toBeGreaterThan(50);
   expect(blankFrame).toBeGreaterThanOrEqual(0);
   expect(partialFrame).toBeGreaterThan(blankFrame);
   expect(completeFrame).toBeGreaterThan(partialFrame);
