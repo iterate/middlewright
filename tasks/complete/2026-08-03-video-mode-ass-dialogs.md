@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: large
 ---
 
@@ -7,7 +7,7 @@ size: large
 
 ## Status
 
-The tracer bullet is green: dialogs no longer touch page DOM, the renderer freezes the last clean raw frame and draws ASS phases before the pointer, and the 25 fps sequence now stays neutral through typing before selecting once. Edge coverage, full validation, docs, and review videos remain.
+Complete. Dialogs no longer touch page DOM: the renderer freezes the last clean raw frame, draws ASS phases before the pointer, stays neutral through prompt typing, and selects once. Edge coverage, the full validation matrix, docs, and four native review videos are complete on PR #19.
 
 ## Goal
 
@@ -31,10 +31,10 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 - [x] Cover alert and confirm accept/dismiss behavior without changing Playwright listener or automatic-dismiss semantics. *Existing public metadata and rendered confirm regressions are green with the prepended observer and no-listener auto-dismiss intact.*
 - [x] Cover prompt default, empty, Unicode, and long/wrapped message/value cases where practical. *Metadata distinguishes a Unicode default from an explicit empty acceptance; rendered coverage holds the default, clears it, keeps a long wrapped message readable, then selects OK.*
 - [x] Preserve existing pointer motion, prompt/goto reveal behavior, dead-air timing, and clean post-dialog pacing. *All 30 pre-existing FFmpeg specs pass alongside the new dialog sequences.*
-- [ ] Document the ASS approach and compare its code complexity, runtime overhead, layout limits, portability, and fidelity in the PR body. *README now documents the pure post-production path; reviewer comparison is pending final measurements.*
-- [ ] Run focused stress tests, FFmpeg specs, full suite, typecheck, build, and publint.
-- [ ] Generate and inspect focused rendered/raw prompt videos; add todo rendered/raw videos if the #15 fixture can be exercised without importing its code.
-- [ ] Upload native GitHub video players and complete the task file.
+- [x] Document the ASS approach and compare its code complexity, runtime overhead, layout limits, portability, and fidelity in the PR body. *README documents the pure post-production path; PR #19 records the +262 net production-line change and the render, layout, portability, and fidelity trade-offs.*
+- [x] Run focused stress tests, FFmpeg specs, full suite, typecheck, build, and publint. *Prompt sequence stress passed 10/10; all 31 FFmpeg specs passed; the full suite passed 98 tests with 3 provider-gated skips; typecheck, build, and publint passed.*
+- [x] Generate and inspect focused rendered/raw prompt videos; add todo rendered/raw videos if the #15 fixture can be exercised without importing its code. *The focused pair and a temporary ignored copy of #15's todo fixture both rendered cleanly; the temporary spec was removed after capture.*
+- [x] Upload native GitHub video players and complete the task file. *PR #19 has focused prompt and todo-app raw/rendered players uploaded through GitHub's attachment flow.*
 
 ## Implementation log
 
@@ -43,3 +43,4 @@ Render alert, confirm, and prompt interactions wholly in post-production with AS
 - 2026-08-03: Removed the page init-script and runtime DOM overlay. Dialog highlights now carry a clean-frame timestamp plus deterministic input/button geometry; a dedicated ASS pass draws the scene before pointer compositing.
 - 2026-08-03: The first ASS pass exposed letterboxing: an 800×600 page was scaled into 600×450 content inside an 800×450 video. Dialog layout now uses the same scaled viewport as screenshots and pointer targets. The frame-order, raw-cleanliness, rendered confirm, post-roll, metadata, listener-order, auto-dismiss, and back-to-back checks pass.
 - 2026-08-03: Added explicit-empty coverage with a Unicode default and long message. Empty acceptance now holds the default briefly, clears the input during the fill phase, and keeps it empty when OK becomes selected. The full 30-spec FFmpeg file passes.
+- 2026-08-03: Final validation passes all 31 FFmpeg specs, a 10-run prompt-order stress check, 98 full-suite tests with 3 provider-gated skips, typecheck, build, and publint. Uploaded four native review videos and documented the measured source diff plus qualitative renderer trade-offs on PR #19.
