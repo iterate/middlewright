@@ -1107,8 +1107,21 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     x: inputBox.x + 8,
     y: inputBox.y + 6,
   };
+  const buttonBox = {
+    height: Math.round(promptClick.rect.height * scale),
+    width: Math.round(promptClick.rect.width * scale),
+    x: Math.round(promptClick.rect.x * scale),
+    y: Math.round(promptClick.rect.y * scale),
+  };
+  const precedingClick = metadata.highlights.find(
+    (highlight) => highlight.method === "click" && !highlight.dialog,
+  )!;
+  const dialogSequenceStart = renderedHighlightStartWithoutDeadAir(
+    precedingClick,
+    metadata.highlights,
+  ) + (precedingClick.end - precedingClick.start);
   const dialogFrames = renderedFrames.slice(
-    Math.floor(fillStart / 40),
+    Math.floor(dialogSequenceStart / 40),
     Math.ceil((clickStart + highlightDurationMs) / 40),
   );
   const darkTextPixels = dialogFrames.map((frame) =>
@@ -1131,6 +1144,28 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   expect(blankFrame).toBeGreaterThanOrEqual(0);
   expect(partialFrame).toBeGreaterThan(blankFrame);
   expect(completeFrame).toBeGreaterThan(partialFrame);
+
+  const selectedButtonStates = dialogFrames
+    .filter((frame) => {
+      const panel = averagePixel(frame, {
+        x: Math.round(frame.width / 2),
+        y: Math.round(frame.height / 2),
+      });
+      return panel.red > 220 && panel.green > 220 && panel.blue > 220;
+    })
+    .map(
+      (frame) =>
+        countPixels(
+          frame,
+          buttonBox,
+          ({ blue, green, red }) => blue > 150 && blue > red * 1.4 && blue > green * 1.1,
+        ) > 200,
+    );
+  const firstSelectedButton = selectedButtonStates.indexOf(true);
+
+  expect(selectedButtonStates[0]).toBe(false);
+  expect(firstSelectedButton).toBeGreaterThan(0);
+  expect(selectedButtonStates.slice(firstSelectedButton)).not.toContain(false);
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({
