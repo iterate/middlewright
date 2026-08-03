@@ -759,6 +759,8 @@ test("sets video source range from current timestamps", async ({ page }, testInf
   const startBefore = plugged.videoMode.getVideoTimestamp();
   plugged.videoMode.setStartTime();
   const startAfter = plugged.videoMode.getVideoTimestamp();
+  await plugged.setContent(`<button>first locator action</button>`);
+  await plugged.locator("button").click();
   await plugged.waitForTimeout(20);
   const endBefore = plugged.videoMode.getVideoTimestamp();
   plugged.videoMode.setEndTime();

@@ -223,13 +223,11 @@ export type VideoModeOptions = {
    */
   deadAirThreshold?: number;
   /**
-   * Where the rendered video starts, trimming the blank "startup" lead-in
-   * (about:blank, the loading shell, the pre-hydration app frame) so it opens on
-   * real content instead of a white screen. An explicit `setStartTime()` always
-   * wins over this.
+   * Where the rendered video starts. An explicit `setStartTime()` always wins
+   * over this.
    *
-   * - `"auto"` (default): pick a sensible strategy — currently the blank
-   *   detector below. Chosen so consumers get lead-in trimming just by upgrading.
+   * - `"auto"` (default): start when the first locator action is invoked,
+   *   including that action's Playwright auto-wait.
    * - `"detect-blank"`: find where the leading blank frames end in the recorded
    *   pixels (the first frame that differs from the opening frame) and start
    *   there, when that lead-in is long enough to be worth trimming.
@@ -380,6 +378,7 @@ const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
 type ResolvedTrimStart = {
   selector?: string;
   detectBlank: boolean;
+  firstLocator: boolean;
 };
 
 const resolveAddressBar = (value: VideoModeOptions["addressBar"]) => {
@@ -411,15 +410,16 @@ const resolveTrimStart = (trimStart: VideoModeOptions["trimStart"]): ResolvedTri
     if (kind !== "selector" || typeof selector !== "string" || selector.length === 0) {
       throw new Error('videoMode trimStart tuple must be ["selector", "<css>"]');
     }
-    return { selector, detectBlank: true };
+    return { selector, detectBlank: true, firstLocator: false };
   }
 
   switch (value) {
     case "never":
-      return { detectBlank: false };
+      return { detectBlank: false, firstLocator: false };
     case "auto":
+      return { detectBlank: false, firstLocator: true };
     case "detect-blank":
-      return { detectBlank: true };
+      return { detectBlank: true, firstLocator: false };
     default:
       throw new Error(
         'videoMode trimStart must be "auto", "detect-blank", "never", or ["selector", "<css>"]',
@@ -433,13 +433,13 @@ const resolveTrimStart = (trimStart: VideoModeOptions["trimStart"]): ResolvedTri
 // letterbox bar or a solid-but-dark shell would fool that); it's the first frame
 // that *differs* from the opening frame. We decode a coarse, tiny greyscale strip
 // of the opening seconds and find where it first changes and stays changed.
-const AUTO_START_SAMPLE_FPS = 5;
-const AUTO_START_SAMPLE_SIZE = 48;
-const AUTO_START_MAX_SCAN_MS = 30_000;
+const BLANK_START_SAMPLE_FPS = 5;
+const VIDEO_ANALYSIS_SAMPLE_SIZE = 48;
+const BLANK_START_MAX_SCAN_MS = 30_000;
 // Mean per-pixel greyscale delta (0-255) above which a frame counts as "changed"
 // from the opening frame. Comfortably above VP8 quantisation noise on a static
 // scene (which stays ~0) and below the jump when real content paints.
-const AUTO_START_DIFF_THRESHOLD = 1.5;
+const BLANK_START_DIFF_THRESHOLD = 1.5;
 
 const frameMeanAbsDiff = (frame: Buffer, reference: Buffer) => {
   let sum = 0;
@@ -455,7 +455,7 @@ const frameMeanAbsDiff = (frame: Buffer, reference: Buffer) => {
  * static lead-in (nothing to trim).
  */
 const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undefined> => {
-  const size = AUTO_START_SAMPLE_SIZE;
+  const size = VIDEO_ANALYSIS_SAMPLE_SIZE;
   const frameSize = size * size;
   let stdout: Buffer;
   try {
@@ -468,9 +468,9 @@ const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undef
         "-i",
         inputPath,
         "-vf",
-        `fps=${AUTO_START_SAMPLE_FPS},scale=${size}:${size},format=gray`,
+        `fps=${BLANK_START_SAMPLE_FPS},scale=${size}:${size},format=gray`,
         "-t",
-        formatSeconds(AUTO_START_MAX_SCAN_MS),
+        formatSeconds(BLANK_START_MAX_SCAN_MS),
         "-f",
         "rawvideo",
         "-pix_fmt",
@@ -495,13 +495,13 @@ const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undef
     frameMeanAbsDiff(
       stdout.subarray(index * frameSize, (index + 1) * frameSize),
       firstFrame,
-    ) > AUTO_START_DIFF_THRESHOLD;
+    ) > BLANK_START_DIFF_THRESHOLD;
 
   // First frame that differs from the opening frame *and* stays changed (two
   // consecutive samples), so a single decode blip can't trip it.
   for (let index = 1; index < frameCount - 1; index += 1) {
     if (hasChanged(index) && hasChanged(index + 1)) {
-      return Math.round((index / AUTO_START_SAMPLE_FPS) * 1000);
+      return Math.round((index / BLANK_START_SAMPLE_FPS) * 1000);
     }
   }
 
@@ -3459,6 +3459,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       if (skipStackFrames.length > 0) {
         const stack = new Error().stack || "";
         if (skipStackFrames.some((frame) => stack.includes(frame))) return next();
+      }
+
+      if (
+        trimStart.firstLocator &&
+        state.sourceRange.start === undefined &&
+        state.startedAt !== undefined
+      ) {
+        controls.setStartTime(Math.max(0, Math.round(timing.actionStartedAt - state.startedAt)));
       }
 
       if (method === "waitFor") {

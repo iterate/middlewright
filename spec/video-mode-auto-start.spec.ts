@@ -36,10 +36,34 @@ const blankThenContent = (options: { blankMs: number; markerAtMs?: number }) => 
   </script>
 `;
 
-test("trims the blank startup lead-in so the video opens on content", async ({ page }, testInfo) => {
-  const blankMs = 2000;
-  // default trimStart is "auto" — no option needed
+test("starts at the first locator invocation by default", async ({ page }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setContent(`
+      <button id="ready" hidden>Ready</button>
+      <button id="next">Next</button>
+      <script>setTimeout(() => { document.querySelector('#ready').hidden = false; }, 600)</script>
+    `);
+
+    const firstLocatorBefore = plugged.videoMode.getVideoTimestamp();
+    await plugged.locator("#ready").waitFor();
+    const firstLocatorAfter = plugged.videoMode.getVideoTimestamp();
+    const firstStart = (await video.metadata()).sourceRange.start;
+
+    expect(firstLocatorAfter - firstLocatorBefore).toBeGreaterThan(400);
+    expect(firstStart).toBeGreaterThanOrEqual(firstLocatorBefore);
+    expect(firstStart).toBeLessThan(firstLocatorBefore + 100);
+
+    await plugged.waitForTimeout(100);
+    await plugged.locator("#next").click();
+    expect((await video.metadata()).sourceRange).toMatchObject({ start: firstStart });
+  }
+});
+
+test("detects the blank startup lead-in when requested", async ({ page }, testInfo) => {
+  const blankMs = 2000;
+  const video = videoMode({ finalHold: 0, highlight: false, trimStart: "detect-blank" });
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
     await plugged.setViewportSize({ width: 800, height: 600 });
@@ -97,8 +121,10 @@ test("starts from a selector the moment it becomes visible", async ({ page }, te
   expect(renderedDuration).toBeLessThan(rawDuration - 500);
 });
 
-test("leaves a video that was never blank untrimmed", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 0, highlight: false });
+test('trimStart: "detect-blank" leaves a video that was never blank untrimmed', async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({ finalHold: 0, highlight: false, trimStart: "detect-blank" });
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
     await plugged.setViewportSize({ width: 800, height: 600 });
