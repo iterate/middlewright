@@ -292,7 +292,6 @@ type VideoPiece = {
   end: number;
   highlight?: VideoModeHighlight;
   postAction?: VideoModeHighlight;
-  preAction?: VideoModeHighlight;
   speed: number;
   start: number;
 };
@@ -2052,7 +2051,6 @@ const videoPieces = (options: {
         pieces.push({
           end: highlight.start,
           postAction: previousHighlight?.fillReveal ? previousHighlight : undefined,
-          preAction: highlight.fillReveal ? highlight : undefined,
           speed: segment.speed,
           start: cursor,
         });
@@ -2602,9 +2600,6 @@ const renderedVideoFilter = (options: {
     labels.push(`[${label}]`);
 
     const operations: string[] = [];
-    const preActionInput = piece.preAction?.image
-      ? highlightInputByImage.get(piece.preAction.image)
-      : undefined;
     const postActionInput = piece.postAction?.fillReveal
       ? highlightInputByImage.get(piece.postAction.fillReveal.image)
       : undefined;
@@ -2651,32 +2646,14 @@ const renderedVideoFilter = (options: {
         viewport: piece.postAction.viewport,
       });
     }
-    if (piece.preAction?.fillReveal && preActionInput) {
-      stabilizations.push({
-        input: preActionInput,
-        rect: piece.preAction.fillReveal.initialRect,
-        viewport: piece.preAction.viewport,
-      });
-    }
 
     if (stabilizations.length > 0) {
-      const preActionCover = piece.preAction?.fillReveal?.cover;
-      const coverRect = preActionCover
-        ? scaleVideoModeRect(
-            preActionCover.rect,
-            piece.preAction!.viewport,
-            options.video,
-          )
-        : undefined;
       const durationSeconds = formatSeconds(renderedPieceDuration(piece));
       const baseLabel = `stabilizebase${index}`;
       filters.push(
         [
           `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
           `setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`,
-          coverRect && preActionCover
-            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${preActionCover.color}:t=fill`
-            : undefined,
         ]
           .filter((operation): operation is string => Boolean(operation))
           .join(",") + `[${baseLabel}]`,
