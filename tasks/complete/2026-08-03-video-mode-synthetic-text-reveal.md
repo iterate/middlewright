@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-All three implementation slices are complete: prompts and URLs reveal progressively, while long destinations stay as compact clipped single-line text. Next: run stress/full validation, regenerate review media, and finish the draft PR.
+Complete on draft PR #17. Prompts and URLs reveal progressively, long destinations stay as compact clipped single-line text, all validation passes, and three native review players are in the PR body.
 
 ## Goal
 
@@ -31,9 +31,9 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 - [x] Add a failing rendered-video regression proving a long URL stays inside the address field and visible video bounds. *A repeated path wrapped to 24 pixels across two lines before the fix; the final rendered pixels now form one compact line inside the calculated address-field clip.*
 - [x] Reduce address-bar URL type size and enforce rendering containment without changing recorded URL metadata. *Address text scales from a 12px floor at 2.4% of video height, uses ASS no-wrap mode, and retains the existing right-edge clip.*
 - [x] Document the default synthetic-text behavior. *The video-mode README now describes glyph reveals for goto and prompt text plus compact clipping for long destinations.*
-- [ ] Run focused stress, the relevant/full suite, typecheck, build, and publint.
-- [ ] Generate and inspect the todo raw/rendered pair and a focused long-address render.
-- [ ] Upload native inline video players to the stacked draft PR and complete this task file.
+- [x] Run focused stress, the relevant/full suite, typecheck, build, and publint. *The new specs passed 15/15 with three workers, all 30 FFmpeg specs pass, the full suite passes 96 tests with 3 provider-gated skips, and typecheck/build/publint are clean.*
+- [x] Generate and inspect the todo raw/rendered pair and a focused long-address render. *Contact sheets confirm the todo prompt types into the fake dialog and the focused long URL reveals on one clipped line; the raw todo stays unchanged.*
+- [x] Upload native inline video players to the draft PR and complete this task file. *PR #17 has GitHub user-attachment players for the rendered todo, raw todo, and focused address bar; rendered PR HTML contains three `<video>` elements.*
 
 ## Implementation log
 
@@ -41,3 +41,4 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 - 2026-08-03: The prompt tracer bullet failed against the old all-at-once handoff, then passed after recording the accepted input as the post-fill frame for the existing grapheme-aware reveal renderer. The native prompt and live runtime remain untouched.
 - 2026-08-03: The address tracer bullet proved the old ASS annotation painted all 685 light URL pixels in every sampled hold frame. Successive grapheme-prefix annotations now produce a clear start, middle, and complete destination without extending navigation runtime.
 - 2026-08-03: The long-address regression exposed the reported overflow as ASS word wrapping: the clipped URL occupied two 12-pixel rows. `\\q2` keeps it on one line, and the smaller type remains within both horizontal clip edges in decoded output.
+- 2026-08-03: Stress and full validation passed. Generated the todo journey from the current branch using PR #15's ignored fixture as a review-only input, then reran the checked-in long-address spec for focused media. Uploaded all three MP4s through GitHub's attachment editor and verified three native players in the rendered PR body.
