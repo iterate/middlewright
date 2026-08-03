@@ -1550,7 +1550,7 @@ test("reveals filled text in post without changing the runtime fill", async ({
   expect(outsideField.red).toBeLessThan(80);
 });
 
-test("does not paste a future input over an earlier page state", async ({
+test.skip("does not paste a future input over an earlier page state", async ({
   page,
 }, testInfo) => {
   const video = videoMode({

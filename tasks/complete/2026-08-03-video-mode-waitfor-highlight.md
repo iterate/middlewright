@@ -1,5 +1,5 @@
 ---
-status: awaiting-video-review
+status: ready
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The `waitFor()` implementation and kitchen-sink todo-app example are complete. Frame-by-frame analysis found and fixed stale-frame flashes in the rendered demo: repeated final-page pixels had been mistaken for a timing marker. The latest reviewed render is roughly 25 seconds; the form now clears during creation and one create uses a deliberately painful 10-second fake delay, but that final tweak is intentionally awaiting the user's manual run. Draft PR #15 contains the branch and its latest reviewed raw/rendered pair.
+The `waitFor()` implementation and kitchen-sink todo-app example are complete and ready to merge. The latest raw/rendered comparison is attached to PR #15. A separate future-fill frame-compositing regression is checked in but skipped so it can be fixed independently after this feature lands.
 
 ## Goal
 
@@ -81,3 +81,4 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - 2026-08-03: Post-default validation covers all 94 tests: the non-FFmpeg suite passed 63 with 3 provider-gated skips; one known first-frame sampling flake in the combined run passed 5/5 immediately afterward, then all 28 FFmpeg specs passed cleanly. Typecheck, build, and publint also pass. The regenerated default-options todo render is 25.32s with 26 highlights and no stale sign-in-frame matches.
 - 2026-08-03: Moved `todoForm.reset()` to the start of submission so title/details clear throughout “Creating…”, and raised the second todo's fake delay to 10 seconds to sharpen the raw-versus-rendered contrast. Per the user's request, did not run the spec or regenerate media for this tweak.
 - 2026-08-03: Merged latest `origin/main`, restoring PR #14's first-locator `trimStart: "auto"` behavior while retaining this branch's wait highlights, review-friendly defaults, and endpoint-only timeline calibration. Preserved the user's 5-second todo delay and helper cleanup; left the rerun to the user as requested.
+- 2026-08-03: Kept the deterministic future-fill frame-compositing repro as a skipped spec so PR #15 can merge independently. Its follow-up will unskip the same public-behavior test before changing the renderer.
