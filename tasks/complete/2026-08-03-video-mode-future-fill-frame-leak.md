@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The fix is complete. Removing the future `preAction` crop fixes all 15 hybrid frames, while scrolling, resizing, gradient, cursor, and text-reveal behavior remains intact. Full validation passes; PR #20 includes a labelled raw/rendered comparison from the todo app.
+The fix is complete. Removing the future `preAction` crop fixes all 15 hybrid frames, while scrolling, resizing, gradient, cursor, and text-reveal behavior remains intact. Full validation passes; PR #20 includes the exact repro before and after the fix, plus the todo app baseline.
 
 ## Goal
 
@@ -38,4 +38,5 @@ Rendered video must never show a future input over an earlier page. Fill stabili
 - 2026-08-03: Hypothesis 1 was correct. `videoPieces()` labelled the whole gap before a fill with that future fill, and FFmpeg overlaid its screenshot crop for the full piece. Removing that label and overlay turns the repro green 10/10 under two workers without regressing the focused fill suite.
 - 2026-08-03: Full validation exposed a pre-existing text-cursor sampler flake at the same rate on untouched `main`. The spec now searches the complete video for its cursor-then-reveal contract and checks background stability only during the final hold, avoiding assumptions about calculated slice and first-frame alignment.
 - 2026-08-03: Final validation passes 103 tests with 3 provider-gated skips, typecheck, build, and publint. The todo contact sheet shows a monotonic login/create/review journey with no future-input overlay; its render is attached to PR #20.
-- 2026-08-03: Removed the redundant `No todos yet` highlight from the demo journey and refreshed the PR media as a labelled raw-versus-rendered comparison.
+- 2026-08-03: Removed the redundant `No todos yet` highlight from the demo journey and refreshed the todo baseline as a labelled raw-versus-rendered comparison.
+- 2026-08-03: Added a side-by-side comparison of the exact frame-level repro at the pre-fix and post-fix commits; the buggy version visibly pastes the future blue input over the earlier red screen.
