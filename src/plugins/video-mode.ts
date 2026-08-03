@@ -17,7 +17,12 @@ import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Dialog, Locator, Page, TestInfo } from "@playwright/test";
-import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
+import type {
+  ActionTiming,
+  LocatorWithOriginal,
+  Plugin,
+  OverrideableMethod,
+} from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
 const VIDEO_MODE_METADATA_FILE = "video-mode.json";
@@ -204,7 +209,7 @@ export type VideoModeOptions = {
   highlight?: VideoModeHighlightOptions;
   /** Final hold duration in the rendered video (ms). Default: 3000 */
   finalHold?: number;
-  /** Methods to skip highlighting. Default: ['waitFor'] */
+  /** Methods to skip highlighting. Default: [] */
   skipMethods?: OverrideableMethod[];
   /**
    * Skip highlighting for actions triggered from these files (matched as
@@ -1227,6 +1232,8 @@ const recordHighlight = async (options: {
   durationMs: number;
   locator: Locator;
   method: OverrideableMethod;
+  requireVisible: boolean;
+  startAfterScreenshot: boolean;
   state: VideoModeState;
   testInfo: TestInfo;
   thickness: number;
@@ -1240,6 +1247,10 @@ const recordHighlight = async (options: {
   }
 
   try {
+    if (options.requireVisible && !(await options.locator.isVisible())) {
+      return;
+    }
+
     const snapshot = await options.locator.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       return {
@@ -1269,8 +1280,11 @@ const recordHighlight = async (options: {
     options.state.highlightImageIndex += 1;
     const imagePath = join(options.testInfo.outputDir, image);
     await mkdir(options.testInfo.outputDir, { recursive: true });
-    const start = Math.round(performance.now() - options.state.startedAt);
+    const beforeScreenshot = Math.round(performance.now() - options.state.startedAt);
     await options.locator.page().screenshot({ path: imagePath, scale: "css" });
+    const start = options.startAfterScreenshot
+      ? Math.round(performance.now() - options.state.startedAt)
+      : beforeScreenshot;
 
     const highlight: VideoModeHighlight = {
       color: options.color,
@@ -3448,7 +3462,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const addressBar = resolveAddressBar(options.addressBar);
   const captionMode = options.captions || "test-step";
   const highlight = resolveVideoModeHighlight(options);
-  const skipMethods = options.skipMethods || ["waitFor"];
+  const skipMethods = options.skipMethods || [];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
   const trimStart = resolveTrimStart(options.trimStart);
@@ -3531,11 +3545,28 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       }
 
       if (method === "waitFor") {
+        let result: unknown;
         try {
-          return await next();
+          result = await next();
         } finally {
           recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 0 });
         }
+
+        if (highlight.mode !== "off" && !skipMethods.includes(method)) {
+          await recordHighlight({
+            color: highlight.color,
+            durationMs: highlight.durationMs,
+            locator,
+            method,
+            requireVisible: true,
+            startAfterScreenshot: true,
+            state,
+            testInfo,
+            thickness: highlight.thickness,
+          });
+        }
+
+        return result;
       }
 
       recordMiddlewareWaitBeforeVideoMode(state, timing);
@@ -3559,6 +3590,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               durationMs: highlight.durationMs,
               locator,
               method,
+              requireVisible: false,
+              startAfterScreenshot: false,
               state,
               testInfo,
               thickness: highlight.thickness,
@@ -3740,10 +3773,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         // element appears; a timeout or a page close just leaves the blank
         // detector to handle it. Never let it reject the test.
         if (trimStart.selector) {
-          page
+          const trimStartLocator = page
             .locator(trimStart.selector)
-            .first()
-            .waitFor({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
+            .first() as LocatorWithOriginal;
+          trimStartLocator
+            .waitFor_original({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
             .then(() => {
               if (state.sourceRange.start === undefined) controls.setStartTime();
             })

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: awaiting-video-review
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Specification ready; implementation and review videos have not started. The branch will stop before opening a pull request so the pacing can be reviewed locally first.
+Implementation and validation are complete. Visible `waitFor()` results now use the normal post-rendered highlight duration without delaying the test; invisible results and explicit skips remain unhighlighted. Twenty-seven local review videos are ready. No pull request has been opened; only the user's pacing decision remains.
 
 ## Goal
 
@@ -25,14 +25,18 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 
 ## Checklist
 
-- [ ] Add one failing public-behavior rendered-video spec for a delayed visible `waitFor()` that moves the pointer to the result and holds it without delaying the test.
-- [ ] Record a post-resolution `waitFor()` highlight while preserving the preceding wait as dead air.
-- [ ] Keep `skipMethods: ["waitFor"]`, disabled highlighting, and non-visible terminal states well-defined.
-- [ ] Update public documentation for the new default and opt-out.
-- [ ] Run focused tests, typecheck, build, and the full relevant video-mode suite.
-- [ ] Collect and inspect every rendered video-mode spec artifact for local review.
-- [ ] Stop before opening a pull request and hand the local videos back to the user.
+- [x] Add one failing public-behavior rendered-video spec for a delayed visible `waitFor()` that moves the pointer to the result and holds it without delaying the test. *The FFmpeg spec first failed with only the following click highlight, then passed with distinct wait-result and click holds while the live wait stayed below 600 ms.*
+- [x] Record a post-resolution `waitFor()` highlight while preserving the preceding wait as dead air. *Middleware records elapsed wait timing first, then captures the visible resolved state for the ordinary synthetic highlight timeline.*
+- [x] Keep `skipMethods: ["waitFor"]`, disabled highlighting, and non-visible terminal states well-defined. *Focused metadata specs cover the opt-out, the default 1000 ms duration, and an attached element that resolves hidden.*
+- [x] Update public documentation for the new default and opt-out. *The video-mode README now describes the shared duration and `skipMethods` escape hatch.*
+- [x] Run focused tests, typecheck, build, and the full relevant video-mode suite. *All 27 FFmpeg specs pass serially; the full suite passes 89 tests with 3 provider-gated skips, plus typecheck, build, and publint.*
+- [x] Collect and inspect every rendered video-mode spec artifact for local review. *Twenty-five FFmpeg renders and two auto-start renders were sampled across five evenly-spaced frames and collected behind one local HTML player page.*
+- [x] Stop before opening a pull request and hand the local videos back to the user. *The branch is pushed, but no PR exists.*
 
 ## Implementation log
 
 - 2026-08-03: Created `feature/video-mode-waitfor-highlight` from `main` in a sibling worktree. Chose the existing global highlight duration as the configuration surface so action pacing stays consistent.
+- 2026-08-03: The RED tracer bullet proved current `waitFor()` emitted dead air but no highlight. The GREEN path captures a visible post-resolution screenshot and starts its synthetic hold after capture, so selector-based start trimming retains it.
+- 2026-08-03: The full renderer pass exposed video mode's own `trimStart: ["selector", css]` watcher as a second apparent `waitFor()`. It now calls the original Playwright method so internal bookkeeping cannot create user-facing highlights.
+- 2026-08-03: Added the default-duration, explicit-skip, and hidden-result regressions. Updated frame-level fill tests to distinguish the new wait outline from later fill outlines and increased their decode buffer for longer review clips.
+- 2026-08-03: Generated and sampled all 27 available rendered fixtures. Static review-page verification found 27 valid video streams and no missing sources. The local browser connector was unavailable, so the HTML handoff page was validated by its files and streams rather than automated playback controls.

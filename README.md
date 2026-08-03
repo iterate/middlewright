@@ -161,7 +161,6 @@ await using page = await addPlugins({
       highlight: { mode: "pointer", duration: 1000 },
       finalHold: 3000,
       deadAirThreshold: 300,
-      skipMethods: ["waitFor"],
       skipStackFrames: ["test-helpers.ts"], // don't annotate internal login/setup helpers
     }),
   ],
@@ -247,6 +246,8 @@ videoMode({
   highlight: { mode: "outline", style: "1px solid yellow" },
 });
 ```
+
+A successful visible `locator.waitFor()` points at and holds the resolved locator using the same highlight mode and duration. The elapsed wait remains dead air, so `deadAirThreshold` can compress it before the resolved-state hold. Use `skipMethods: ["waitFor"]` to keep waits as dead air without highlighting their result.
 
 Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and records the action target immediately before the action.
 

@@ -318,9 +318,12 @@ test("turns meaningful Playwright steps into readable video captions", async ({
   expect(metadata.highlights.map(({ method }) => method)).toEqual([
     "fill",
     "click",
+    "waitFor",
     "click",
     "click",
+    "waitFor",
     "click",
+    "waitFor",
   ]);
 
   const renderedDurationMs = await videoDurationMs(paths.rendered);
@@ -1058,7 +1061,9 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
   expect(cursorPixelCount(finalHoldFrame, targetBox)).toBeLessThan(10);
 });
 
-test("moves the pointer toward the first click after a waitFor", async ({ page }, testInfo) => {
+test("points at a visible result after waitFor without delaying the test", async ({
+  page,
+}, testInfo) => {
   const highlightDurationMs = 700;
   const video = videoMode({ trimStart: "never",
     finalHold: 0,
@@ -1081,7 +1086,9 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
       </script>
     `);
 
+    const waitStartedAt = performance.now();
     await plugged.locator("#ready").waitFor();
+    expect(performance.now() - waitStartedAt).toBeLessThan(600);
     await plugged.waitForTimeout(900);
     await plugged.locator("#run").click();
     await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
@@ -1090,34 +1097,48 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
 
   const paths = video.outputPaths();
   const metadata = await video.metadata();
-  const [highlight] = metadata.highlights;
-  expect(highlight).toBeDefined();
+  const [waitHighlight, clickHighlight] = metadata.highlights;
+  expect(metadata.highlights).toMatchObject([
+    { method: "waitFor", rect: { height: 100, width: 140, x: 80, y: 140 } },
+    { method: "click", rect: { height: 100, width: 140, x: 560, y: 140 } },
+  ]);
 
   const renderedPath = paths.rendered;
-  const preClickFrame = await videoFrame(renderedPath, Math.max(100, highlight.start - 650));
+  const waitHoldStart = renderedHighlightStartWithoutDeadAir(
+    waitHighlight,
+    metadata.highlights,
+  );
+  const clickHoldStart = renderedHighlightStartWithoutDeadAir(
+    clickHighlight,
+    metadata.highlights,
+  );
+  const waitHoldFrame = await videoFrame(
+    renderedPath,
+    waitHoldStart + highlightDurationMs - 100,
+  );
   const clickHoldFrame = await videoFrame(
     renderedPath,
-    highlight.start + highlightDurationMs - 100,
+    clickHoldStart + highlightDurationMs - 100,
   );
   const scale = Math.min(
-    preClickFrame.width / highlight.viewport.width,
-    preClickFrame.height / highlight.viewport.height,
+    waitHoldFrame.width / waitHighlight.viewport.width,
+    waitHoldFrame.height / waitHighlight.viewport.height,
   );
-  const runBox = {
-    height: Math.round(highlight.rect.height * scale),
-    width: Math.round(highlight.rect.width * scale),
-    x: Math.round(highlight.rect.x * scale),
-    y: Math.round(highlight.rect.y * scale),
+  const readyBox = {
+    height: Math.round(waitHighlight.rect.height * scale),
+    width: Math.round(waitHighlight.rect.width * scale),
+    x: Math.round(waitHighlight.rect.x * scale),
+    y: Math.round(waitHighlight.rect.y * scale),
   };
-  const fullFrame = {
-    height: preClickFrame.height,
-    width: preClickFrame.width,
-    x: 0,
-    y: 0,
+  const runBox = {
+    height: Math.round(clickHighlight.rect.height * scale),
+    width: Math.round(clickHighlight.rect.width * scale),
+    x: Math.round(clickHighlight.rect.x * scale),
+    y: Math.round(clickHighlight.rect.y * scale),
   };
 
-  expect(cursorPixelCount(preClickFrame, fullFrame)).toBeGreaterThan(20);
-  expect(cursorPixelCount(preClickFrame, runBox)).toBeLessThan(10);
+  expect(cursorPixelCount(waitHoldFrame, readyBox)).toBeGreaterThan(40);
+  expect(cursorPixelCount(waitHoldFrame, runBox)).toBeLessThan(10);
   expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
 });
 
@@ -1483,8 +1504,15 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
 
   const paths = video.outputPaths();
   const metadata = await video.metadata();
+  const waitHighlight = metadata.highlights.find((highlight) => highlight.method === "waitFor")!;
   const clickHighlight = metadata.highlights.find((highlight) => highlight.method === "click")!;
   const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(metadata.highlights.map((highlight) => highlight.method)).toEqual([
+    "waitFor",
+    "click",
+    "fill",
+  ]);
+  expect(waitHighlight.start).toBeGreaterThanOrEqual(metadata.sourceRange.start!);
   expect(clickHighlight).toBeDefined();
   expect(fillHighlight.fillReveal).toBeDefined();
 
@@ -1832,11 +1860,14 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
   expect(fillHighlight.fillReveal).toBeDefined();
   expect(fillHighlight.rect.height).toBeGreaterThan(initialHeight);
   const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const fillStartFrame = Math.floor(
+    renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights) / 40,
+  );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
     frames[0].height / fillHighlight.viewport.height,
   );
-  const outlinedFrames = frames.flatMap((frame) => {
+  const outlinedFrames = frames.slice(fillStartFrame).flatMap((frame) => {
     const yellowPixels = countPixels(
       frame,
       { height: frame.height, width: frame.width, x: 0, y: 0 },
@@ -2456,7 +2487,7 @@ const videoFrames = async (path: string, framesPerSecond: number): Promise<Video
     ],
     {
       encoding: "buffer",
-      maxBuffer: 128 * 1024 * 1024,
+      maxBuffer: 256 * 1024 * 1024,
     },
   );
   const frameSize = info.width * info.height * 3;
