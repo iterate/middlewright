@@ -1550,6 +1550,118 @@ test("reveals filled text in post without changing the runtime fill", async ({
   expect(outsideField.red).toBeLessThan(80);
 });
 
+test("does not paste a future input over an earlier page state", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "outline", duration: 600 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 24px sans-serif; }
+        [hidden] { display: none !important; }
+        section { position: fixed; inset: 0; padding: 40px; }
+        #welcome { background: rgb(220, 20, 30); color: white; }
+        #editor { background: rgb(20, 180, 40); }
+        input {
+          position: absolute;
+          left: 250px;
+          top: 150px;
+          width: 300px;
+          height: 100px;
+          border: 0;
+          padding: 20px;
+          background: rgb(20, 80, 230);
+          color: white;
+          caret-color: transparent;
+          font: 32px monospace;
+        }
+      </style>
+      <section id="welcome">
+        <h1>Welcome back</h1>
+        <button>Sign in</button>
+      </section>
+      <section id="editor" hidden>
+        <h1>Edit todo</h1>
+        <label>Title <input aria-label="Title" /></label>
+      </section>
+      <script>
+        document.querySelector("button").addEventListener("click", () => {
+          document.querySelector("#welcome h1").textContent = "Signing in...";
+          setTimeout(() => {
+            document.querySelector("#welcome").hidden = true;
+            document.querySelector("#editor").hidden = false;
+          }, 2_000);
+        });
+      </script>
+    `);
+
+    await plugged.waitForTimeout(1_000);
+    await plugged.getByRole("button", { name: "Sign in" }).click();
+    await plugged.waitForTimeout(2_700);
+    await plugged.getByLabel("Title").fill("Check the demo pacing");
+  }
+
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find(
+    (highlight) => highlight.method === "fill" && !highlight.dialog,
+  )!;
+  expect(fillHighlight).toBeDefined();
+  const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const scale = Math.min(
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
+  );
+  const welcomeMarker = {
+    height: Math.round(60 * scale),
+    width: Math.round(60 * scale),
+    x: Math.round(20 * scale),
+    y: Math.round(350 * scale),
+  };
+  const inputInterior = inset(
+    {
+      height: Math.round(fillHighlight.rect.height * scale),
+      width: Math.round(fillHighlight.rect.width * scale),
+      x: Math.round(fillHighlight.rect.x * scale),
+      y: Math.round(fillHighlight.rect.y * scale),
+    },
+    Math.round(16 * scale),
+  );
+  const hybridFrames = frames.flatMap((frame, index) => {
+    const hasWelcomeBackground =
+      countPixels(
+        frame,
+        welcomeMarker,
+        ({ blue, green, red }) => red > 160 && green < 80 && blue < 80,
+      ) >
+      welcomeMarker.width * welcomeMarker.height * 0.9;
+    const hasFutureInput =
+      countPixels(
+        frame,
+        inputInterior,
+        ({ blue, green, red }) => blue > 150 && red < 80 && green < 130,
+      ) >
+      inputInterior.width * inputInterior.height * 0.6;
+
+    return hasWelcomeBackground && hasFutureInput ? [index] : [];
+  });
+
+  expect(
+    hybridFrames,
+    "rendered frames must not paste the future Title input over the Welcome view",
+  ).toEqual([]);
+});
+
 test("reveals complete glyphs instead of slicing through the next character", async ({
   page,
 }, testInfo) => {
