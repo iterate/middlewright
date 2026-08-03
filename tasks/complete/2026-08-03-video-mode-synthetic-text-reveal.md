@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation and media are complete on draft PR #17. Linux CI exposed a timestamp-sensitive prompt frame assertion; its full decoded hold now asserts blank, intermediate, and complete states. Final CI confirmation remains.
+Complete on draft PR #17. Prompts and URLs reveal progressively, long destinations stay compact and clipped, three native review players are in the PR body, and Linux CI passes.
 
 ## Goal
 
@@ -43,3 +43,4 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 - 2026-08-03: The long-address regression exposed the reported overflow as ASS word wrapping: the clipped URL occupied two 12-pixel rows. `\\q2` keeps it on one line, and the smaller type remains within both horizontal clip edges in decoded output.
 - 2026-08-03: Stress and full validation passed. Generated the todo journey from the current branch using PR #15's ignored fixture as a review-only input, then reran the checked-in long-address spec for focused media. Uploaded all three MP4s through GitHub's attachment editor and verified three native players in the rendered PR body.
 - 2026-08-03: Linux CI rendered the expected prompt animation but two fixed sample timestamps occasionally landed on the same glyph state. The regression now scans every decoded prompt fill and decision frame for ordered blank → partial → complete states, avoiding recorder and font-specific pixel totals.
+- 2026-08-03: The portable decoded-sequence regression passed 10/10 locally and the complete Linux CI workflow passed on `44b3ed2`.
