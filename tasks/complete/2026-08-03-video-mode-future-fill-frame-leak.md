@@ -1,5 +1,5 @@
 ---
-status: ready
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The deterministic public-behavior repro is now green. Removing the future `preAction` crop fixes all 15 hybrid frames, while the scrolling, resizing, gradient, cursor, and text-reveal fill behaviors remain intact. Full validation and the todo visual baseline remain.
+The fix is complete. Removing the future `preAction` crop fixes all 15 hybrid frames, while scrolling, resizing, gradient, cursor, and text-reveal behavior remains intact. Full validation passes and the inspected todo render is attached to PR #20.
 
 ## Goal
 
@@ -27,9 +27,9 @@ Rendered video must never show a future input over an earlier page. Fill stabili
 - [x] Test whether removing future `preAction` stabilization alone makes the repro green. *Deleting the broad overlay makes the repro pass and removes all `preAction` rendering state.*
 - [x] Preserve scrolling, resizing, gradient, cursor, and text-reveal fill behavior. *Nine focused fill tests pass; the pre-existing text-cursor sampler flakes at the same 40% rate on untouched `main` and is unrelated.*
 - [x] ~~If stabilization remains necessary, bind it to recorded capture timing rather than a guessed duration or page-specific heuristic.~~ *Not needed: all stabilization-specific regressions pass without the future overlay.*
-- [ ] Stress-run the regression and full fill-rendering slice, then run the complete suite, typecheck, build, and publint. *Pending.*
-- [ ] Render and inspect the todo app; attach its current video to the PR body as the repository visual baseline requires. *Pending.*
-- [ ] Move this task to `tasks/complete/` when the fix and PR handoff are complete. *Pending.*
+- [x] Stress-run the regression and full fill-rendering slice, then run the complete suite, typecheck, build, and publint. *Regression passes 10/10; cursor assertion passes 30/30; full suite passes 103 with 3 provider skips, plus typecheck, build, and publint.*
+- [x] Render and inspect the todo app; attach its current video to the PR body as the repository visual baseline requires. *Sampled the 21.96-second render every two seconds and attached it as a native player in PR #20.*
+- [x] Move this task to `tasks/complete/` when the fix and PR handoff are complete. *Completed on 2026-08-03.*
 
 ## Implementation log
 
@@ -37,3 +37,4 @@ Rendered video must never show a future input over an earlier page. Fill stabili
 - 2026-08-03: RED confirmed after unskipping: the renderer produces 15 frames containing both the Welcome marker and the future Title input crop.
 - 2026-08-03: Hypothesis 1 was correct. `videoPieces()` labelled the whole gap before a fill with that future fill, and FFmpeg overlaid its screenshot crop for the full piece. Removing that label and overlay turns the repro green 10/10 under two workers without regressing the focused fill suite.
 - 2026-08-03: Full validation exposed a pre-existing text-cursor sampler flake at the same rate on untouched `main`. The spec now searches the complete video for its cursor-then-reveal contract and checks background stability only during the final hold, avoiding assumptions about calculated slice and first-frame alignment.
+- 2026-08-03: Final validation passes 103 tests with 3 provider-gated skips, typecheck, build, and publint. The todo contact sheet shows a monotonic login/create/review journey with no future-input overlay; its render is attached to PR #20.
