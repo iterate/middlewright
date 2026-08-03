@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The `waitFor()` implementation and kitchen-sink todo-app example are complete. The 29.28-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 28 videos, and the independently opened draft PR #15 contains the branch. Only the user's pacing review remains.
+The `waitFor()` implementation and kitchen-sink todo-app example are complete. The roughly 29-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 28 videos, and the independently opened draft PR #15 contains the branch. Only the user's pacing review remains.
 
 ## Goal
 
@@ -55,3 +55,4 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - 2026-08-03: Expanded the todo fixture into a kitchen-sink journey: native prompt login, three UI-created todos, and three slow-loaded detail dialogs. A prompt render exposed video mode's own overlay isolation `waitFor()` as a full-screen user highlight; that internal call now uses the original Playwright method, with a focused regression covering the action timeline.
 - 2026-08-03: Sampled the 29.28s kitchen-sink render across ten frames. Its 26 highlights cover only the user's click, fill, and visible-wait actions; the local review page keeps it first for pacing review.
 - 2026-08-03: Final kitchen-sink validation passes the full suite (90 passed, 3 provider-gated skips), typecheck, build, and publint.
+- 2026-08-03: Refactored `getAppHtml()` so its document structure stays readable at the top, with nested `run()` and `getStyle()` functions supplying the serialized client script and CSS. The unchanged browser flow passes and renders 26 highlights in 29.12s.

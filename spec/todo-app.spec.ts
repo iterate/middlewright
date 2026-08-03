@@ -128,7 +128,158 @@ function getAppHtml() {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
     <title>Todo desk</title>
-    <style>
+    <style>${getStyle()}</style>
+    <main class="shell" data-app-ready>
+      <section id="login-panel" class="login-panel">
+        <div class="eyebrow">Private workspace</div>
+        <h1>Welcome back</h1>
+        <p class="intro">Sign in to pick up where you left off.</p>
+        <button id="sign-in" class="primary" type="button">Sign in</button>
+        <div id="login-status"></div>
+      </section>
+      <section id="todo-app" hidden>
+        <div class="eyebrow">Monday · Focus list</div>
+        <h1>Todo desk</h1>
+        <p class="intro">A small place for work worth finishing.</p>
+        <form id="todo-form" class="todo-form">
+          <label>
+            Title
+            <input name="title" autocomplete="off" required />
+          </label>
+          <label>
+            Details
+            <textarea name="body" required></textarea>
+          </label>
+          <button class="primary" type="submit">Add todo</button>
+          <div id="create-status" class="create-status"></div>
+        </form>
+        <div id="todos"></div>
+      </section>
+    </main>
+    <dialog id="todo-dialog">
+      <div id="todo-detail"></div>
+      <button class="close" type="button">Close</button>
+    </dialog>
+    <script>(${run.toString()})()</script>
+  `;
+
+  function run() {
+    const app = window as any;
+    const loginPanel = document.querySelector<HTMLElement>("#login-panel")!;
+    const loginStatus = document.querySelector<HTMLElement>("#login-status")!;
+    const signIn = document.querySelector<HTMLButtonElement>("#sign-in")!;
+    const todoApp = document.querySelector<HTMLElement>("#todo-app")!;
+    const todoForm = document.querySelector<HTMLFormElement>("#todo-form")!;
+    const createStatus = document.querySelector<HTMLElement>("#create-status")!;
+    const todos = document.querySelector<HTMLElement>("#todos")!;
+    const dialog = document.querySelector<HTMLDialogElement>("#todo-dialog")!;
+    const detail = document.querySelector<HTMLElement>("#todo-detail")!;
+
+    const spinner = (label: string) =>
+      '<span class="spinner" aria-hidden="true"></span><span>' + label + "</span>";
+    const showError = (target: HTMLElement, error: unknown) => {
+      target.className = "status error";
+      target.removeAttribute("data-spinner");
+      target.setAttribute("data-type", "error");
+      target.textContent = error instanceof Error ? error.message : String(error);
+    };
+
+    const loadTodos = async () => {
+      todos.className = "status";
+      todos.setAttribute("data-spinner", "true");
+      todos.innerHTML = spinner("Loading todos…");
+      const items = await app.todoDBList();
+      todos.removeAttribute("data-spinner");
+      if (items.length === 0) {
+        todos.className = "status";
+        todos.textContent = "No todos yet";
+        return;
+      }
+      todos.className = "todo-grid";
+      todos.replaceChildren(
+        ...items.map((todo: any) => {
+          const card = document.createElement("button");
+          const title = document.createElement("span");
+          card.className = "todo-card";
+          card.type = "button";
+          card.dataset.todoId = todo.id;
+          title.className = "todo-title";
+          title.textContent = todo.title;
+          card.append(title);
+          return card;
+        }),
+      );
+    };
+
+    signIn.addEventListener("click", async () => {
+      const password = prompt("Enter the password");
+      if (password === null) return;
+      signIn.disabled = true;
+      loginStatus.className = "status compact";
+      loginStatus.setAttribute("data-spinner", "true");
+      loginStatus.innerHTML = spinner("Signing in…");
+      try {
+        await app.todoDBAuthenticate(password);
+        loginPanel.hidden = true;
+        todoApp.hidden = false;
+        await loadTodos();
+      } catch (error) {
+        showError(loginStatus, error);
+        signIn.disabled = false;
+      }
+    });
+
+    todoForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = todoForm.querySelector<HTMLButtonElement>('[type="submit"]')!;
+      const input = Object.fromEntries(new FormData(todoForm));
+      submit.disabled = true;
+      createStatus.className = "status compact";
+      createStatus.setAttribute("data-spinner", "true");
+      createStatus.innerHTML = spinner("Creating todo…");
+      try {
+        await app.todoDBCreate({ body: input.body, title: input.title });
+        todoForm.reset();
+        await loadTodos();
+        createStatus.className = "create-status";
+        createStatus.removeAttribute("data-spinner");
+        createStatus.replaceChildren();
+      } catch (error) {
+        showError(createStatus, error);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    todos.addEventListener("click", (event) => {
+      const title = (event.target as HTMLElement).closest<HTMLElement>("[data-todo-id]");
+      if (!title) return;
+      detail.innerHTML =
+        '<div class="status" data-spinner="true">' +
+        spinner("Loading todo details…") +
+        "</div>";
+      dialog.showModal();
+      app
+        .todoDBGet(title.dataset.todoId)
+        .then((todo: any) => {
+          detail.replaceChildren();
+          const heading = document.createElement("h2");
+          const body = document.createElement("p");
+          heading.textContent = todo.title;
+          body.textContent = todo.body;
+          detail.append(heading, body);
+        })
+        .catch((error: unknown) => {
+          detail.innerHTML = '<div class="status error" data-type="error"></div>';
+          showError(detail.firstElementChild as HTMLElement, error);
+        });
+    });
+
+    dialog.querySelector(".close")!.addEventListener("click", () => dialog.close());
+  }
+
+  function getStyle() {
+    return `
       :root {
         color: #25231f;
         font-family: Inter, ui-sans-serif, system-ui, sans-serif;
@@ -238,141 +389,6 @@ function getAppHtml() {
       @media (max-width: 760px) {
         .todo-form, .todo-grid { grid-template-columns: 1fr; }
       }
-    </style>
-    <main class="shell" data-app-ready>
-      <section id="login-panel" class="login-panel">
-        <div class="eyebrow">Private workspace</div>
-        <h1>Welcome back</h1>
-        <p class="intro">Sign in to pick up where you left off.</p>
-        <button id="sign-in" class="primary" type="button">Sign in</button>
-        <div id="login-status"></div>
-      </section>
-      <section id="todo-app" hidden>
-        <div class="eyebrow">Monday · Focus list</div>
-        <h1>Todo desk</h1>
-        <p class="intro">A small place for work worth finishing.</p>
-        <form id="todo-form" class="todo-form">
-          <label>
-            Title
-            <input name="title" autocomplete="off" required />
-          </label>
-          <label>
-            Details
-            <textarea name="body" required></textarea>
-          </label>
-          <button class="primary" type="submit">Add todo</button>
-          <div id="create-status" class="create-status"></div>
-        </form>
-        <div id="todos"></div>
-      </section>
-    </main>
-    <dialog id="todo-dialog">
-      <div id="todo-detail"></div>
-      <button class="close" type="button">Close</button>
-    </dialog>
-    <script>
-      const loginPanel = document.querySelector("#login-panel");
-      const loginStatus = document.querySelector("#login-status");
-      const signIn = document.querySelector("#sign-in");
-      const todoApp = document.querySelector("#todo-app");
-      const todoForm = document.querySelector("#todo-form");
-      const createStatus = document.querySelector("#create-status");
-      const todos = document.querySelector("#todos");
-      const dialog = document.querySelector("#todo-dialog");
-      const detail = document.querySelector("#todo-detail");
-
-      const spinner = (label) => '<span class="spinner" aria-hidden="true"></span><span>' + label + '</span>';
-      const showError = (target, error) => {
-        target.className = "status error";
-        target.removeAttribute("data-spinner");
-        target.setAttribute("data-type", "error");
-        target.textContent = error instanceof Error ? error.message : String(error);
-      };
-
-      const loadTodos = async () => {
-        todos.className = "status";
-        todos.setAttribute("data-spinner", "true");
-        todos.innerHTML = spinner("Loading todos…");
-        const items = await window.todoDBList();
-        todos.removeAttribute("data-spinner");
-        if (items.length === 0) {
-          todos.className = "status";
-          todos.textContent = "No todos yet";
-          return;
-        }
-        todos.className = "todo-grid";
-        todos.replaceChildren(...items.map((todo) => {
-          const card = document.createElement("button");
-          const title = document.createElement("span");
-          card.className = "todo-card";
-          card.type = "button";
-          card.dataset.todoId = todo.id;
-          title.className = "todo-title";
-          title.textContent = todo.title;
-          card.append(title);
-          return card;
-        }));
-      };
-
-      signIn.addEventListener("click", async () => {
-        const password = prompt("Enter the password");
-        if (password === null) return;
-        signIn.disabled = true;
-        loginStatus.className = "status compact";
-        loginStatus.setAttribute("data-spinner", "true");
-        loginStatus.innerHTML = spinner("Signing in…");
-        try {
-          await window.todoDBAuthenticate(password);
-          loginPanel.hidden = true;
-          todoApp.hidden = false;
-          await loadTodos();
-        } catch (error) {
-          showError(loginStatus, error);
-          signIn.disabled = false;
-        }
-      });
-
-      todoForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const submit = todoForm.querySelector('[type="submit"]');
-        const input = Object.fromEntries(new FormData(todoForm));
-        submit.disabled = true;
-        createStatus.className = "status compact";
-        createStatus.setAttribute("data-spinner", "true");
-        createStatus.innerHTML = spinner("Creating todo…");
-        try {
-          await window.todoDBCreate({ body: input.body, title: input.title });
-          todoForm.reset();
-          await loadTodos();
-          createStatus.className = "create-status";
-          createStatus.removeAttribute("data-spinner");
-          createStatus.replaceChildren();
-        } catch (error) {
-          showError(createStatus, error);
-        } finally {
-          submit.disabled = false;
-        }
-      });
-
-      todos.addEventListener("click", (event) => {
-        const title = event.target.closest("[data-todo-id]");
-        if (!title) return;
-        detail.innerHTML = '<div class="status" data-spinner="true">' + spinner("Loading todo details…") + '</div>';
-        dialog.showModal();
-        window.todoDBGet(title.dataset.todoId).then((todo) => {
-          detail.replaceChildren();
-          const heading = document.createElement("h2");
-          const body = document.createElement("p");
-          heading.textContent = todo.title;
-          body.textContent = todo.body;
-          detail.append(heading, body);
-        }).catch((error) => {
-          detail.innerHTML = '<div class="status error" data-type="error"></div>';
-          showError(detail.firstElementChild, error);
-        });
-      });
-
-      dialog.querySelector(".close").addEventListener("click", () => dialog.close());
-    </script>
-  `;
+    `;
+  }
 }
