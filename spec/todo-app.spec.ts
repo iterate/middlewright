@@ -8,7 +8,7 @@ test.use({
 
 test("creates todos and reviews their details", async ({ page: basePage }, testInfo) => {
   const db = new TodoDB({ password: "hunter2" });
-  db.setDelay(2000);
+  db.setDelay(2300);
   await db.connect(basePage);
   await using page = await addPlugins({
     page: basePage,
