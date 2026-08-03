@@ -79,6 +79,45 @@ test("renders a multi-navigation release flow without changing the live page", a
   expect(renderedFrames.filter(hasAddressBar).length).toBeGreaterThan(8);
 });
 
+test("reveals a goto destination progressively in the rendered address bar", async ({
+  page,
+}, testInfo) => {
+  const url = "https://dashboard.middlewright.test/releases/2026.8?view=review";
+  await page.route(url, async (route) => {
+    await route.fulfill({
+      body: '<main style="position: fixed; inset: 0; background: rgb(70, 30, 120)"></main>',
+      contentType: "text/html",
+    });
+  });
+  const video = videoMode({
+    addressBar: { holdMs: 1200 },
+    finalHold: 0,
+    highlight: false,
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+
+    await plugged.goto(url);
+  }
+
+  const frames = (await videoFrames(video.outputPaths().rendered, 25)).filter(hasAddressBar);
+  expect(frames.length).toBeGreaterThan(20);
+  const sampledFrames = [frames[2], frames[Math.floor(frames.length / 2)], frames.at(-3)!];
+  const lightTextPixels = sampledFrames.map((frame) =>
+    countPixels(
+      frame,
+      { height: 44, width: frame.width - 40, x: 20, y: 7 },
+      ({ blue, green, red }) => red > 210 && green > 210 && blue > 210,
+    ),
+  );
+
+  expect(lightTextPixels[0]).toBeLessThan(lightTextPixels[1]);
+  expect(lightTextPixels[1]).toBeLessThan(lightTextPixels[2]);
+  expect(lightTextPixels[2]).toBeGreaterThan(250);
+});
+
 test("renders navigation before clicking a control at the top edge", async ({
   page,
 }, testInfo) => {
