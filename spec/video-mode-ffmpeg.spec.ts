@@ -405,9 +405,12 @@ test("turns meaningful Playwright steps into readable video captions", async ({
   expect(metadata.highlights.map(({ method }) => method)).toEqual([
     "fill",
     "click",
+    "waitFor",
     "click",
     "click",
+    "waitFor",
     "click",
+    "waitFor",
   ]);
 
   const renderedDurationMs = await videoDurationMs(paths.rendered);
@@ -697,10 +700,12 @@ test("keeps the page open for later afterTest hooks", async ({ page }, testInfo)
   expect(afterTestEvents).toEqual(["open"]);
 });
 
-test("speeds dead air up instead of cutting through it", async ({ page }, testInfo) => {
-  const deadAirThresholdMs = 500;
-  const video = videoMode({ trimStart: "never",
-    deadAirThreshold: deadAirThresholdMs,
+test("speeds dead air to the default threshold instead of cutting through it", async ({
+  page,
+}, testInfo) => {
+  const deadAirThresholdMs = 300;
+  const video = videoMode({
+    trimStart: "never",
     finalHold: 0,
     highlight: { mode: "pointer", duration: 0 },
   });
@@ -1323,10 +1328,12 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
   expect(finalGreenFrameCount).toBeLessThan(40);
 });
 
-test("hides the pointer cursor after the last highlighted action", async ({ page }, testInfo) => {
+test("uses the default final hold without leaving the pointer visible", async ({
+  page,
+}, testInfo) => {
   const highlightDurationMs = 700;
-  const video = videoMode({ trimStart: "never",
-    finalHold: 900,
+  const video = videoMode({
+    trimStart: "never",
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
@@ -1375,9 +1382,16 @@ test("hides the pointer cursor after the last highlighted action", async ({ page
   expect(cursorPixelCount(clickHoldFrame, targetBox)).toBeGreaterThan(40);
   expect(cursorPixelCount(pointerTailFrame, targetBox)).toBeGreaterThan(40);
   expect(cursorPixelCount(finalHoldFrame, targetBox)).toBeLessThan(10);
+  const cleanTailFrameCount = [...(await videoFrames(renderedPath, 25))]
+    .reverse()
+    .findIndex((frame) => cursorPixelCount(frame, targetBox) > 10);
+  expect(cleanTailFrameCount).toBeGreaterThanOrEqual(10);
+  expect(cleanTailFrameCount).toBeLessThan(40);
 });
 
-test("moves the pointer toward the first click after a waitFor", async ({ page }, testInfo) => {
+test("points at a visible result after waitFor without delaying the test", async ({
+  page,
+}, testInfo) => {
   const highlightDurationMs = 700;
   const video = videoMode({ trimStart: "never",
     finalHold: 0,
@@ -1400,7 +1414,9 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
       </script>
     `);
 
+    const waitStartedAt = performance.now();
     await plugged.locator("#ready").waitFor();
+    expect(performance.now() - waitStartedAt).toBeLessThan(600);
     await plugged.waitForTimeout(900);
     await plugged.locator("#run").click();
     await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
@@ -1409,34 +1425,48 @@ test("moves the pointer toward the first click after a waitFor", async ({ page }
 
   const paths = video.outputPaths();
   const metadata = await video.metadata();
-  const [highlight] = metadata.highlights;
-  expect(highlight).toBeDefined();
+  const [waitHighlight, clickHighlight] = metadata.highlights;
+  expect(metadata.highlights).toMatchObject([
+    { method: "waitFor", rect: { height: 100, width: 140, x: 80, y: 140 } },
+    { method: "click", rect: { height: 100, width: 140, x: 560, y: 140 } },
+  ]);
 
   const renderedPath = paths.rendered;
-  const preClickFrame = await videoFrame(renderedPath, Math.max(100, highlight.start - 650));
+  const waitHoldStart = renderedHighlightStartWithoutDeadAir(
+    waitHighlight,
+    metadata.highlights,
+  );
+  const clickHoldStart = renderedHighlightStartWithoutDeadAir(
+    clickHighlight,
+    metadata.highlights,
+  );
+  const waitHoldFrame = await videoFrame(
+    renderedPath,
+    waitHoldStart + highlightDurationMs - 100,
+  );
   const clickHoldFrame = await videoFrame(
     renderedPath,
-    highlight.start + highlightDurationMs - 100,
+    clickHoldStart + highlightDurationMs - 100,
   );
   const scale = Math.min(
-    preClickFrame.width / highlight.viewport.width,
-    preClickFrame.height / highlight.viewport.height,
+    waitHoldFrame.width / waitHighlight.viewport.width,
+    waitHoldFrame.height / waitHighlight.viewport.height,
   );
-  const runBox = {
-    height: Math.round(highlight.rect.height * scale),
-    width: Math.round(highlight.rect.width * scale),
-    x: Math.round(highlight.rect.x * scale),
-    y: Math.round(highlight.rect.y * scale),
+  const readyBox = {
+    height: Math.round(waitHighlight.rect.height * scale),
+    width: Math.round(waitHighlight.rect.width * scale),
+    x: Math.round(waitHighlight.rect.x * scale),
+    y: Math.round(waitHighlight.rect.y * scale),
   };
-  const fullFrame = {
-    height: preClickFrame.height,
-    width: preClickFrame.width,
-    x: 0,
-    y: 0,
+  const runBox = {
+    height: Math.round(clickHighlight.rect.height * scale),
+    width: Math.round(clickHighlight.rect.width * scale),
+    x: Math.round(clickHighlight.rect.x * scale),
+    y: Math.round(clickHighlight.rect.y * scale),
   };
 
-  expect(cursorPixelCount(preClickFrame, fullFrame)).toBeGreaterThan(20);
-  expect(cursorPixelCount(preClickFrame, runBox)).toBeLessThan(10);
+  expect(cursorPixelCount(waitHoldFrame, readyBox)).toBeGreaterThan(40);
+  expect(cursorPixelCount(waitHoldFrame, runBox)).toBeLessThan(10);
   expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
 });
 
@@ -1518,6 +1548,118 @@ test("reveals filled text in post without changing the runtime fill", async ({
   const outsideField = averagePixel(lateFrame, { x: 30, y: 30 });
   expect(outsideField.blue).toBeGreaterThan(120);
   expect(outsideField.red).toBeLessThan(80);
+});
+
+test.skip("does not paste a future input over an earlier page state", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "outline", duration: 600 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 24px sans-serif; }
+        [hidden] { display: none !important; }
+        section { position: fixed; inset: 0; padding: 40px; }
+        #welcome { background: rgb(220, 20, 30); color: white; }
+        #editor { background: rgb(20, 180, 40); }
+        input {
+          position: absolute;
+          left: 250px;
+          top: 150px;
+          width: 300px;
+          height: 100px;
+          border: 0;
+          padding: 20px;
+          background: rgb(20, 80, 230);
+          color: white;
+          caret-color: transparent;
+          font: 32px monospace;
+        }
+      </style>
+      <section id="welcome">
+        <h1>Welcome back</h1>
+        <button>Sign in</button>
+      </section>
+      <section id="editor" hidden>
+        <h1>Edit todo</h1>
+        <label>Title <input aria-label="Title" /></label>
+      </section>
+      <script>
+        document.querySelector("button").addEventListener("click", () => {
+          document.querySelector("#welcome h1").textContent = "Signing in...";
+          setTimeout(() => {
+            document.querySelector("#welcome").hidden = true;
+            document.querySelector("#editor").hidden = false;
+          }, 2_000);
+        });
+      </script>
+    `);
+
+    await plugged.waitForTimeout(1_000);
+    await plugged.getByRole("button", { name: "Sign in" }).click();
+    await plugged.waitForTimeout(2_700);
+    await plugged.getByLabel("Title").fill("Check the demo pacing");
+  }
+
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find(
+    (highlight) => highlight.method === "fill" && !highlight.dialog,
+  )!;
+  expect(fillHighlight).toBeDefined();
+  const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const scale = Math.min(
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
+  );
+  const welcomeMarker = {
+    height: Math.round(60 * scale),
+    width: Math.round(60 * scale),
+    x: Math.round(20 * scale),
+    y: Math.round(350 * scale),
+  };
+  const inputInterior = inset(
+    {
+      height: Math.round(fillHighlight.rect.height * scale),
+      width: Math.round(fillHighlight.rect.width * scale),
+      x: Math.round(fillHighlight.rect.x * scale),
+      y: Math.round(fillHighlight.rect.y * scale),
+    },
+    Math.round(16 * scale),
+  );
+  const hybridFrames = frames.flatMap((frame, index) => {
+    const hasWelcomeBackground =
+      countPixels(
+        frame,
+        welcomeMarker,
+        ({ blue, green, red }) => red > 160 && green < 80 && blue < 80,
+      ) >
+      welcomeMarker.width * welcomeMarker.height * 0.9;
+    const hasFutureInput =
+      countPixels(
+        frame,
+        inputInterior,
+        ({ blue, green, red }) => blue > 150 && red < 80 && green < 130,
+      ) >
+      inputInterior.width * inputInterior.height * 0.6;
+
+    return hasWelcomeBackground && hasFutureInput ? [index] : [];
+  });
+
+  expect(
+    hybridFrames,
+    "rendered frames must not paste the future Title input over the Welcome view",
+  ).toEqual([]);
 });
 
 test("reveals complete glyphs instead of slicing through the next character", async ({
@@ -1606,6 +1748,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     captions: "explicit",
     finalHold: 1000,
     highlight: { mode: "pointer", duration: highlightDurationMs },
+    skipMethods: ["waitFor"],
     trimStart: ["selector", 'input[aria-label="Name"]'],
   });
   {
@@ -1673,7 +1816,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
   expect(textCursorFrame).toBeGreaterThan(0);
   expect(firstRevealFrame - textCursorFrame).toBeGreaterThanOrEqual(7);
   const boundaryColors = [frames[0], ...frames.slice(-10)].map((frame) =>
-    averagePixel(frame, { x: 30, y: 30 }),
+    averagePixel(frame, { x: 30, y: 420 }),
   );
   expect(
     boundaryColors.map(
@@ -1802,8 +1945,15 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
 
   const paths = video.outputPaths();
   const metadata = await video.metadata();
+  const waitHighlight = metadata.highlights.find((highlight) => highlight.method === "waitFor")!;
   const clickHighlight = metadata.highlights.find((highlight) => highlight.method === "click")!;
   const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
+  expect(metadata.highlights.map((highlight) => highlight.method)).toEqual([
+    "waitFor",
+    "click",
+    "fill",
+  ]);
+  expect(waitHighlight.start).toBeGreaterThanOrEqual(metadata.sourceRange.start!);
   expect(clickHighlight).toBeDefined();
   expect(fillHighlight.fillReveal).toBeDefined();
 
@@ -2151,11 +2301,14 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
   expect(fillHighlight.fillReveal).toBeDefined();
   expect(fillHighlight.rect.height).toBeGreaterThan(initialHeight);
   const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const fillStartFrame = Math.floor(
+    renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights) / 40,
+  );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
     frames[0].height / fillHighlight.viewport.height,
   );
-  const outlinedFrames = frames.flatMap((frame) => {
+  const outlinedFrames = frames.slice(fillStartFrame).flatMap((frame) => {
     const yellowPixels = countPixels(
       frame,
       { height: frame.height, width: frame.width, x: 0, y: 0 },
@@ -2400,6 +2553,61 @@ test("does not replay action frames when a hold overlaps the next highlight", as
     red: expect.any(Number),
   });
   expect(center.green).toBeGreaterThan(center.red + 80);
+});
+
+test("does not calibrate against an earlier occurrence of the final page state", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    trimStart: "never",
+    finalHold: 500,
+    highlight: { mode: "pointer", duration: 600 },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <body style="margin: 0; width: 800px; height: 600px; background: rgb(0, 180, 0)">
+        <button id="open" style="position: absolute; left: 80px; top: 80px; width: 160px; height: 80px">Open</button>
+        <dialog style="width: 300px; height: 200px; background: white">
+          <p>Dialog ready</p>
+          <button id="close">Close</button>
+        </dialog>
+        <script>
+          const dialog = document.querySelector("dialog");
+          document.querySelector("#open").addEventListener("click", () => {
+            document.body.style.background = "rgb(220, 0, 0)";
+            dialog.showModal();
+          });
+          document.querySelector("#close").addEventListener("click", () => {
+            dialog.close();
+            document.body.style.background = "rgb(0, 180, 0)";
+          });
+        </script>
+      </body>
+    `);
+
+    await plugged.waitForTimeout(1200);
+    await plugged.locator("#open").click();
+    await plugged.getByText("Dialog ready").waitFor();
+    await plugged.waitForTimeout(2000);
+    await plugged.locator("#close").click();
+  }
+
+  const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const states = frames.map((frame) => {
+    const color = averagePixel(frame, { x: 500, y: 400 });
+    if (color.green > color.red + 80) return "green";
+    if (color.red > color.green + 80) return "red";
+    return "other";
+  });
+  const transitions = states.filter((state, index) => state !== states[index - 1]);
+
+  expect(transitions).toEqual(["green", "red", "green"]);
 });
 
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
@@ -2775,7 +2983,7 @@ const videoFrames = async (path: string, framesPerSecond: number): Promise<Video
     ],
     {
       encoding: "buffer",
-      maxBuffer: 128 * 1024 * 1024,
+      maxBuffer: 256 * 1024 * 1024,
     },
   );
   const frameSize = info.width * info.height * 3;

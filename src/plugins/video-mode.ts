@@ -17,7 +17,12 @@ import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Dialog, Locator, Page, TestInfo } from "@playwright/test";
-import type { ActionTiming, Plugin, OverrideableMethod } from "../plugin-system.ts";
+import type {
+  ActionTiming,
+  LocatorWithOriginal,
+  Plugin,
+  OverrideableMethod,
+} from "../plugin-system.ts";
 
 const execFile = promisify(execFileCallback);
 const VIDEO_MODE_METADATA_FILE = "video-mode.json";
@@ -204,9 +209,9 @@ export type VideoModeOptions = {
    * Default: true
    */
   highlight?: VideoModeHighlightOptions;
-  /** Final hold duration in the rendered video (ms). Default: 3000 */
+  /** Final hold duration in the rendered video (ms). Default: 1000 */
   finalHold?: number;
-  /** Methods to skip highlighting. Default: ['waitFor'] */
+  /** Methods to skip highlighting. Default: [] */
   skipMethods?: OverrideableMethod[];
   /**
    * Skip highlighting for actions triggered from these files (matched as
@@ -216,7 +221,7 @@ export type VideoModeOptions = {
   skipStackFrames?: string[];
   /**
    * Maximum rendered duration for each dead-air span. Longer spans are sped up
-   * so they fit within this duration.
+   * so they fit within this duration. Default: 300
    */
   deadAirThreshold?: number;
   /**
@@ -370,15 +375,13 @@ type ResolvedVideoModeHighlight =
     };
 
 const resolveDeadAirThreshold = (thresholdMs: number | undefined) => {
-  if (thresholdMs === undefined) {
-    return undefined;
-  }
+  const value = thresholdMs === undefined ? 300 : thresholdMs;
 
-  if (!Number.isFinite(thresholdMs) || thresholdMs < 0) {
+  if (!Number.isFinite(value) || value < 0) {
     throw new Error("videoMode deadAirThreshold must be a non-negative number");
   }
 
-  return thresholdMs;
+  return value;
 };
 
 type ResolvedTrimStart = {
@@ -509,92 +512,6 @@ const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undef
     if (hasChanged(index) && hasChanged(index + 1)) {
       return Math.round((index / BLANK_START_SAMPLE_FPS) * 1000);
     }
-  }
-
-  return undefined;
-};
-
-const FINAL_PAINT_SAMPLE_FPS = 25;
-const FINAL_PAINT_MAX_SCAN_MS = 30_000;
-const FINAL_PAINT_DIFF_THRESHOLD = 3;
-
-/**
- * Find the last encoded frame matching the page's final live screenshot.
- * Playwright can append a black close frame for the recorder settle period
- * when a static page emits no more screencast frames.
- */
-const detectFinalPaintEndMs = async (options: {
-  durationMs: number;
-  finalFramePath: string;
-  inputPath: string;
-}): Promise<number | undefined> => {
-  const size = VIDEO_ANALYSIS_SAMPLE_SIZE;
-  const frameSize = size * size;
-  const sampleStart = Math.max(0, options.durationMs - FINAL_PAINT_MAX_SCAN_MS);
-
-  try {
-    const [finalFrameResult, videoResult] = await Promise.all([
-      execFile(
-        "ffmpeg",
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-i",
-          options.finalFramePath,
-          "-vf",
-          `scale=${size}:${size},format=gray`,
-          "-frames:v",
-          "1",
-          "-f",
-          "rawvideo",
-          "-pix_fmt",
-          "gray",
-          "pipe:1",
-        ],
-        { encoding: "buffer", maxBuffer: frameSize * 2 },
-      ),
-      execFile(
-        "ffmpeg",
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-i",
-          options.inputPath,
-          "-ss",
-          formatSeconds(sampleStart),
-          "-vf",
-          `fps=${FINAL_PAINT_SAMPLE_FPS},scale=${size}:${size},format=gray`,
-          "-f",
-          "rawvideo",
-          "-pix_fmt",
-          "gray",
-          "pipe:1",
-        ],
-        { encoding: "buffer", maxBuffer: 128 * 1024 * 1024 },
-      ),
-    ]);
-    const finalFrame = (finalFrameResult.stdout as Buffer).subarray(0, frameSize);
-    const videoFrames = videoResult.stdout as Buffer;
-    const frameCount = Math.floor(videoFrames.length / frameSize);
-
-    if (finalFrame.length < frameSize || frameCount === 0) {
-      return undefined;
-    }
-
-    for (let index = frameCount - 1; index >= 0; index -= 1) {
-      const frame = videoFrames.subarray(index * frameSize, (index + 1) * frameSize);
-      if (frameMeanAbsDiff(frame, finalFrame) <= FINAL_PAINT_DIFF_THRESHOLD) {
-        return Math.min(
-          options.durationMs,
-          Math.round(sampleStart + ((index + 1) / FINAL_PAINT_SAMPLE_FPS) * 1000),
-        );
-      }
-    }
-  } catch {
-    // Calibration is best-effort; retain endpoint calibration when no final
-    // page frame can be matched.
   }
 
   return undefined;
@@ -1106,6 +1023,8 @@ const recordHighlight = async (options: {
   durationMs: number;
   locator: Locator;
   method: OverrideableMethod;
+  requireVisible: boolean;
+  startAfterScreenshot: boolean;
   state: VideoModeState;
   testInfo: TestInfo;
   thickness: number;
@@ -1119,6 +1038,10 @@ const recordHighlight = async (options: {
   }
 
   try {
+    if (options.requireVisible && !(await options.locator.isVisible())) {
+      return;
+    }
+
     const snapshot = await options.locator.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       return {
@@ -1148,8 +1071,11 @@ const recordHighlight = async (options: {
     options.state.highlightImageIndex += 1;
     const imagePath = join(options.testInfo.outputDir, image);
     await mkdir(options.testInfo.outputDir, { recursive: true });
-    const start = Math.round(performance.now() - options.state.startedAt);
+    const beforeScreenshot = Math.round(performance.now() - options.state.startedAt);
     await options.locator.page().screenshot({ path: imagePath, scale: "css" });
+    const start = options.startAfterScreenshot
+      ? Math.round(performance.now() - options.state.startedAt)
+      : beforeScreenshot;
 
     const highlight: VideoModeHighlight = {
       color: options.color,
@@ -2132,7 +2058,10 @@ const videoPieces = (options: {
         });
       }
 
-      const actionEnd = Math.max(highlight.start, highlight.actionEnd || highlight.start);
+      const actionEnd =
+        highlight.actionEnd === undefined
+          ? highlight.start + options.frameDurationMs
+          : Math.max(highlight.start, highlight.actionEnd);
       const highlightSourceEnd = Math.min(
         segment.end,
         Math.max(highlight.start + 1, actionEnd),
@@ -3734,14 +3663,14 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   }
 
   const finalHold = resolveNonNegativeNumber({
-    defaultValue: 3000,
+    defaultValue: 1000,
     name: "videoMode finalHold",
     value: options.finalHold,
   });
   const addressBar = resolveAddressBar(options.addressBar);
   const captionMode = options.captions || "test-step";
   const highlight = resolveVideoModeHighlight(options);
-  const skipMethods = options.skipMethods || ["waitFor"];
+  const skipMethods = options.skipMethods || [];
   const skipStackFrames = options.skipStackFrames || [];
   const deadAirThreshold = resolveDeadAirThreshold(options.deadAirThreshold);
   const trimStart = resolveTrimStart(options.trimStart);
@@ -3832,11 +3761,28 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       }
 
       if (method === "waitFor") {
+        let result: unknown;
         try {
-          return await next();
+          result = await next();
         } finally {
           recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 0 });
         }
+
+        if (highlight.mode !== "off" && !skipMethods.includes(method)) {
+          await recordHighlight({
+            color: highlight.color,
+            durationMs: highlight.durationMs,
+            locator,
+            method,
+            requireVisible: true,
+            startAfterScreenshot: true,
+            state,
+            testInfo,
+            thickness: highlight.thickness,
+          });
+        }
+
+        return result;
       }
 
       recordMiddlewareWaitBeforeVideoMode(state, timing);
@@ -3860,6 +3806,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               durationMs: highlight.durationMs,
               locator,
               method,
+              requireVisible: false,
+              startAfterScreenshot: false,
               state,
               testInfo,
               thickness: highlight.thickness,
@@ -4049,10 +3997,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         // element appears; a timeout or a page close just leaves the blank
         // detector to handle it. Never let it reject the test.
         if (trimStart.selector) {
-          page
+          const trimStartLocator = page
             .locator(trimStart.selector)
-            .first()
-            .waitFor({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
+            .first() as LocatorWithOriginal;
+          trimStartLocator
+            .waitFor_original({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
             .then(() => {
               if (state.sourceRange.start === undefined) controls.setStartTime();
             })
@@ -4145,20 +4094,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
 
           const rawVideoInfo = await videoInfo(paths.raw);
-          const finalPaintEnd =
-            finalFrame === undefined
-              ? undefined
-              : await detectFinalPaintEndMs({
-                  durationMs: rawVideoInfo.durationMs,
-                  finalFramePath: finalFrame.path,
-                  inputPath: paths.raw,
-                });
+          // Page pixels are not a clock marker: a final state can have appeared
+          // earlier, and the final live paint might never reach the screencast.
+          // settleVideoRecorder makes the recorder endpoint the reliable marker.
           const sourceOffset =
-            finalPaintEnd !== undefined
-              ? finalPaintEnd - renderEndedAt
-              : recordingEndedAt === undefined
-              ? 0
-              : rawVideoInfo.durationMs - recordingEndedAt;
+            recordingEndedAt === undefined ? 0 : rawVideoInfo.durationMs - recordingEndedAt;
           const timelineOffset =
             Math.floor(sourceOffset / rawVideoInfo.frameDurationMs) *
             rawVideoInfo.frameDurationMs;

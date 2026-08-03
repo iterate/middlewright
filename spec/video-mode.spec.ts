@@ -293,7 +293,8 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
   await plugged.locator("#rename").click();
 
   await expect(plugged.locator("#result")).toHaveText("release-notes.md");
-  const dialogHighlights = (await video.metadata()).highlights.filter(
+  const metadata = await video.metadata();
+  const dialogHighlights = metadata.highlights.filter(
     (candidate) => candidate.dialog?.type === "prompt",
   );
   expect(dialogHighlights).toMatchObject([
@@ -315,6 +316,11 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
       },
       method: "click",
     },
+  ]);
+  expect(metadata.highlights.map((highlight) => highlight.method)).toEqual([
+    "click",
+    "fill",
+    "click",
   ]);
 });
 
@@ -595,6 +601,35 @@ test("skipped methods are not highlighted", async ({ page }, testInfo) => {
   expect(metadata.highlights).toEqual([]);
 });
 
+test("waitFor highlighting can be skipped explicitly", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 50,
+    highlight: { mode: "pointer", duration: 5000 },
+    skipMethods: ["waitFor"],
+  });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <div id="ready" hidden>ready</div>
+    <script>
+      setTimeout(() => {
+        document.querySelector('#ready').hidden = false;
+      }, 150);
+    </script>
+  `);
+
+  const start = Date.now();
+  await plugged.locator("#ready").waitFor();
+
+  expect(Date.now() - start).toBeLessThan(2000);
+  const metadata = await video.metadata();
+  expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  expect(metadata.highlights).toEqual([]);
+});
+
 test("marks pre-action waits for attachment as dead air", async ({ page }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
   await using plugged = await addPlugins({
@@ -670,7 +705,7 @@ test("marks explicit attached waitFor calls as dead air", async ({ page }, testI
 });
 
 test("marks default visible waitFor calls as dead air", async ({ page }, testInfo) => {
-  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
+  const video = videoMode({ finalHold: 50 });
   await using plugged = await addPlugins({
     page,
     testInfo,
@@ -687,7 +722,10 @@ test("marks default visible waitFor calls as dead air", async ({ page }, testInf
 
   await plugged.locator("#ready").waitFor();
 
-  expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  const metadata = await video.metadata();
+  expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  expect(metadata.highlights).toMatchObject([{ method: "waitFor" }]);
+  expect(metadata.highlights[0].end - metadata.highlights[0].start).toBe(1000);
 });
 
 test("marks explicit visible waitFor calls as dead air", async ({ page }, testInfo) => {
@@ -708,6 +746,29 @@ test("marks explicit visible waitFor calls as dead air", async ({ page }, testIn
   await plugged.locator("#late").waitFor({ state: "visible" });
 
   expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+});
+
+test("does not highlight a waitFor result that is no longer visible", async ({ page }, testInfo) => {
+  const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setContent(`
+    <div id="notice" style="width: 200px; height: 80px">Temporary notice</div>
+    <script>
+      setTimeout(() => {
+        document.querySelector('#notice').style.visibility = 'hidden';
+      }, 150);
+    </script>
+  `);
+
+  await plugged.locator("#notice").waitFor({ state: "hidden" });
+
+  const metadata = await video.metadata();
+  expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
+  expect(metadata.highlights).toEqual([]);
 });
 
 test("marks attached actionability waits as dead air", async ({ page }, testInfo) => {
