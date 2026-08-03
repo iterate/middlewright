@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The `waitFor()` implementation and kitchen-sink todo-app example are complete. The roughly 29-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 28 videos, and the independently opened draft PR #15 contains the branch. Only the user's pacing review remains.
+The `waitFor()` implementation and kitchen-sink todo-app example are complete. Frame-by-frame analysis found and fixed stale-frame flashes in the rendered demo: repeated final-page pixels had been mistaken for a timing marker. The roughly 29-second app video covers prompt login, spinner-backed slow work, three todo creations, and three detail reviews. The local review page has 30 videos, including raw and before/fixed todo recordings, and draft PR #15 contains the branch. Only the user's pacing review remains.
 
 ## Goal
 
@@ -29,7 +29,7 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - [x] Record a post-resolution `waitFor()` highlight while preserving the preceding wait as dead air. *Middleware records elapsed wait timing first, then captures the visible resolved state for the ordinary synthetic highlight timeline.*
 - [x] Keep `skipMethods: ["waitFor"]`, disabled highlighting, and non-visible terminal states well-defined. *Focused metadata specs cover the opt-out, the default 1000 ms duration, and an attached element that resolves hidden.*
 - [x] Update public documentation for the new default and opt-out. *The video-mode README now describes the shared duration and `skipMethods` escape hatch.*
-- [x] Run focused tests, typecheck, build, and the full relevant video-mode suite. *All 27 FFmpeg specs pass serially; the full suite passes 89 tests with 3 provider-gated skips, plus typecheck, build, and publint.*
+- [x] Run focused tests, typecheck, build, and the full relevant video-mode suite. *All 28 FFmpeg specs pass serially; the full suite passes 91 tests with 3 provider-gated skips, plus typecheck, build, and publint.*
 - [x] Collect and inspect every rendered video-mode spec artifact for local review. *Twenty-five FFmpeg renders and two auto-start renders were sampled across five evenly-spaced frames and collected behind one local HTML player page.*
 - [x] Hand the local videos back to the user before asking for review. *The branch and local review page were prepared first; a separate agent subsequently opened draft PR #15.*
 
@@ -41,6 +41,15 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - [x] Add todos one by one, then open each card and positively assert its body with `getByText(body).waitFor()`. *The test creates three records through the UI and reviews all three semantic cards and dialogs.*
 - [x] Add a prompt-based login so the video includes native dialog handling. *The Sign in action asks “Enter the password”, accepts the configured test password, and shows a slow authentication state.*
 - [x] Render, inspect, and add the kitchen-sink flow to the local review page. *The inspected render is 29.28s with 26 meaningful highlights, compressed slow spans, and no internal full-viewport wait highlight.*
+
+## Stale-frame flicker regression
+
+- [x] Prove whether the flashes are old source frames or an overlay/filter illusion. *Rendered frame 209 at 8.36s was pixel-equivalent to raw frame 11 at 0.44s, proving that old source footage was replayed.*
+- [x] Find why the raw timeline was shifted backwards. *The final todo-list screenshot was absent from the screencast, so final-paint calibration matched an identical todo-list state roughly 2.4 seconds earlier.*
+- [x] Add a rendered-video regression with a final state that repeats an earlier state. *The red-green frame sequence failed as green/red/green/red/green before the fix and now stays green/red/green.*
+- [x] Replace ambiguous pixel calibration with the recorder-settle endpoint. *The existing unique settle phase and close timestamp now remain the sole source-to-action clock calibration.*
+- [x] Keep a post-resolution `waitFor()` hold from resuming on the preceding encoded frame. *Screenshot-backed highlights advance the source cursor by one frame before live footage resumes.*
+- [x] Audit the kitchen-sink render for old-state recurrence. *The detector found ten stale matches in the old render after Todo desk appeared and none in the fixed render.*
 
 ## Implementation log
 
@@ -58,3 +67,6 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - 2026-08-03: Refactored `getAppHtml()` so its document structure stays readable at the top, with nested `run()` and `getStyle()` functions supplying the serialized client script and CSS. The unchanged browser flow passes and renders 26 highlights in 29.12s.
 - 2026-08-03: Stacked the title and details fields, increased the textarea to a two-line height, and moved creation progress into the fixed-width submit button. The button carries `data-spinner` while disabled, preserving spinner-waiter behavior without adding a layout-shifting status row.
 - 2026-08-03: Confirmed the stock Playwright HTML report displays inline `video-raw`, `video-rendered`, and native `video` players. The native and video-mode raw files are byte-identical, so the report is sufficient for side-by-side artifact review; the custom page remains useful only as an all-fixtures gallery.
+- 2026-08-03: Diagnosed the reported flashes frame by frame. The rendered video replayed exact raw frames from the sign-in screen; the raw video itself remained monotonic. The final live todo-list paint was never encoded, causing final-screenshot pixel calibration to latch onto an earlier occurrence of the same state and shift every source cut backwards.
+- 2026-08-03: Removed final-page pixel matching as a timing heuristic and retained the settled recorder endpoint as the single calibration marker. Advanced post-resolution wait highlights past the conservative frame-floor boundary. A repeated-final-state regression now detects both the multi-second shift and the one-frame replay.
+- 2026-08-03: Clean validation passes 91 tests with 3 provider-gated skips, typecheck, build, and publint. Regenerated the todo demo last so the Playwright report contains its raw and rendered players, and preserved the old flickering render beside the fixed one for local comparison.

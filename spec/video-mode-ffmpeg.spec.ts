@@ -2114,6 +2114,61 @@ test("does not replay action frames when a hold overlaps the next highlight", as
   expect(center.green).toBeGreaterThan(center.red + 80);
 });
 
+test("does not calibrate against an earlier occurrence of the final page state", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    trimStart: "never",
+    finalHold: 500,
+    highlight: { mode: "pointer", duration: 600 },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <body style="margin: 0; width: 800px; height: 600px; background: rgb(0, 180, 0)">
+        <button id="open" style="position: absolute; left: 80px; top: 80px; width: 160px; height: 80px">Open</button>
+        <dialog style="width: 300px; height: 200px; background: white">
+          <p>Dialog ready</p>
+          <button id="close">Close</button>
+        </dialog>
+        <script>
+          const dialog = document.querySelector("dialog");
+          document.querySelector("#open").addEventListener("click", () => {
+            document.body.style.background = "rgb(220, 0, 0)";
+            dialog.showModal();
+          });
+          document.querySelector("#close").addEventListener("click", () => {
+            dialog.close();
+            document.body.style.background = "rgb(0, 180, 0)";
+          });
+        </script>
+      </body>
+    `);
+
+    await plugged.waitForTimeout(1200);
+    await plugged.locator("#open").click();
+    await plugged.getByText("Dialog ready").waitFor();
+    await plugged.waitForTimeout(2000);
+    await plugged.locator("#close").click();
+  }
+
+  const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const states = frames.map((frame) => {
+    const color = averagePixel(frame, { x: 500, y: 400 });
+    if (color.green > color.red + 80) return "green";
+    if (color.red > color.green + 80) return "red";
+    return "other";
+  });
+  const transitions = states.filter((state, index) => state !== states[index - 1]);
+
+  expect(transitions).toEqual(["green", "red", "green"]);
+});
+
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
   page,
 }, testInfo) => {

@@ -510,92 +510,6 @@ const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undef
   return undefined;
 };
 
-const FINAL_PAINT_SAMPLE_FPS = 25;
-const FINAL_PAINT_MAX_SCAN_MS = 30_000;
-const FINAL_PAINT_DIFF_THRESHOLD = 3;
-
-/**
- * Find the last encoded frame matching the page's final live screenshot.
- * Playwright can append a black close frame for the recorder settle period
- * when a static page emits no more screencast frames.
- */
-const detectFinalPaintEndMs = async (options: {
-  durationMs: number;
-  finalFramePath: string;
-  inputPath: string;
-}): Promise<number | undefined> => {
-  const size = AUTO_START_SAMPLE_SIZE;
-  const frameSize = size * size;
-  const sampleStart = Math.max(0, options.durationMs - FINAL_PAINT_MAX_SCAN_MS);
-
-  try {
-    const [finalFrameResult, videoResult] = await Promise.all([
-      execFile(
-        "ffmpeg",
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-i",
-          options.finalFramePath,
-          "-vf",
-          `scale=${size}:${size},format=gray`,
-          "-frames:v",
-          "1",
-          "-f",
-          "rawvideo",
-          "-pix_fmt",
-          "gray",
-          "pipe:1",
-        ],
-        { encoding: "buffer", maxBuffer: frameSize * 2 },
-      ),
-      execFile(
-        "ffmpeg",
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-i",
-          options.inputPath,
-          "-ss",
-          formatSeconds(sampleStart),
-          "-vf",
-          `fps=${FINAL_PAINT_SAMPLE_FPS},scale=${size}:${size},format=gray`,
-          "-f",
-          "rawvideo",
-          "-pix_fmt",
-          "gray",
-          "pipe:1",
-        ],
-        { encoding: "buffer", maxBuffer: 128 * 1024 * 1024 },
-      ),
-    ]);
-    const finalFrame = (finalFrameResult.stdout as Buffer).subarray(0, frameSize);
-    const videoFrames = videoResult.stdout as Buffer;
-    const frameCount = Math.floor(videoFrames.length / frameSize);
-
-    if (finalFrame.length < frameSize || frameCount === 0) {
-      return undefined;
-    }
-
-    for (let index = frameCount - 1; index >= 0; index -= 1) {
-      const frame = videoFrames.subarray(index * frameSize, (index + 1) * frameSize);
-      if (frameMeanAbsDiff(frame, finalFrame) <= FINAL_PAINT_DIFF_THRESHOLD) {
-        return Math.min(
-          options.durationMs,
-          Math.round(sampleStart + ((index + 1) / FINAL_PAINT_SAMPLE_FPS) * 1000),
-        );
-      }
-    }
-  } catch {
-    // Calibration is best-effort; retain endpoint calibration when no final
-    // page frame can be matched.
-  }
-
-  return undefined;
-};
-
 const resolveNonNegativeNumber = (options: {
   defaultValue: number;
   name: string;
@@ -1920,7 +1834,10 @@ const videoPieces = (options: {
         });
       }
 
-      const actionEnd = Math.max(highlight.start, highlight.actionEnd || highlight.start);
+      const actionEnd =
+        highlight.actionEnd === undefined
+          ? highlight.start + options.frameDurationMs
+          : Math.max(highlight.start, highlight.actionEnd);
       const highlightSourceEnd = Math.min(
         segment.end,
         Math.max(highlight.start + 1, actionEnd),
@@ -3872,20 +3789,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
 
           const rawVideoInfo = await videoInfo(paths.raw);
-          const finalPaintEnd =
-            finalFrame === undefined
-              ? undefined
-              : await detectFinalPaintEndMs({
-                  durationMs: rawVideoInfo.durationMs,
-                  finalFramePath: finalFrame.path,
-                  inputPath: paths.raw,
-                });
+          // Page pixels are not a clock marker: a final state can have appeared
+          // earlier, and the final live paint might never reach the screencast.
+          // settleVideoRecorder makes the recorder endpoint the reliable marker.
           const sourceOffset =
-            finalPaintEnd !== undefined
-              ? finalPaintEnd - renderEndedAt
-              : recordingEndedAt === undefined
-              ? 0
-              : rawVideoInfo.durationMs - recordingEndedAt;
+            recordingEndedAt === undefined ? 0 : rawVideoInfo.durationMs - recordingEndedAt;
           const timelineOffset =
             Math.floor(sourceOffset / rawVideoInfo.frameDurationMs) *
             rawVideoInfo.frameDurationMs;
