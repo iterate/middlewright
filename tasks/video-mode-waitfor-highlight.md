@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: awaiting-video-review
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The `waitFor()` implementation and original 27-video review set are complete. A self-contained slow todo-app spec is now in progress so the pacing can be judged in a realistic test shaped by the draft middlewright guidelines. No pull request has been opened.
+The `waitFor()` implementation and realistic todo-app example are complete. The app demonstrates spinner-backed slow list/detail loading, a card click, and a positive body `waitFor()` in a 3.64-second rendered flow. The local review page now has 28 videos. No pull request has been opened; only the user's pacing decision remains.
 
 ## Goal
 
@@ -35,11 +35,11 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 
 ## Todo app review fixture
 
-- [ ] Add a readable `todo-app.spec.ts` whose test flow appears before all fixture/app code and uses locator actions instead of expect assertions or manual timeouts.
-- [ ] Back the client-only HTML app with a `TodoDB` whose list/detail delays and in-memory records are supplied by the test.
-- [ ] Show meaningful loading UI while the initial list and selected todo body are delayed, allowing `spinnerWaiter` to extend the normal short action timeout.
-- [ ] Open a todo card into a dialog and positively assert its body with `getByText(body).waitFor()`, producing a resolved-result video highlight.
-- [ ] Render, inspect, and add the todo flow to the local review page without opening a PR.
+- [x] Add a readable `todo-app.spec.ts` whose test flow appears before all fixture/app code and uses locator actions instead of expect assertions or manual timeouts. *The test has two user-level actions at the top; types, `TodoDB`, timing, and `getAppHtml()` follow below.*
+- [x] Back the client-only HTML app with a `TodoDB` whose list/detail delays and in-memory records are supplied by the test. *Two exposed functions connect the page-only app to configurable delayed list/detail reads without an HTTP server.*
+- [x] Show meaningful loading UI while the initial list and selected todo body are delayed, allowing `spinnerWaiter` to extend the normal short action timeout. *Both 1.6s list loading and 1.4s detail loading show `data-spinner` progress UI and pass under the project's 1s action timeout.*
+- [x] Open a todo card into a dialog and positively assert its body with `getByText(body).waitFor()`, producing a resolved-result video highlight. *The whole semantic card is clickable; the dialog body wait records the second full pointer hold.*
+- [x] Render, inspect, and add the todo flow to the local review page without opening a PR. *The inspected render is 3.64s: both slow spans compress to 300ms while click/body highlights remain 1000ms. It is first on the 28-video local page.*
 
 ## Implementation log
 
@@ -48,3 +48,6 @@ Make a successful `locator.waitFor()` point out the resolved locator and hold it
 - 2026-08-03: The full renderer pass exposed video mode's own `trimStart: ["selector", css]` watcher as a second apparent `waitFor()`. It now calls the original Playwright method so internal bookkeeping cannot create user-facing highlights.
 - 2026-08-03: Added the default-duration, explicit-skip, and hidden-result regressions. Updated frame-level fill tests to distinguish the new wait outline from later fill outlines and increased their decode buffer for longer review clips.
 - 2026-08-03: Generated and sampled all 27 available rendered fixtures. Static review-page verification found 27 valid video streams and no missing sources. The local browser connector was unavailable, so the HTML handoff page was validated by its files and streams rather than automated playback controls.
+- 2026-08-03: Read the root worktree's ignored draft middlewright guide and shaped the todo spec around it: no manual timeout, no expect visibility assertion, positive locator behavior, and real progress UI for every slow operation.
+- 2026-08-03: The todo tracer bullet failed after the detail spinner disappeared without the requested body, producing spinner-waiter's targeted failure. Rendering the body made the same public test pass without changing its timeout or adding a sleep.
+- 2026-08-03: The final todo video holds the loaded card click and dialog body while compressing 3s of fake database latency into 600ms. Full validation passes 90 tests with 3 provider-gated skips, plus typecheck, build, and publint.
