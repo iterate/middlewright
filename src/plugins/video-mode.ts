@@ -1193,6 +1193,7 @@ const recordDialogHighlights = async (options: {
         thickness: options.thickness,
         viewport: snapshot.viewport,
       });
+      return options.state.highlights.at(-1)!;
     };
 
     if (
@@ -1204,7 +1205,16 @@ const recordDialogHighlights = async (options: {
       await setVideoModeDialogOverlayState(host, {
         promptText: options.dialog.defaultValue(),
       });
-      await record("fill", snapshot.inputRect);
+      const fillHighlight = await record("fill", snapshot.inputRect);
+      await setVideoModeDialogOverlayState(host, {
+        promptText: options.promptText,
+      });
+      await recordFillReveal({
+        highlight: fillHighlight,
+        locator: host.locator("[data-dialog-input]"),
+        state: options.state,
+        testInfo: options.testInfo,
+      });
     }
 
     await setVideoModeDialogOverlayState(host, {

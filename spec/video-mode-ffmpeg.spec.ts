@@ -956,6 +956,81 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
   expect(finalCenter.blue).toBeLessThan(80);
 });
 
+test("reveals accepted prompt text progressively in the rendered dialog", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 1000;
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: highlightDurationMs },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <body style="margin: 0; background: rgb(17, 24, 39)">
+        <button id="sign-in" style="position: absolute; left: 370px; top: 460px">Sign in</button>
+        <output id="result"></output>
+        <script>
+          document.querySelector("#sign-in").addEventListener("click", () => {
+            document.querySelector("#result").textContent = prompt("Enter the password") || "";
+          });
+        </script>
+      </body>
+    `);
+    plugged.once("dialog", (dialog) => dialog.accept("correct horse battery staple"));
+
+    await plugged.locator("#sign-in").click();
+
+    await expect(plugged.locator("#result")).toHaveText("correct horse battery staple");
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const promptFill = metadata.highlights.find(
+    (highlight) => highlight.method === "fill" && highlight.dialog?.type === "prompt",
+  )!;
+  expect(promptFill).toBeDefined();
+
+  const fillStart = renderedHighlightStartWithoutDeadAir(promptFill, metadata.highlights);
+  const [earlyFrame, middleFrame, lateFrame] = await Promise.all(
+    [300, 700, 900].map((offset) => videoFrame(paths.rendered, fillStart + offset)),
+  );
+  const scale = Math.min(
+    lateFrame.width / promptFill.viewport.width,
+    lateFrame.height / promptFill.viewport.height,
+  );
+  const inputBox = {
+    height: Math.round(promptFill.rect.height * scale),
+    width: Math.round(promptFill.rect.width * scale),
+    x: Math.round(promptFill.rect.x * scale),
+    y: Math.round(promptFill.rect.y * scale),
+  };
+  const textBox = {
+    height: inputBox.height - 12,
+    width: Math.round(inputBox.width * 0.4),
+    x: inputBox.x + 8,
+    y: inputBox.y + 6,
+  };
+  const darkTextPixels = [earlyFrame, middleFrame, lateFrame].map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
+    ),
+  );
+
+  expect(darkTextPixels[0]).toBeLessThan(20);
+  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
+  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
+  expect(darkTextPixels[2]).toBeGreaterThan(100);
+});
+
 test("uses natural post-dialog footage without adding a synthetic hold", async ({
   page,
 }, testInfo) => {

@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The stacked worktree and implementation brief are ready. No production code has changed yet. Next: add one public rendered-video regression at a time for prompts, navigation URLs, and long-address containment, then regenerate review media and validate the full branch.
+The prompt slice is implemented through the existing post-produced fill-reveal path. Next: add public rendered-video regressions for navigation URLs and long-address containment, then regenerate review media and validate the full branch.
 
 ## Goal
 
@@ -24,8 +24,8 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 
 ## Checklist
 
-- [ ] Add a failing rendered-video spec proving accepted prompt text advances through intermediate glyph states rather than appearing all at once.
-- [ ] Implement prompt text reveal within video mode while preserving fake-dialog pointer and text-cursor behavior.
+- [x] Add a failing rendered-video spec proving accepted prompt text advances through intermediate glyph states rather than appearing all at once. *The prompt input stayed effectively blank for the whole synthetic fill hold before the implementation; the frame-level spec now sees increasing dark-text pixels across early, middle, and late frames.*
+- [x] Implement prompt text reveal within video mode while preserving fake-dialog pointer and text-cursor behavior. *The accepted prompt state feeds the same screenshot-backed grapheme reveal as ordinary `fill()`, retaining the existing fill highlight and text cursor before the OK click.*
 - [ ] Add a failing rendered-video spec proving a `page.goto()` destination advances through intermediate URL states.
 - [ ] Implement the address-bar reveal with shared synthetic-text timing where that simplifies the renderer.
 - [ ] Add a failing rendered-video regression proving a long URL stays inside the address field and visible video bounds.
@@ -38,3 +38,4 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 ## Implementation log
 
 - 2026-08-03: Created `feature/video-mode-synthetic-text-reveal` from `origin/feature/video-mode-waitfor-highlight` in a sibling worktree. Chose a stacked draft PR so PR #15 remains independently reviewable.
+- 2026-08-03: The prompt tracer bullet failed against the old all-at-once handoff, then passed after recording the accepted input as the post-fill frame for the existing grapheme-aware reveal renderer. The native prompt and live runtime remain untouched.
