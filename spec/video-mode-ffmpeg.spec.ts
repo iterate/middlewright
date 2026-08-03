@@ -1085,12 +1085,10 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
   expect(promptFill).toBeDefined();
 
   const fillStart = renderedHighlightStartWithoutDeadAir(promptFill, metadata.highlights);
-  const [earlyFrame, middleFrame, lateFrame] = await Promise.all(
-    [300, 700, 900].map((offset) => videoFrame(paths.rendered, fillStart + offset)),
-  );
+  const renderedFrames = await videoFrames(paths.rendered, 25);
   const scale = Math.min(
-    lateFrame.width / promptFill.viewport.width,
-    lateFrame.height / promptFill.viewport.height,
+    renderedFrames[0].width / promptFill.viewport.width,
+    renderedFrames[0].height / promptFill.viewport.height,
   );
   const inputBox = {
     height: Math.round(promptFill.rect.height * scale),
@@ -1104,18 +1102,30 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     x: inputBox.x + 8,
     y: inputBox.y + 6,
   };
-  const darkTextPixels = [earlyFrame, middleFrame, lateFrame].map((frame) =>
+  const fillFrames = renderedFrames.slice(
+    Math.floor(fillStart / 40),
+    Math.ceil((fillStart + highlightDurationMs) / 40),
+  );
+  const darkTextPixels = fillFrames.map((frame) =>
     countPixels(
       frame,
       textBox,
       ({ blue, green, red }) => red < 80 && green < 80 && blue < 80,
     ),
   );
+  const completePixelCount = Math.max(...darkTextPixels);
+  const blankFrame = darkTextPixels.findIndex((count) => count < 20);
+  const partialFrame = darkTextPixels.findIndex(
+    (count) => count > 20 && count < completePixelCount * 0.8,
+  );
+  const completeFrame = darkTextPixels.findIndex(
+    (count) => count >= completePixelCount * 0.95,
+  );
 
-  expect(darkTextPixels[0]).toBeLessThan(20);
-  expect(darkTextPixels[0]).toBeLessThan(darkTextPixels[1]);
-  expect(darkTextPixels[1]).toBeLessThan(darkTextPixels[2]);
-  expect(darkTextPixels[2]).toBeGreaterThan(100);
+  expect(completePixelCount).toBeGreaterThan(100);
+  expect(blankFrame).toBeGreaterThanOrEqual(0);
+  expect(partialFrame).toBeGreaterThan(blankFrame);
+  expect(completeFrame).toBeGreaterThan(partialFrame);
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({

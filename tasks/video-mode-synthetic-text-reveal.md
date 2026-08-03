@@ -1,5 +1,5 @@
 ---
-status: complete
+status: in-progress
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete on draft PR #17. Prompts and URLs reveal progressively, long destinations stay as compact clipped single-line text, all validation passes, and three native review players are in the PR body.
+Implementation and media are complete on draft PR #17. Linux CI exposed a timestamp-sensitive prompt frame assertion; its full decoded hold now asserts blank, intermediate, and complete states. Final CI confirmation remains.
 
 ## Goal
 
@@ -42,3 +42,4 @@ Make text that exists only in video-mode's post-produced UI read like ordinary t
 - 2026-08-03: The address tracer bullet proved the old ASS annotation painted all 685 light URL pixels in every sampled hold frame. Successive grapheme-prefix annotations now produce a clear start, middle, and complete destination without extending navigation runtime.
 - 2026-08-03: The long-address regression exposed the reported overflow as ASS word wrapping: the clipped URL occupied two 12-pixel rows. `\\q2` keeps it on one line, and the smaller type remains within both horizontal clip edges in decoded output.
 - 2026-08-03: Stress and full validation passed. Generated the todo journey from the current branch using PR #15's ignored fixture as a review-only input, then reran the checked-in long-address spec for focused media. Uploaded all three MP4s through GitHub's attachment editor and verified three native players in the rendered PR body.
+- 2026-08-03: Linux CI rendered the expected prompt animation but two fixed sample timestamps occasionally landed on the same glyph state. Replaced timestamp sampling with an assertion over every decoded fill-hold frame, preserving the public blank → partial → complete requirement.
