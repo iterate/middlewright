@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["middlewright/lint-plugin"],
+  "rules": {
+    "middlewright/prefer-locator-waits": "error"
+  }
+}

@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The public plugin is implemented and package-validated. Repository adoption, the intentionally red lint commit, autofix pass, final verification, and video remain.
+The plugin is implemented and adopted. The adoption checkpoint is intentionally red on two real Oxlint correctness warnings; the autofix pass, any manual cleanup, final verification, and video remain.
 
 ## Goal
 
@@ -38,7 +38,7 @@ await locator.filter({ hasText: "Hello" }).waitFor();
 ## Commit plan
 
 - [x] Add Oxlint, the exported plugin, public usage docs, and integration specs. *The dependency-free JS plugin is exported from `middlewright/lint-plugin`; four consumer-style Oxlint specs, typecheck, build, publint, and pack validation pass.*
-- [ ] Apply the plugin to this repository and push the intentionally failing lint configuration. *Keep this as a separate commit so its CI run shows every violation.*
+- [x] Apply the plugin to this repository and push the intentionally failing lint configuration. *Oxlint runs in CI with warnings denied; the checkpoint exposes an unused import and an unassigned variable warning.*
 - [ ] Run `oxlint --fix` and commit only its automatic fixes. *Do not mix manual edits into the autofix commit.*
 - [ ] Fix any remaining or malformed cases manually in a final implementation commit. *Skip this commit if the automatic pass is complete and correct.*
 - [ ] Run typecheck, build, lint, tests, package validation, and attach the current todo-app video to the pull request. *Record final evidence here and in the PR body.*
@@ -48,3 +48,4 @@ await locator.filter({ hasText: "Hello" }).waitFor();
 
 - 2026-08-04: PR #21 was merged with `origin/main` in commit `f90e921`; the resolved FFmpeg and todo-app specs pass 35/35 with typecheck green.
 - 2026-08-04: Built `middlewright/prefer-locator-waits` through four red/green slices: both requested fixes, no unsafe unawaited rewrite, and reporting without fixing unsupported matcher options.
+- 2026-08-04: PR #21 already contains zero locator assertions matched by the new rule. Enabling Oxlint's normal correctness baseline keeps the requested adoption checkpoint meaningful and exposes two existing warnings.
