@@ -656,7 +656,9 @@ test("records a horizontal pan for a waitFor target beyond the right edge", asyn
     pan: {
       back: true,
       from: { x: 0, y: 0 },
-      to: { x: 2000 + 200 + 24 - 800, y: 0 },
+      // The destination centers the element, matching Chromium's own
+      // scroll-for-action alignment: element center minus half a viewport.
+      to: { x: 2000 + 100 - 400, y: 0 },
     },
   });
   // The held rect is viewport-relative at the panned-to position.

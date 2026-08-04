@@ -1077,16 +1077,22 @@ const panScrollTarget = (options: {
   viewportSize: number;
 }) => {
   const documentStart = options.start + options.scroll;
-  let target = options.scroll;
+  const fullyVisible =
+    documentStart >= options.scroll &&
+    documentStart + options.size <= options.scroll + options.viewportSize;
 
-  if (documentStart < options.scroll) {
-    target = documentStart - PAN_MARGIN_PX;
-  } else if (documentStart + options.size > options.scroll + options.viewportSize) {
-    target = documentStart + options.size + PAN_MARGIN_PX - options.viewportSize;
+  if (fullyVisible) {
+    return options.scroll;
   }
-  if (options.size + PAN_MARGIN_PX * 2 > options.viewportSize) {
-    target = documentStart - PAN_MARGIN_PX;
-  }
+
+  // Center the element, matching how Chromium scrolls for actions — so a
+  // wait-then-act pan pair lands on the same view — and keeping the target
+  // clear of the caption band at the bottom. Oversized elements align to
+  // their start instead.
+  const target =
+    options.size + PAN_MARGIN_PX * 2 > options.viewportSize
+      ? documentStart - PAN_MARGIN_PX
+      : Math.round(documentStart + options.size / 2 - options.viewportSize / 2);
 
   return Math.max(
     0,
