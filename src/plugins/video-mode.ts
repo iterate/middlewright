@@ -1046,6 +1046,18 @@ const recordDialogHighlights = async (options: {
   options.state.lastDialogEndedAt = decisionStart;
 };
 
+const panDurationMs = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+  return Math.round(
+    Math.min(
+      PAN_MAX_MS,
+      Math.max(
+        PAN_MIN_MS,
+        (Math.hypot(to.x - from.x, to.y - from.y) / PAN_SPEED_PX_PER_SECOND) * 1000,
+      ),
+    ),
+  );
+};
+
 const panScrollTarget = (options: {
   documentSize: number;
   scroll: number;
@@ -1072,7 +1084,12 @@ const panScrollTarget = (options: {
 };
 
 const recordHighlight = async (options: {
-  allowPan: boolean;
+  /**
+   * How an offscreen target is shown: "return" pans to it and back (the live
+   * page keeps its scroll position), "stay" pans to it and remains (the
+   * action itself scrolls the live page there).
+   */
+  pan: "off" | "return" | "stay";
   color: string;
   durationMs: number;
   locator: Locator;
@@ -1155,7 +1172,7 @@ const recordHighlight = async (options: {
       snapshot.rect.x + snapshot.rect.width > snapshot.viewport.width ||
       snapshot.rect.y + snapshot.rect.height > snapshot.viewport.height;
     const panTo =
-      options.allowPan && offscreen && !snapshot.clippedByScrollContainer
+      options.pan !== "off" && offscreen && !snapshot.clippedByScrollContainer
         ? {
             x: panScrollTarget({
               documentSize: snapshot.document.width,
@@ -1173,36 +1190,54 @@ const recordHighlight = async (options: {
             }),
           }
         : undefined;
+    // The image covers both scroll windows. A "stay" pan adopts the action's
+    // real scroll destination afterwards, so its capture extends one extra
+    // viewport in the travel direction in case the browser scrolls further
+    // than the minimal estimate.
+    const panImageAxis = (axis: {
+      documentSize: number;
+      from: number;
+      to: number;
+      viewportSize: number;
+    }) => {
+      let low = Math.min(axis.from, axis.to);
+      let high = Math.max(axis.from, axis.to) + axis.viewportSize;
+      if (options.pan === "stay") {
+        if (axis.to > axis.from) high += axis.viewportSize;
+        if (axis.to < axis.from) low -= axis.viewportSize;
+      }
+      low = Math.max(0, low);
+      high = Math.min(Math.max(axis.documentSize, axis.viewportSize), high);
+      return { size: high - low, start: low };
+    };
     const pan: VideoModePan | undefined =
       panTo && (panTo.x !== snapshot.scroll.x || panTo.y !== snapshot.scroll.y)
-        ? {
-            back: true,
-            durationMs: Math.round(
-              Math.min(
-                PAN_MAX_MS,
-                Math.max(
-                  PAN_MIN_MS,
-                  (Math.hypot(panTo.x - snapshot.scroll.x, panTo.y - snapshot.scroll.y) /
-                    PAN_SPEED_PX_PER_SECOND) *
-                    1000,
-                ),
-              ),
-            ),
-            from: snapshot.scroll,
-            imageRect: {
-              height:
-                Math.max(snapshot.scroll.y, panTo.y) +
-                snapshot.viewport.height -
-                Math.min(snapshot.scroll.y, panTo.y),
-              width:
-                Math.max(snapshot.scroll.x, panTo.x) +
-                snapshot.viewport.width -
-                Math.min(snapshot.scroll.x, panTo.x),
-              x: Math.min(snapshot.scroll.x, panTo.x),
-              y: Math.min(snapshot.scroll.y, panTo.y),
-            },
-            to: panTo,
-          }
+        ? (() => {
+            const horizontal = panImageAxis({
+              documentSize: snapshot.document.width,
+              from: snapshot.scroll.x,
+              to: panTo.x,
+              viewportSize: snapshot.viewport.width,
+            });
+            const vertical = panImageAxis({
+              documentSize: snapshot.document.height,
+              from: snapshot.scroll.y,
+              to: panTo.y,
+              viewportSize: snapshot.viewport.height,
+            });
+            return {
+              back: options.pan === "return",
+              durationMs: panDurationMs(snapshot.scroll, panTo),
+              from: snapshot.scroll,
+              imageRect: {
+                height: vertical.size,
+                width: horizontal.size,
+                x: horizontal.start,
+                y: vertical.start,
+              },
+              to: panTo,
+            };
+          })()
         : undefined;
 
     const image = pan
@@ -1249,6 +1284,46 @@ const recordHighlight = async (options: {
     return highlight;
   } catch {
     // Element may disappear between the actionability wait and the snapshot.
+  }
+};
+
+/**
+ * A "stay" pan is captured before the action, but the browser performs the
+ * real scroll during it. Adopt the actual post-action scroll position as the
+ * pan destination so the synthetic pan lands exactly where live footage
+ * resumes, and consume the action's own footage (the instant scroll jump)
+ * from the source.
+ */
+const finalizePanHighlightAfterAction = async (options: {
+  highlight: VideoModeHighlight;
+  locator: Locator;
+  state: VideoModeState;
+}) => {
+  const pan = options.highlight.pan;
+  if (!pan || pan.back || options.state.startedAt === undefined) {
+    return;
+  }
+
+  try {
+    const scroll = await options.locator.evaluate(() => ({
+      x: window.scrollX,
+      y: window.scrollY,
+    }));
+    const documentRect = {
+      x: options.highlight.rect.x + pan.to.x,
+      y: options.highlight.rect.y + pan.to.y,
+    };
+    pan.durationMs = panDurationMs(pan.from, scroll);
+    pan.to = scroll;
+    options.highlight.rect = {
+      ...options.highlight.rect,
+      x: documentRect.x - scroll.x,
+      y: documentRect.y - scroll.y,
+    };
+    options.highlight.actionEnd =
+      Math.round(performance.now() - options.state.startedAt) + PAN_CAPTURE_SETTLE_MS;
+  } catch {
+    // Element may disappear during the action; keep the estimated pan.
   }
 };
 
@@ -4009,7 +4084,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
         if (highlight.mode !== "off" && !skipMethods.includes(method)) {
           await recordHighlight({
-            allowPan: true,
+            pan: "return",
             color: highlight.color,
             durationMs: highlight.durationMs,
             locator,
@@ -4042,7 +4117,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         highlight.mode === "off"
           ? undefined
           : await recordHighlight({
-              allowPan: false,
+              pan: method === "fill" ? "off" : "stay",
               color: highlight.color,
               durationMs: highlight.durationMs,
               locator,
@@ -4074,6 +4149,13 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             recordedHighlight.start,
             Math.round(performance.now() - state.startedAt),
           );
+        }
+        if (recordedHighlight?.pan) {
+          await finalizePanHighlightAfterAction({
+            highlight: recordedHighlight,
+            locator,
+            state,
+          });
         }
         return result;
       } finally {
