@@ -123,10 +123,9 @@ export const llmRecover = (options: LlmRecoverOptions = {}): Plugin => {
 
           const start = Date.now();
           try {
-            let recoveryFn!: Function;
             // eval is intentional: the LLM writes a recovery function, we run it
             // eslint-disable-next-line no-eval
-            eval(`recoveryFn = ${code.trim()}`);
+            const recoveryFn: Function = eval(`(${code.trim()})`);
             if (typeof recoveryFn !== "function") {
               adjustError(
                 originalError,
