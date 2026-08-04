@@ -115,6 +115,24 @@ export type VideoModeFillReveal = {
   revealStops: number[];
 };
 
+/**
+ * A synthetic camera pan rendered over a beyond-viewport screenshot. The live
+ * page is never scrolled; the rendered video travels from the captured scroll
+ * position to a window where the highlighted element is visible.
+ */
+export type VideoModePan = {
+  /** Return to the live scroll position after the hold. */
+  back: boolean;
+  /** One-way pan duration in the rendered video (ms). */
+  durationMs: number;
+  /** Page scroll offset when the highlight was captured. */
+  from: { x: number; y: number };
+  /** Document-coordinate region covered by the highlight image. */
+  imageRect: VideoModeRect;
+  /** Page scroll offset the rendered pan travels to. */
+  to: { x: number; y: number };
+};
+
 export type VideoModeHighlight = VideoModeSpan & {
   actionEnd?: number;
   color: string;
@@ -122,6 +140,7 @@ export type VideoModeHighlight = VideoModeSpan & {
   fillReveal?: VideoModeFillReveal;
   image?: string;
   method?: OverrideableMethod;
+  pan?: VideoModePan;
   rect: VideoModeRect;
   sourceFrameAt?: number;
   thickness: number;
@@ -335,6 +354,15 @@ const CURSOR_TARGET_HOLD_IDEAL_MS = 1000;
 const TEXT_CURSOR_HOLD_IDEAL_MS = 800;
 const TEXT_CURSOR_POINTER_TAIL_MS = 200;
 const DIALOG_POST_ROLL_MS = 1000;
+const PAN_SPEED_PX_PER_SECOND = 1800;
+const PAN_MIN_MS = 400;
+const PAN_MAX_MS = 1000;
+const PAN_MARGIN_PX = 24;
+// Chromium implements beyond-viewport capture by momentarily resizing the
+// renderer, which leaks one zoomed-out frame into the screencast. The pan
+// piece consumes the capture span plus this settle margin from the source so
+// the flash never reaches the rendered video.
+const PAN_CAPTURE_SETTLE_MS = 150;
 
 type HighlightInput = {
   durationMs: number;
@@ -1018,7 +1046,33 @@ const recordDialogHighlights = async (options: {
   options.state.lastDialogEndedAt = decisionStart;
 };
 
+const panScrollTarget = (options: {
+  documentSize: number;
+  scroll: number;
+  start: number;
+  size: number;
+  viewportSize: number;
+}) => {
+  const documentStart = options.start + options.scroll;
+  let target = options.scroll;
+
+  if (documentStart < options.scroll) {
+    target = documentStart - PAN_MARGIN_PX;
+  } else if (documentStart + options.size > options.scroll + options.viewportSize) {
+    target = documentStart + options.size + PAN_MARGIN_PX - options.viewportSize;
+  }
+  if (options.size + PAN_MARGIN_PX * 2 > options.viewportSize) {
+    target = documentStart - PAN_MARGIN_PX;
+  }
+
+  return Math.max(
+    0,
+    Math.min(target, Math.max(0, options.documentSize - options.viewportSize)),
+  );
+};
+
 const recordHighlight = async (options: {
+  allowPan: boolean;
   color: string;
   durationMs: number;
   locator: Locator;
@@ -1044,13 +1098,41 @@ const recordHighlight = async (options: {
 
     const snapshot = await options.locator.evaluate((element) => {
       const rect = element.getBoundingClientRect();
+      let clippedByScrollContainer = false;
+      for (
+        let ancestor = element.parentElement;
+        ancestor && ancestor !== document.documentElement;
+        ancestor = ancestor.parentElement
+      ) {
+        const canScroll =
+          (ancestor.scrollHeight > ancestor.clientHeight + 1 ||
+            ancestor.scrollWidth > ancestor.clientWidth + 1) &&
+          /auto|scroll|hidden/.test(getComputedStyle(ancestor).overflow);
+        if (!canScroll) continue;
+        const box = ancestor.getBoundingClientRect();
+        if (
+          rect.top < box.top - 1 ||
+          rect.bottom > box.bottom + 1 ||
+          rect.left < box.left - 1 ||
+          rect.right > box.right + 1
+        ) {
+          clippedByScrollContainer = true;
+          break;
+        }
+      }
       return {
+        clippedByScrollContainer,
+        document: {
+          height: document.documentElement.scrollHeight,
+          width: document.documentElement.scrollWidth,
+        },
         rect: {
           height: rect.height,
           width: rect.width,
           x: rect.left,
           y: rect.top,
         },
+        scroll: { x: window.scrollX, y: window.scrollY },
         viewport: {
           height: window.innerHeight,
           width: window.innerWidth,
@@ -1067,22 +1149,98 @@ const recordHighlight = async (options: {
       return;
     }
 
-    const image = `video-mode-highlight-${options.state.highlightImageIndex}.png`;
+    const offscreen =
+      snapshot.rect.x < 0 ||
+      snapshot.rect.y < 0 ||
+      snapshot.rect.x + snapshot.rect.width > snapshot.viewport.width ||
+      snapshot.rect.y + snapshot.rect.height > snapshot.viewport.height;
+    const panTo =
+      options.allowPan && offscreen && !snapshot.clippedByScrollContainer
+        ? {
+            x: panScrollTarget({
+              documentSize: snapshot.document.width,
+              scroll: snapshot.scroll.x,
+              size: snapshot.rect.width,
+              start: snapshot.rect.x,
+              viewportSize: snapshot.viewport.width,
+            }),
+            y: panScrollTarget({
+              documentSize: snapshot.document.height,
+              scroll: snapshot.scroll.y,
+              size: snapshot.rect.height,
+              start: snapshot.rect.y,
+              viewportSize: snapshot.viewport.height,
+            }),
+          }
+        : undefined;
+    const pan: VideoModePan | undefined =
+      panTo && (panTo.x !== snapshot.scroll.x || panTo.y !== snapshot.scroll.y)
+        ? {
+            back: true,
+            durationMs: Math.round(
+              Math.min(
+                PAN_MAX_MS,
+                Math.max(
+                  PAN_MIN_MS,
+                  (Math.hypot(panTo.x - snapshot.scroll.x, panTo.y - snapshot.scroll.y) /
+                    PAN_SPEED_PX_PER_SECOND) *
+                    1000,
+                ),
+              ),
+            ),
+            from: snapshot.scroll,
+            imageRect: {
+              height:
+                Math.max(snapshot.scroll.y, panTo.y) +
+                snapshot.viewport.height -
+                Math.min(snapshot.scroll.y, panTo.y),
+              width:
+                Math.max(snapshot.scroll.x, panTo.x) +
+                snapshot.viewport.width -
+                Math.min(snapshot.scroll.x, panTo.x),
+              x: Math.min(snapshot.scroll.x, panTo.x),
+              y: Math.min(snapshot.scroll.y, panTo.y),
+            },
+            to: panTo,
+          }
+        : undefined;
+
+    const image = pan
+      ? `video-mode-pan-${options.state.highlightImageIndex}.png`
+      : `video-mode-highlight-${options.state.highlightImageIndex}.png`;
     options.state.highlightImageIndex += 1;
     const imagePath = join(options.testInfo.outputDir, image);
     await mkdir(options.testInfo.outputDir, { recursive: true });
     const beforeScreenshot = Math.round(performance.now() - options.state.startedAt);
-    await options.locator.page().screenshot({ path: imagePath, scale: "css" });
-    const start = options.startAfterScreenshot
-      ? Math.round(performance.now() - options.state.startedAt)
-      : beforeScreenshot;
+    await options.locator.page().screenshot(
+      pan
+        ? { clip: pan.imageRect, fullPage: true, path: imagePath, scale: "css" }
+        : { path: imagePath, scale: "css" },
+    );
+    const afterScreenshot = Math.round(performance.now() - options.state.startedAt);
+    // A pan starts at the pre-capture footage (its first synthetic frame is
+    // pixel-identical to it) and consumes the capture flash from the source.
+    const start = pan
+      ? beforeScreenshot
+      : options.startAfterScreenshot
+        ? afterScreenshot
+        : beforeScreenshot;
 
     const highlight: VideoModeHighlight = {
+      actionEnd: pan ? afterScreenshot + PAN_CAPTURE_SETTLE_MS : undefined,
       color: options.color,
       end: start + Math.round(options.durationMs),
       image,
       method: options.method,
-      rect: snapshot.rect,
+      pan,
+      rect: pan
+        ? {
+            height: snapshot.rect.height,
+            width: snapshot.rect.width,
+            x: snapshot.rect.x + snapshot.scroll.x - pan.to.x,
+            y: snapshot.rect.y + snapshot.scroll.y - pan.to.y,
+          }
+        : snapshot.rect,
       start,
       thickness: options.thickness,
       viewport: snapshot.viewport,
@@ -2169,6 +2327,12 @@ const renderedPieceDuration = (piece: VideoPiece) => {
 
   const highlightDuration = piece.highlight.end - piece.highlight.start;
 
+  if (piece.highlight.pan) {
+    return (
+      highlightDuration + piece.highlight.pan.durationMs * (piece.highlight.pan.back ? 2 : 1)
+    );
+  }
+
   if (piece.highlight.image || piece.highlight.dialog) {
     return highlightDuration;
   }
@@ -2309,11 +2473,15 @@ const cursorTargets = (options: {
       continue;
     }
 
+    // A panning piece only shows the element at its held rect between the pan
+    // in and the pan back, so aim the cursor at that window.
+    const panLeadMs = highlight.pan ? highlight.pan.durationMs : 0;
+    const panTailMs = highlight.pan?.back ? highlight.pan.durationMs : 0;
     targets.push({
       highlight,
       method: highlight.method,
-      outputEnd: piece.outputEnd,
-      outputStart: piece.outputStart,
+      outputEnd: piece.outputEnd - panTailMs,
+      outputStart: piece.outputStart + panLeadMs,
       point: highlightCursorPoint(highlight, options.video),
     });
   }
@@ -2846,6 +3014,74 @@ const renderedVideoFilter = (options: {
             : `[${composedLabel}]null[${label}]`,
         );
       }
+      continue;
+    }
+
+    if (
+      piece.highlight?.pan &&
+      piece.highlight.image &&
+      highlightInputByImage.has(piece.highlight.image)
+    ) {
+      const highlight = piece.highlight;
+      const pan = piece.highlight.pan;
+      const input = highlightInputByImage.get(piece.highlight.image)!;
+      const scale = Math.min(
+        options.video.width / highlight.viewport.width,
+        options.video.height / highlight.viewport.height,
+      );
+      const scaledViewport = scaledViewportSize(highlight.viewport, options.video);
+      const scaledImage = {
+        height: Math.max(scaledViewport.height, Math.round(pan.imageRect.height * scale)),
+        width: Math.max(scaledViewport.width, Math.round(pan.imageRect.width * scale)),
+      };
+      const cropOffset = (scroll: { x: number; y: number }) => ({
+        x: Math.max(
+          0,
+          Math.min(
+            Math.round((scroll.x - pan.imageRect.x) * scale),
+            scaledImage.width - scaledViewport.width,
+          ),
+        ),
+        y: Math.max(
+          0,
+          Math.min(
+            Math.round((scroll.y - pan.imageRect.y) * scale),
+            scaledImage.height - scaledViewport.height,
+          ),
+        ),
+      });
+      const from = cropOffset(pan.from);
+      const to = cropOffset(pan.to);
+      const duration = renderedPieceDuration(piece);
+      const holdEndMs = pan.durationMs + (highlight.end - highlight.start);
+      const travel = (startMs: number, a: number, b: number) =>
+        `(${a}+(${b - a})*(1-cos(PI*clip((t-${formatSeconds(startMs)})/${formatSeconds(
+          pan.durationMs,
+        )},0,1)))/2)`;
+      const axisExpression = (a: number, b: number) => {
+        const expression = pan.back
+          ? `if(lt(t,${formatSeconds(holdEndMs)}),${travel(0, a, b)},${travel(holdEndMs, b, a)})`
+          : travel(0, a, b);
+        return `'${expression.replaceAll(",", "\\,")}'`;
+      };
+      const highlightEnable = pan.back
+        ? `between(t\\,${formatSeconds(pan.durationMs)}\\,${formatSeconds(holdEndMs)})`
+        : `gte(t\\,${formatSeconds(pan.durationMs)})`;
+      operations.push(
+        `[${input.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+      );
+      operations.push(
+        `crop=w=${scaledViewport.width}:h=${scaledViewport.height}:x=${axisExpression(from.x, to.x)}:y=${axisExpression(from.y, to.y)}`,
+      );
+      operations.push(
+        `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+      );
+      if (options.highlightMode === "outline") {
+        operations.push(`${drawboxFilter(highlight, options.video)}:enable='${highlightEnable}'`);
+      }
+      operations.push(`trim=start=0:end=${formatSeconds(duration)}`);
+      operations.push("setpts=PTS-STARTPTS");
+      filters.push(`${operations.join(",")}[${label}]`);
       continue;
     }
 
@@ -3449,8 +3685,11 @@ const renderVideo = async (options: {
         highlight.image,
         highlight.fillReveal?.image,
       ].filter((image): image is string => Boolean(image));
+      const panMs = highlight.pan
+        ? highlight.pan.durationMs * (highlight.pan.back ? 2 : 1)
+        : 0;
       return images.map((image) => ({
-        durationMs: highlight.end - highlight.start,
+        durationMs: highlight.end - highlight.start + panMs,
         image,
       }));
     })
@@ -3770,6 +4009,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
         if (highlight.mode !== "off" && !skipMethods.includes(method)) {
           await recordHighlight({
+            allowPan: true,
             color: highlight.color,
             durationMs: highlight.durationMs,
             locator,
@@ -3802,6 +4042,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         highlight.mode === "off"
           ? undefined
           : await recordHighlight({
+              allowPan: false,
               color: highlight.color,
               durationMs: highlight.durationMs,
               locator,
@@ -4109,6 +4350,22 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             highlights,
             offsetMs: timelineOffset,
           });
+          // A selector-driven trim start resolves over the protocol and can
+          // land a few milliseconds after a highlight recorded at effectively
+          // the same moment. The race must not drop that highlight, so a start
+          // within one source frame after a highlight start moves back to it.
+          if (state.sourceRange.start !== undefined) {
+            const rangeStart = state.sourceRange.start;
+            const racedHighlightStarts = highlights
+              .map((candidate) => candidate.start)
+              .filter(
+                (start) =>
+                  start < rangeStart && rangeStart - start <= rawVideoInfo.frameDurationMs,
+              );
+            if (racedHighlightStarts.length > 0) {
+              state.sourceRange.start = Math.min(...racedHighlightStarts);
+            }
+          }
           const annotationSourceRange = metadataFor(state).sourceRange;
           const sourceRange = translateSourceRange(annotationSourceRange, timelineOffset);
 

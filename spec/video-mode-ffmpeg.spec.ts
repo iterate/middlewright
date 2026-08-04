@@ -1524,10 +1524,20 @@ test("pans to an offscreen waitFor result without scrolling the live page", asyn
     y: 0,
   });
 
-  // The live page never scrolled, so the raw recording never shows the target.
+  // The live page never scrolled, so the raw recording never shows the target
+  // at its real size. (The beyond-viewport capture leaks one zoomed-out
+  // full-document frame into the screencast; that shrunken glimpse is the
+  // documented cost of capturing offscreen pixels without scrolling.)
   const rawFrames = await videoFrames(paths.raw, 25);
+  const rawScale = Math.min(
+    rawFrames[0].width / waitHighlight.viewport.width,
+    rawFrames[0].height / waitHighlight.viewport.height,
+  );
   for (const frame of rawFrames) {
-    expect(countPixels(frame, fullFrameRect(frame), isMagenta)).toBe(0);
+    const box = pixelBoundingBox(frame, fullFrameRect(frame), isMagenta);
+    if (box) {
+      expect(box.width).toBeLessThan(Math.round(240 * rawScale) / 2);
+    }
   }
 
   const renderedFrames = await videoFrames(paths.rendered, 25);
@@ -1539,6 +1549,21 @@ test("pans to an offscreen waitFor result without scrolling the live page", asyn
     renderedFrames[0].height / waitHighlight.viewport.height,
   );
   const fullWidth = Math.round(240 * scale);
+
+  // The capture flash never reaches the rendered video: no frame can show the
+  // document-top header and the far-below target at the same time.
+  for (const [index, frame] of renderedFrames.entries()) {
+    if (magentaBoxes[index]) {
+      expect(
+        hasGreen(frame, {
+          height: Math.round(60 * scale),
+          width: Math.round(200 * scale),
+          x: 0,
+          y: 0,
+        }),
+      ).toBe(false);
+    }
+  }
   const heldIndexes = magentaBoxes.flatMap((box, index) =>
     box && box.width >= fullWidth - 4 && box.height >= Math.round(120 * scale) - 4
       ? [index]
