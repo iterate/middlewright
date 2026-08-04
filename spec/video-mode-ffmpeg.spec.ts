@@ -1662,6 +1662,116 @@ test("does not paste a future input over an earlier page state", async ({
   ).toEqual([]);
 });
 
+test("does not flash a completed fill before its synthetic reveal", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "outline", duration: 600 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 24px sans-serif; }
+        [hidden] { display: none !important; }
+        section { position: fixed; inset: 0; padding: 40px; }
+        #welcome { background: rgb(220, 20, 30); color: white; }
+        #editor { background: rgb(20, 180, 40); }
+        input {
+          position: absolute;
+          left: 250px;
+          top: 150px;
+          width: 300px;
+          height: 100px;
+          border: 0;
+          padding: 20px;
+          background: rgb(20, 80, 230);
+          color: white;
+          caret-color: transparent;
+          font: 32px monospace;
+        }
+      </style>
+      <section id="welcome">
+        <h1>Welcome back</h1>
+        <button>Sign in</button>
+      </section>
+      <section id="editor" hidden>
+        <h1>Edit todo</h1>
+        <label>Title <input aria-label="Title" /></label>
+      </section>
+      <script>
+        document.querySelector("button").addEventListener("click", () => {
+          document.querySelector("#welcome h1").textContent = "Signing in...";
+          setTimeout(() => {
+            document.querySelector("#welcome").hidden = true;
+            document.querySelector("#editor").hidden = false;
+          }, 2_000);
+        });
+      </script>
+    `);
+
+    await plugged.waitForTimeout(1_000);
+    await plugged.getByRole("button", { name: "Sign in" }).click();
+    await plugged.waitForTimeout(2_700);
+    await plugged.getByLabel("Title").fill("Check the demo pacing");
+    // Force completed compositor frames into the raw recorder without adding
+    // another video-mode action or extending its annotation timeline.
+    await page.screenshot();
+    await page.screenshot();
+    await page.screenshot();
+  }
+
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find(
+    (highlight) => highlight.method === "fill" && !highlight.dialog,
+  )!;
+  expect(fillHighlight).toBeDefined();
+  const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const scale = Math.min(
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
+  );
+  const textBox = inset(
+    {
+      height: Math.round(fillHighlight.rect.height * scale),
+      width: Math.round(fillHighlight.rect.width * scale),
+      x: Math.round(fillHighlight.rect.x * scale),
+      y: Math.round(fillHighlight.rect.y * scale),
+    },
+    Math.round(16 * scale),
+  );
+  const textPixels = frames.map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red > 200 && green > 200 && blue > 200,
+    ),
+  );
+  const completedTextPixels = Math.max(...textPixels);
+  expect(completedTextPixels).toBeGreaterThan(300);
+
+  let revealStartFrame = textPixels.length - 1;
+  while (revealStartFrame > 0 && textPixels[revealStartFrame - 1] > 10) {
+    revealStartFrame -= 1;
+  }
+  const prematureCompletedFrames = textPixels.flatMap((pixels, frame) =>
+    frame < revealStartFrame && pixels > completedTextPixels * 0.8 ? [frame] : [],
+  );
+
+  expect(
+    prematureCompletedFrames,
+    "completed text must not appear before the progressive reveal begins",
+  ).toEqual([]);
+});
+
 test("reveals complete glyphs instead of slicing through the next character", async ({
   page,
 }, testInfo) => {
