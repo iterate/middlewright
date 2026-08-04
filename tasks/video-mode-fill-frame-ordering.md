@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Reopened and broadened. The original future-input time travel has a deterministic green regression, but removing broad `preAction` stabilization exposed one completed-value frame before the synthetic reveal. Missing: a failing regression for that second ordering bug, boundary-scoped stabilization, stress/full validation, and refreshed PR media.
+Implementation is green under focused stress. Separate frame regressions now protect both time-travel directions, and fill stabilization is limited to the measured recorder offset at a frame-aligned action boundary. Missing: full validation and refreshed PR media.
 
 ## Goal
 
@@ -26,10 +26,10 @@ Rendered fills must remain chronological in both directions: never paste a futur
 - [x] Unskip the merged frame-level repro and confirm it fails with the impossible welcome-page/input combination. *The unchanged test finds 15 consecutive hybrid frames (35–49) in 5.7 seconds.*
 - [x] Test whether removing future `preAction` stabilization alone makes the repro green. *Deleting the broad overlay makes the repro pass and removes all `preAction` rendering state.*
 - [x] Preserve scrolling, resizing, gradient, cursor, and text-reveal fill behavior. *Nine focused fill tests pass; the pre-existing text-cursor sampler flakes at the same 40% rate on untouched `main` and is unrelated.*
-- [ ] Add a public-behavior frame regression rejecting any completed fill before the first partial reveal.
-- [ ] Bind pre-action stabilization to measured boundary frames rather than an entire preceding gap.
-- [ ] Keep the original earlier-page/future-input regression green under the boundary fix.
-- [ ] Stress both ordering regressions and the scrolling, resizing, gradient, cursor, and text-reveal fill slice.
+- [x] Add a public-behavior frame regression rejecting any completed fill before the first partial reveal. *Three ordinary page screenshots make the recorder-late completed frame deterministic; the rendered-frame assertion failed 5/5 before the fix.*
+- [x] Bind pre-action stabilization to measured boundary frames rather than an entire preceding gap. *The renderer splits the raw gap at the original action clock plus a three-frame guard, rounded down to the source-frame grid.*
+- [x] Keep the original earlier-page/future-input regression green under the boundary fix. *The earlier-page and pre-reveal-flash regressions pass together 20/20 under two workers.*
+- [x] Stress both ordering regressions and the scrolling, resizing, gradient, cursor, and text-reveal fill slice. *Both ordering cases pass 20/20 and all 11 focused fill cases pass.*
 - [ ] Run the complete suite, typecheck, build, and publint; regenerate and inspect the focused before/after PR media.
 - [x] Stress-run the regression and full fill-rendering slice, then run the complete suite, typecheck, build, and publint. *Regression passes 10/10; cursor assertion passes 30/30; full suite passes 103 with 3 provider skips, plus typecheck, build, and publint.*
 - [x] Render and inspect the todo app; attach its current video to the PR body as the repository visual baseline requires. *Sampled the 21.96-second render every two seconds and attached it as a native player in PR #20.*
@@ -46,3 +46,6 @@ Rendered fills must remain chronological in both directions: never paste a futur
 - 2026-08-03: Added a side-by-side comparison of the exact frame-level repro at the pre-fix and post-fix commits; the buggy version visibly pastes the future blue input over the earlier red screen.
 - 2026-08-04: Removed the todo raw/rendered player from the PR body so it does not distract from the targeted before/after repro.
 - 2026-08-04: Reopened after native-rate inspection confirmed the post-fix video still flashes its completed fill for one frame before the synthetic reveal. The raw WebM contains the same recorder-late frame; PR #9 and #12 history confirms earlier calibration and `preAction` work targeted this exact bug class.
+- 2026-08-04: Added a second public-behavior RED regression which forces completed compositor frames into the raw recorder, then rejects any completed text before the final progressive reveal run. It failed 5/5 without pre-action stabilization.
+- 2026-08-04: Instrumentation showed the recorder-late frame lives between the original action clock and the endpoint-calibrated highlight clock. A boundary window based on the measured timeline offset plus three native frames removes that overlap without touching the earlier multi-second gap.
+- 2026-08-04: Stress found one frame left on the wrong side of an unaligned FFmpeg trim boundary. Rounding the source cut down to its native frame grid made both chronological-order regressions pass 20/20; the 11-case fill slice also passes.

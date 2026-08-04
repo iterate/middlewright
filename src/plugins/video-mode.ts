@@ -43,6 +43,7 @@ const VIDEO_MODE_DIALOGS_FILE = "video-mode-dialogs.ass";
 // endpoint without depending on browser-frame delivery latency.
 const VIDEO_MODE_RECORDER_SETTLE_MS = 1100;
 const VIDEO_MODE_FILL_REVEAL_MAX_CHARACTERS = 100;
+const VIDEO_MODE_FILL_PRE_ACTION_FRAME_PADDING = 3;
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -292,6 +293,7 @@ type VideoPiece = {
   end: number;
   highlight?: VideoModeHighlight;
   postAction?: VideoModeHighlight;
+  preAction?: VideoModeHighlight;
   speed: number;
   start: number;
 };
@@ -2002,6 +2004,7 @@ const videoPieces = (options: {
   addressBars: VideoModeAddressBar[];
   frameDurationMs: number;
   highlights: VideoModeHighlight[];
+  preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
 }): VideoPiece[] => {
   const pieces: VideoPiece[] = [];
@@ -2048,12 +2051,38 @@ const videoPieces = (options: {
       const nextHighlight = highlights[highlightIndex + 1];
 
       if (highlight.start > cursor) {
-        pieces.push({
-          end: highlight.start,
-          postAction: previousHighlight?.fillReveal ? previousHighlight : undefined,
-          speed: segment.speed,
-          start: cursor,
-        });
+        const postAction = previousHighlight?.fillReveal ? previousHighlight : undefined;
+        const preAction = highlight.fillReveal ? highlight : undefined;
+        // `trim` chooses whole source frames. Round down so the boundary frame
+        // belongs to the stabilized piece instead of leaking from the raw gap.
+        const preActionStart = preAction
+          ? Math.max(
+              cursor,
+              Math.floor(
+                (highlight.start - options.preActionStabilizationMs) /
+                  options.frameDurationMs,
+              ) * options.frameDurationMs,
+            )
+          : highlight.start;
+
+        if (preActionStart > cursor) {
+          pieces.push({
+            end: preActionStart,
+            postAction,
+            speed: segment.speed,
+            start: cursor,
+          });
+        }
+
+        if (highlight.start > preActionStart) {
+          pieces.push({
+            end: highlight.start,
+            postAction,
+            preAction,
+            speed: segment.speed,
+            start: preActionStart,
+          });
+        }
       }
 
       const actionEnd =
@@ -2560,6 +2589,7 @@ const renderedVideoFilter = (options: {
   highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
+  preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
   textPointerInput?: PointerInput;
   video: { frameDurationMs: number; width: number; height: number };
@@ -2571,6 +2601,7 @@ const renderedVideoFilter = (options: {
     addressBars: options.addressBars,
     frameDurationMs: options.video.frameDurationMs,
     highlights: options.highlights,
+    preActionStabilizationMs: options.preActionStabilizationMs,
     segments: options.segments,
   });
   const renderedPieces = renderedVideoPieces(pieces);
@@ -2600,6 +2631,9 @@ const renderedVideoFilter = (options: {
     labels.push(`[${label}]`);
 
     const operations: string[] = [];
+    const preActionInput = piece.preAction?.image
+      ? highlightInputByImage.get(piece.preAction.image)
+      : undefined;
     const postActionInput = piece.postAction?.fillReveal
       ? highlightInputByImage.get(piece.postAction.fillReveal.image)
       : undefined;
@@ -2646,14 +2680,32 @@ const renderedVideoFilter = (options: {
         viewport: piece.postAction.viewport,
       });
     }
+    if (piece.preAction?.fillReveal && preActionInput) {
+      stabilizations.push({
+        input: preActionInput,
+        rect: piece.preAction.fillReveal.initialRect,
+        viewport: piece.preAction.viewport,
+      });
+    }
 
     if (stabilizations.length > 0) {
+      const preActionCover = piece.preAction?.fillReveal?.cover;
+      const coverRect = preActionCover
+        ? scaleVideoModeRect(
+            preActionCover.rect,
+            piece.preAction!.viewport,
+            options.video,
+          )
+        : undefined;
       const durationSeconds = formatSeconds(renderedPieceDuration(piece));
       const baseLabel = `stabilizebase${index}`;
       filters.push(
         [
           `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
           `setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`,
+          coverRect && preActionCover
+            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${preActionCover.color}:t=fill`
+            : undefined,
         ]
           .filter((operation): operation is string => Boolean(operation))
           .join(",") + `[${baseLabel}]`,
@@ -3402,6 +3454,7 @@ const renderVideo = async (options: {
   deadAir: VideoModeSpan[];
   sourceRange: VideoModeSourceRange;
   thresholdMs: number | undefined;
+  timelineOffsetMs: number;
 }) => {
   const info = await videoInfo(options.inputPath);
   const sourceRangeStart = options.sourceRange.start === undefined ? 0 : options.sourceRange.start;
@@ -3412,6 +3465,13 @@ const renderVideo = async (options: {
     0,
     Math.min(Math.round(sourceRangeEnd), info.durationMs),
   );
+  // Highlight times have already moved forward by `timelineOffsetMs`, while
+  // the live completed fill can enter the raw recorder at its original action
+  // time. Stabilize that measured gap plus enough source/concat frame padding
+  // to keep the last completed raw frame behind the synthetic reveal.
+  const preActionStabilizationMs =
+    Math.max(0, options.timelineOffsetMs) +
+    info.frameDurationMs * VIDEO_MODE_FILL_PRE_ACTION_FRAME_PADDING;
 
   if (rangeEnd <= rangeStart) {
     console.warn(
@@ -3500,6 +3560,7 @@ const renderVideo = async (options: {
       addressBars: options.addressBars,
       frameDurationMs: info.frameDurationMs,
       highlights: options.highlights,
+      preActionStabilizationMs,
       segments,
     }),
   );
@@ -3550,6 +3611,7 @@ const renderVideo = async (options: {
     highlightMode: options.highlightMode,
     highlightInputs,
     highlights: options.highlights,
+    preActionStabilizationMs,
     segments,
     textPointerInput,
     video: info,
@@ -4155,6 +4217,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               outputPath: paths.rendered,
               sourceRange,
               thresholdMs: deadAirThreshold,
+              timelineOffsetMs: timelineOffset,
             });
 
             if (wroteRenderedVideo) {
