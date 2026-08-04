@@ -39,4 +39,4 @@ Make the repository's tests and demo snippets follow the Playwright guidance alr
 
 - 2026-08-04: Created from the user's edited `spec/video-mode-ffmpeg.spec.ts`; the root-worktree edit is reference only and will not be copied wholesale.
 - 2026-08-04: Typecheck and build pass. Changed non-ffmpeg specs pass after moving observation-only video checks to page-level waits so they do not become recorded middleware actions.
-- 2026-08-04: The ffmpeg spec run passed 31 tests with one expected skip; one pixel-timing test failed under eight-way concurrency and passed immediately in isolation.
+- 2026-08-04: The full run passed 101 tests with four expected skips. One text-cursor pixel test failed under eight-way concurrency, passed immediately in isolation, and reproduced unchanged on `main` with its original `toHaveValue` assertion.
