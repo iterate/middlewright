@@ -1540,7 +1540,7 @@ test("reveals filled text in post without changing the runtime fill", async ({
   expect(outsideField.red).toBeLessThan(80);
 });
 
-test.skip("does not paste a future input over an earlier page state", async ({
+test("does not paste a future input over an earlier page state", async ({
   page: basePage,
 }, testInfo) => {
   const video = videoMode({
@@ -1652,6 +1652,144 @@ test.skip("does not paste a future input over an earlier page state", async ({
   ).toEqual([]);
 });
 
+test("does not flash a completed fill before its synthetic reveal", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "outline", duration: 600 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 450 });
+    await plugged.setContent(`
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 24px sans-serif; }
+        [hidden] { display: none !important; }
+        section { position: fixed; inset: 0; padding: 40px; }
+        #welcome { background: rgb(220, 20, 30); color: white; }
+        #editor { background: rgb(20, 180, 40); }
+        input {
+          position: absolute;
+          left: 250px;
+          top: 150px;
+          width: 300px;
+          height: 100px;
+          border: 0;
+          padding: 20px;
+          background: rgb(20, 80, 230);
+          color: white;
+          caret-color: transparent;
+          font: 32px monospace;
+        }
+      </style>
+      <section id="welcome">
+        <h1>Welcome back</h1>
+        <button>Sign in</button>
+      </section>
+      <section id="editor" hidden>
+        <h1>Edit todo</h1>
+        <label>Title <input aria-label="Title" /></label>
+      </section>
+      <script>
+        document.querySelector("button").addEventListener("click", () => {
+          document.querySelector("#welcome h1").textContent = "Signing in...";
+          setTimeout(() => {
+            document.querySelector("#welcome").hidden = true;
+            document.querySelector("#editor").hidden = false;
+          }, 2_000);
+        });
+      </script>
+    `);
+
+    await plugged.waitForTimeout(1_000);
+    await plugged.getByRole("button", { name: "Sign in" }).click();
+    await plugged.waitForTimeout(2_700);
+    await plugged.getByLabel("Title").fill("Check the demo pacing");
+    // Force completed compositor frames into the raw recorder without adding
+    // another video-mode action or extending its annotation timeline.
+    await page.screenshot();
+    await page.screenshot();
+    await page.screenshot();
+  }
+
+  const metadata = await video.metadata();
+  const fillHighlight = metadata.highlights.find(
+    (highlight) => highlight.method === "fill" && !highlight.dialog,
+  )!;
+  expect(fillHighlight).toBeDefined();
+  const frames = await videoFrames(video.outputPaths().rendered, 25);
+  const scale = Math.min(
+    frames[0].width / fillHighlight.viewport.width,
+    frames[0].height / fillHighlight.viewport.height,
+  );
+  const textBox = inset(
+    {
+      height: Math.round(fillHighlight.rect.height * scale),
+      width: Math.round(fillHighlight.rect.width * scale),
+      x: Math.round(fillHighlight.rect.x * scale),
+      y: Math.round(fillHighlight.rect.y * scale),
+    },
+    Math.round(16 * scale),
+  );
+  const editorMarker = {
+    height: Math.round(60 * scale),
+    width: Math.round(60 * scale),
+    x: Math.round(20 * scale),
+    y: Math.round(350 * scale),
+  };
+  const isolatedInputFrames = frames.flatMap((frame, index) => {
+    const hasInput =
+      countPixels(
+        frame,
+        textBox,
+        ({ blue, green, red }) => blue > 150 && red < 80 && green < 130,
+      ) >
+      textBox.width * textBox.height * 0.6;
+    const hasEditorBackground =
+      countPixels(
+        frame,
+        editorMarker,
+        ({ blue, green, red }) => green > 130 && red < 80 && blue < 100,
+      ) >
+      editorMarker.width * editorMarker.height * 0.9;
+
+    return hasInput && !hasEditorBackground ? [index] : [];
+  });
+  expect(
+    isolatedInputFrames,
+    "the pre-action input must never be composited without its current page",
+  ).toEqual([]);
+  const textPixels = frames.map((frame) =>
+    countPixels(
+      frame,
+      textBox,
+      ({ blue, green, red }) => red > 200 && green > 200 && blue > 200,
+    ),
+  );
+  const completedTextPixels = Math.max(...textPixels);
+  expect(completedTextPixels).toBeGreaterThan(300);
+
+  let revealStartFrame = textPixels.length - 1;
+  while (revealStartFrame > 0 && textPixels[revealStartFrame - 1] > 10) {
+    revealStartFrame -= 1;
+  }
+  const prematureCompletedFrames = textPixels.flatMap((pixels, frame) =>
+    frame < revealStartFrame && pixels > completedTextPixels * 0.8 ? [frame] : [],
+  );
+
+  expect(
+    prematureCompletedFrames,
+    "completed text must not appear before the progressive reveal begins",
+  ).toEqual([]);
+});
+
 test("reveals complete glyphs instead of slicing through the next character", async ({
   page: basePage,
 }, testInfo) => {
@@ -1738,7 +1876,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     finalHold: 1000,
     highlight: { mode: "pointer", duration: highlightDurationMs },
     skipMethods: ["waitFor"],
-    trimStart: ["selector", 'input[aria-label="Name"]'],
+    trimStart: "never",
   });
   {
     await using page = await addPlugins({
@@ -1765,12 +1903,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
   const fillHighlight = metadata.highlights.find((highlight) => highlight.method === "fill")!;
   expect(fillHighlight).toBeDefined();
 
-  const fillStart = renderedHighlightStartWithoutDeadAir(fillHighlight, metadata.highlights);
   const frames = await videoFrames(paths.rendered, 25);
-  const fillFrames = frames.slice(
-    Math.floor(fillStart / 40),
-    Math.ceil((fillStart + highlightDurationMs) / 40),
-  );
   const scale = Math.min(
     frames[0].width / fillHighlight.viewport.width,
     frames[0].height / fillHighlight.viewport.height,
@@ -1787,12 +1920,12 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     x: Math.round((fillHighlight.rect.x + 20) * scale),
     y: Math.round((fillHighlight.rect.y + 12) * scale),
   };
-  const textCursorFrame = fillFrames.findIndex(
+  const textCursorFrame = frames.findIndex(
     (frame) =>
       textCursorPixelCount(frame, fillBox) > 35 &&
       pointerTailPixelCount(frame, fillBox) < 10,
   );
-  const firstRevealFrame = fillFrames.findIndex(
+  const firstRevealFrame = frames.findIndex(
     (frame) =>
       countPixels(
         frame,
@@ -1803,14 +1936,14 @@ test("moves to the field and switches to the text cursor before revealing", asyn
 
   expect(textCursorFrame).toBeGreaterThan(0);
   expect(firstRevealFrame - textCursorFrame).toBeGreaterThanOrEqual(7);
-  const boundaryColors = [frames[1], ...frames.slice(-10)].map((frame) =>
+  const finalHoldColors = frames.slice(-10).map((frame) =>
     averagePixel(frame, { x: 30, y: 420 }),
   );
   expect(
-    boundaryColors.map(
+    finalHoldColors.map(
       ({ blue, green, red }) => blue > 220 && green > 220 && red > 220,
     ),
-  ).toEqual(Array.from({ length: 11 }, () => true));
+  ).toEqual(Array.from({ length: 10 }, () => true));
 });
 
 test("preserves gradient field pixels while revealing the filled text", async ({

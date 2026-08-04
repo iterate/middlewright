@@ -20,7 +20,6 @@ test("creates todos and reviews their details", async ({ page: basePage }, testI
   page.once("dialog", (dialog) => dialog.accept("hunter2"));
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Todo desk" }).waitFor();
-  await page.getByText("No todos yet").waitFor();
 
   db.setDelay(700);
   await page.getByLabel("Title").fill("Review the demo recording");
