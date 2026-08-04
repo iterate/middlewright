@@ -338,7 +338,6 @@ const TEXT_CURSOR_POINTER_TAIL_MS = 200;
 const DIALOG_POST_ROLL_MS = 1000;
 
 type HighlightInput = {
-  durationMs: number;
   image: string;
   inputIndex: number;
   path: string;
@@ -2673,6 +2672,34 @@ const renderedVideoFilter = (options: {
       continue;
     }
 
+    // Screencasts can have no frame packet inside these short calibrated
+    // slices. Use the exact action screenshot as the whole boundary frame so
+    // a target crop can never be composited over FFmpeg's empty black canvas.
+    const boundaryFrame =
+      piece.preAction && preActionInput
+        ? {
+            input: preActionInput,
+            viewport: piece.preAction.viewport,
+          }
+        : index === pieces.length - 1 && piece.postAction?.fillReveal && postActionInput
+          ? {
+              input: postActionInput,
+              viewport: piece.postAction.viewport,
+            }
+          : undefined;
+    if (boundaryFrame) {
+      const scaledViewport = scaledViewportSize(boundaryFrame.viewport, options.video);
+      filters.push(
+        [
+          `[${boundaryFrame.input.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+          `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          `trim=start=0:end=${formatSeconds(renderedPieceDuration(piece))}`,
+          `setpts=PTS-STARTPTS[${label}]`,
+        ].join(","),
+      );
+      continue;
+    }
+
     if (piece.postAction?.fillReveal && postActionInput) {
       stabilizations.push({
         input: postActionInput,
@@ -2680,32 +2707,14 @@ const renderedVideoFilter = (options: {
         viewport: piece.postAction.viewport,
       });
     }
-    if (piece.preAction?.fillReveal && preActionInput) {
-      stabilizations.push({
-        input: preActionInput,
-        rect: piece.preAction.fillReveal.initialRect,
-        viewport: piece.preAction.viewport,
-      });
-    }
 
     if (stabilizations.length > 0) {
-      const preActionCover = piece.preAction?.fillReveal?.cover;
-      const coverRect = preActionCover
-        ? scaleVideoModeRect(
-            preActionCover.rect,
-            piece.preAction!.viewport,
-            options.video,
-          )
-        : undefined;
       const durationSeconds = formatSeconds(renderedPieceDuration(piece));
       const baseLabel = `stabilizebase${index}`;
       filters.push(
         [
           `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
           `setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`,
-          coverRect && preActionCover
-            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${preActionCover.color}:t=fill`
-            : undefined,
         ]
           .filter((operation): operation is string => Boolean(operation))
           .join(",") + `[${baseLabel}]`,
@@ -3486,10 +3495,7 @@ const renderVideo = async (options: {
         highlight.image,
         highlight.fillReveal?.image,
       ].filter((image): image is string => Boolean(image));
-      return images.map((image) => ({
-        durationMs: highlight.end - highlight.start,
-        image,
-      }));
+      return images.map((image) => ({ image }));
     })
     .map((input, index) => ({
       ...input,
@@ -3630,14 +3636,9 @@ const renderVideo = async (options: {
       "-y",
       "-i",
       options.inputPath,
-      ...highlightInputs.flatMap((input) => [
-        "-loop",
-        "1",
-        "-t",
-        formatSeconds(input.durationMs),
-        "-i",
-        input.path,
-      ]),
+      // Boundary slices can outlast the configured highlight hold. Every
+      // still-image consumer trims itself to its rendered piece.
+      ...highlightInputs.flatMap((input) => ["-loop", "1", "-i", input.path]),
       ...(dialogPostFrameInput
         ? ["-loop", "1", "-i", dialogPostFrameInput.path]
         : []),
