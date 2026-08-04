@@ -1,7 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
-test.use({ video: "on" });
+test.use({
+  video: "on",
+  viewport: { height: 720, width: 480 },
+});
 
 // A watchable demo of offscreen pans and the pull-request media fixture: a
 // deploy-log page with targets above and below the fold. Queries (waitFor)
@@ -15,7 +18,6 @@ test("deploy log demo: pans both directions while only clicks really scroll", as
   const video = videoMode();
   {
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 600 });
     await plugged.setContent(getDemoHtml());
 
     await test.step("waitFor below the fold: no real scroll, the video pans down and back", async () => {
