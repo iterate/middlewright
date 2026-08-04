@@ -388,6 +388,30 @@ Notes for plugin authors:
 - Inside middleware, use the `_original` methods (`locator.waitFor_original(...)` etc. — see the `LocatorWithOriginal` type) when you need to perform locator actions *without* re-entering the middleware chain.
 - `adjustError(error, infoLines, filterFile?)` appends colored info lines to an error message and optionally scrubs your plugin's frames from the stack trace.
 
+## Oxlint plugin
+
+Middlewright ships a zero-dependency Oxlint plugin at `middlewright/lint-plugin`. Enable it in `.oxlintrc.json`:
+
+```json
+{
+  "jsPlugins": ["middlewright/lint-plugin"],
+  "rules": {
+    "middlewright/prefer-locator-waits": "error"
+  }
+}
+```
+
+`middlewright/prefer-locator-waits` replaces redundant Playwright locator assertions with locator-native waits:
+
+```ts
+await expect(page.getByText("Ready")).toBeVisible();
+await expect(page.getByRole("status")).toContainText("Receipt ready");
+
+// oxlint --fix
+await page.getByText("Ready").waitFor();
+await page.getByRole("status").filter({ hasText: "Receipt ready" }).waitFor();
+```
+
 ## How it works
 
 `addPlugins` patches `Locator.prototype` (once per process), replacing `click`, `dblclick`, `fill`, `type`, `press`, `clear`, `blur`, `focus`, `hover` and `waitFor` with a dispatcher. The dispatcher looks up the plugin state stored on the action's page; if the page has plugins, it runs the middleware chain (each middleware calling `next()` until the original method runs); if not, it calls the original method directly.

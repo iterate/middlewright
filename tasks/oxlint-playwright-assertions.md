@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Not started. The stacked branch is based on the conflict-resolved head of PR #21. The public plugin, repository adoption, autofix pass, and verification remain.
+The public plugin is implemented and package-validated. Repository adoption, the intentionally red lint commit, autofix pass, final verification, and video remain.
 
 ## Goal
 
@@ -37,7 +37,7 @@ await locator.filter({ hasText: "Hello" }).waitFor();
 
 ## Commit plan
 
-- [ ] Add Oxlint, the exported plugin, public usage docs, and integration specs. *This is the implementation commit and must be green before repository adoption.*
+- [x] Add Oxlint, the exported plugin, public usage docs, and integration specs. *The dependency-free JS plugin is exported from `middlewright/lint-plugin`; four consumer-style Oxlint specs, typecheck, build, publint, and pack validation pass.*
 - [ ] Apply the plugin to this repository and push the intentionally failing lint configuration. *Keep this as a separate commit so its CI run shows every violation.*
 - [ ] Run `oxlint --fix` and commit only its automatic fixes. *Do not mix manual edits into the autofix commit.*
 - [ ] Fix any remaining or malformed cases manually in a final implementation commit. *Skip this commit if the automatic pass is complete and correct.*
@@ -47,3 +47,4 @@ await locator.filter({ hasText: "Hello" }).waitFor();
 ## Implementation log
 
 - 2026-08-04: PR #21 was merged with `origin/main` in commit `f90e921`; the resolved FFmpeg and todo-app specs pass 35/35 with typecheck green.
+- 2026-08-04: Built `middlewright/prefer-locator-waits` through four red/green slices: both requested fixes, no unsafe unawaited rewrite, and reporting without fixing unsupported matcher options.

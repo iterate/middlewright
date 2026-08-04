@@ -22,11 +22,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./lint-plugin": "./lint-plugin.js"
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "lint-plugin.js"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -41,6 +43,7 @@
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@types/node": "^24.10.9",
+    "oxlint": "^1.77.0",
     "pkg-pr-new": "^0.0.75",
     "publint": "^0.3.14",
     "typescript": "^5.9.3"
