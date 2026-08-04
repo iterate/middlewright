@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-The fix is complete. Removing the future `preAction` crop fixes all 15 hybrid frames, while scrolling, resizing, gradient, cursor, and text-reveal behavior remains intact. Full validation passes; PR #20 includes the exact repro before and after the fix, plus the todo app baseline.
+The fix is complete. Removing the future `preAction` crop fixes all 15 hybrid frames, while scrolling, resizing, gradient, cursor, and text-reveal behavior remains intact. Full validation passes; PR #20 includes the exact repro before and after the fix.
 
 ## Goal
 
@@ -40,3 +40,4 @@ Rendered video must never show a future input over an earlier page. Fill stabili
 - 2026-08-03: Final validation passes 103 tests with 3 provider-gated skips, typecheck, build, and publint. The todo contact sheet shows a monotonic login/create/review journey with no future-input overlay; its render is attached to PR #20.
 - 2026-08-03: Removed the redundant `No todos yet` highlight from the demo journey and refreshed the todo baseline as a labelled raw-versus-rendered comparison.
 - 2026-08-03: Added a side-by-side comparison of the exact frame-level repro at the pre-fix and post-fix commits; the buggy version visibly pastes the future blue input over the earlier red screen.
+- 2026-08-04: Removed the todo raw/rendered player from the PR body so it does not distract from the targeted before/after repro.
