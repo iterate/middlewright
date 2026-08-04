@@ -1470,6 +1470,109 @@ test("points at a visible result after waitFor without delaying the test", async
   expect(cursorPixelCount(clickHoldFrame, runBox)).toBeGreaterThan(40);
 });
 
+test("pans to an offscreen waitFor result without scrolling the live page", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    trimStart: "never",
+    finalHold: 0,
+    highlight: { mode: "outline", style: "3px solid yellow", duration: highlightDurationMs },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <div style="height: 2100px">
+        <div id="top" style="position: absolute; left: 0; top: 0; width: 800px; height: 80px; background: rgb(0, 190, 0)"></div>
+        <div id="target" style="visibility: hidden; position: absolute; left: 200px; top: 1500px; width: 240px; height: 120px; background: rgb(255, 0, 200)"></div>
+      </div>
+      <script>
+        setTimeout(() => {
+          document.querySelector('#target').style.visibility = 'visible';
+        }, 200);
+      </script>
+    `);
+
+    const waitStartedAt = performance.now();
+    await plugged.locator("#target").waitFor();
+    expect(performance.now() - waitStartedAt).toBeLessThan(600);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await plugged.waitForTimeout(400);
+    await page.waitForTimeout(200);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const waitHighlight = metadata.highlights.find(
+    (candidate) => candidate.method === "waitFor",
+  )!;
+  expect(waitHighlight).toMatchObject({ method: "waitFor" });
+  // The held rect is where the outline lands after the pan: inside the viewport.
+  expect(waitHighlight.rect.y + waitHighlight.rect.height).toBeLessThanOrEqual(600);
+
+  const isMagenta = (pixel: { blue: number; green: number; red: number }) =>
+    pixel.red > 180 && pixel.green < 80 && pixel.blue > 120;
+  const fullFrameRect = (frame: VideoFrame) => ({
+    height: frame.height,
+    width: frame.width,
+    x: 0,
+    y: 0,
+  });
+
+  // The live page never scrolled, so the raw recording never shows the target.
+  const rawFrames = await videoFrames(paths.raw, 25);
+  for (const frame of rawFrames) {
+    expect(countPixels(frame, fullFrameRect(frame), isMagenta)).toBe(0);
+  }
+
+  const renderedFrames = await videoFrames(paths.rendered, 25);
+  const magentaBoxes = renderedFrames.map((frame) =>
+    pixelBoundingBox(frame, fullFrameRect(frame), isMagenta),
+  );
+  const scale = Math.min(
+    renderedFrames[0].width / waitHighlight.viewport.width,
+    renderedFrames[0].height / waitHighlight.viewport.height,
+  );
+  const fullWidth = Math.round(240 * scale);
+  const heldIndexes = magentaBoxes.flatMap((box, index) =>
+    box && box.width >= fullWidth - 4 && box.height >= Math.round(120 * scale) - 4
+      ? [index]
+      : [],
+  );
+  expect(heldIndexes.length).toBeGreaterThan(3);
+
+  // The pan slides the element through several positions instead of jump-cutting.
+  const distinctBands = new Set(
+    magentaBoxes.flatMap((box) => (box ? [Math.round(box.y / 12)] : [])),
+  );
+  expect(distinctBands.size).toBeGreaterThanOrEqual(3);
+
+  // During the hold, the outline surrounds the fully visible element.
+  const outlinedFrame = heldIndexes
+    .map((index) => ({ box: magentaBoxes[index]!, frame: renderedFrames[index] }))
+    .find(({ box, frame }) =>
+      hasYellow(frame, {
+        height: box.height + 16,
+        width: box.width + 16,
+        x: box.x - 8,
+        y: box.y - 8,
+      }),
+    );
+  expect(outlinedFrame).toBeTruthy();
+
+  // After the hold, the video returns to the live un-scrolled page.
+  const lastFrame = renderedFrames[renderedFrames.length - 1];
+  expect(countPixels(lastFrame, fullFrameRect(lastFrame), isMagenta)).toBe(0);
+  expect(
+    hasGreen(lastFrame, { height: Math.round(60 * scale), width: Math.round(200 * scale), x: 0, y: 0 }),
+  ).toBe(true);
+});
+
 test("reveals filled text in post without changing the runtime fill", async ({
   page,
 }, testInfo) => {
