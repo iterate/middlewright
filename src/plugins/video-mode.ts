@@ -310,6 +310,17 @@ type VideoPiece = {
   addressBar?: VideoModeAddressBar;
   end: number;
   highlight?: VideoModeHighlight;
+  /**
+   * Set when this pan piece follows another pan piece directly: the camera
+   * enters from the previous pan's destination instead of the live scroll
+   * position, with a travel time matching that (possibly zero) distance.
+   */
+  panEntry?: { durationMs: number; from: { x: number; y: number } };
+  /**
+   * Set on a return pan directly followed by another pan piece: the camera
+   * hands over to the next pan instead of travelling back first.
+   */
+  panBackSuppressed?: boolean;
   postAction?: VideoModeHighlight;
   preAction?: VideoModeHighlight;
   speed: number;
@@ -2329,7 +2340,50 @@ const videoPieces = (options: {
     }
   }
 
-  return pieces.filter((piece) => piece.end > piece.start);
+  const kept = pieces.filter((piece) => piece.end > piece.start);
+
+  // Hand adjacent pans over to each other instead of yo-yoing: a return pan
+  // directly followed by another pan skips its travel back, and the next pan
+  // enters from the previous destination (a zero-length entry when both point
+  // at the same view, so the hold simply continues).
+  for (let index = 0; index < kept.length - 1; index += 1) {
+    const current = kept[index];
+    const next = kept[index + 1];
+    const currentPan = current.highlight?.pan;
+    const nextPan = next.highlight?.pan;
+
+    if (
+      !currentPan?.back ||
+      !nextPan ||
+      current.highlight === next.highlight ||
+      next.highlight!.start > current.end + options.frameDurationMs
+    ) {
+      continue;
+    }
+
+    const viewport = current.highlight!.viewport;
+    const nextImageCoversCurrentDestination =
+      currentPan.to.x >= nextPan.imageRect.x &&
+      currentPan.to.y >= nextPan.imageRect.y &&
+      currentPan.to.x + viewport.width <= nextPan.imageRect.x + nextPan.imageRect.width &&
+      currentPan.to.y + viewport.height <= nextPan.imageRect.y + nextPan.imageRect.height;
+
+    if (!nextImageCoversCurrentDestination) {
+      continue;
+    }
+
+    const distance = Math.hypot(
+      nextPan.to.x - currentPan.to.x,
+      nextPan.to.y - currentPan.to.y,
+    );
+    current.panBackSuppressed = true;
+    next.panEntry = {
+      durationMs: distance < 1 ? 0 : panDurationMs(currentPan.to, nextPan.to),
+      from: currentPan.to,
+    };
+  }
+
+  return kept;
 };
 
 const scaleVideoModeRect = (
@@ -2403,9 +2457,10 @@ const renderedPieceDuration = (piece: VideoPiece) => {
   const highlightDuration = piece.highlight.end - piece.highlight.start;
 
   if (piece.highlight.pan) {
-    return (
-      highlightDuration + piece.highlight.pan.durationMs * (piece.highlight.pan.back ? 2 : 1)
-    );
+    const entryMs = piece.panEntry ? piece.panEntry.durationMs : piece.highlight.pan.durationMs;
+    const backMs =
+      piece.highlight.pan.back && !piece.panBackSuppressed ? piece.highlight.pan.durationMs : 0;
+    return highlightDuration + entryMs + backMs;
   }
 
   if (piece.highlight.image || piece.highlight.dialog) {
@@ -2550,8 +2605,13 @@ const cursorTargets = (options: {
 
     // A panning piece only shows the element at its held rect between the pan
     // in and the pan back, so aim the cursor at that window.
-    const panLeadMs = highlight.pan ? highlight.pan.durationMs : 0;
-    const panTailMs = highlight.pan?.back ? highlight.pan.durationMs : 0;
+    const panLeadMs = highlight.pan
+      ? piece.panEntry
+        ? piece.panEntry.durationMs
+        : highlight.pan.durationMs
+      : 0;
+    const panTailMs =
+      highlight.pan?.back && !piece.panBackSuppressed ? highlight.pan.durationMs : 0;
     targets.push({
       highlight,
       method: highlight.method,
@@ -3125,23 +3185,27 @@ const renderedVideoFilter = (options: {
           ),
         ),
       });
-      const from = cropOffset(pan.from);
+      const from = cropOffset(piece.panEntry ? piece.panEntry.from : pan.from);
       const to = cropOffset(pan.to);
       const duration = renderedPieceDuration(piece);
-      const holdEndMs = pan.durationMs + (highlight.end - highlight.start);
-      const travel = (startMs: number, a: number, b: number) =>
-        `(${a}+(${b - a})*(1-cos(PI*clip((t-${formatSeconds(startMs)})/${formatSeconds(
-          pan.durationMs,
-        )},0,1)))/2)`;
+      const entryMs = piece.panEntry ? piece.panEntry.durationMs : pan.durationMs;
+      const panBack = pan.back && !piece.panBackSuppressed;
+      const holdEndMs = entryMs + (highlight.end - highlight.start);
+      const travel = (startMs: number, legMs: number, a: number, b: number) =>
+        legMs <= 0
+          ? `${b}`
+          : `(${a}+(${b - a})*(1-cos(PI*clip((t-${formatSeconds(startMs)})/${formatSeconds(
+              legMs,
+            )},0,1)))/2)`;
       const axisExpression = (a: number, b: number) => {
-        const expression = pan.back
-          ? `if(lt(t,${formatSeconds(holdEndMs)}),${travel(0, a, b)},${travel(holdEndMs, b, a)})`
-          : travel(0, a, b);
+        const expression = panBack
+          ? `if(lt(t,${formatSeconds(holdEndMs)}),${travel(0, entryMs, a, b)},${travel(holdEndMs, pan.durationMs, b, a)})`
+          : travel(0, entryMs, a, b);
         return `'${expression.replaceAll(",", "\\,")}'`;
       };
-      const highlightEnable = pan.back
-        ? `between(t\\,${formatSeconds(pan.durationMs)}\\,${formatSeconds(holdEndMs)})`
-        : `gte(t\\,${formatSeconds(pan.durationMs)})`;
+      const highlightEnable = panBack
+        ? `between(t\\,${formatSeconds(entryMs)}\\,${formatSeconds(holdEndMs)})`
+        : `gte(t\\,${formatSeconds(entryMs)})`;
       operations.push(
         `[${input.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
       );
