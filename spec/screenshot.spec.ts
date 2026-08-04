@@ -2,13 +2,13 @@ import { statSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import { addPlugins, screenshot } from "../src/index.ts";
 
-test("saves matching successful actions under readable locator names", async ({ page }, testInfo) => {
+test("saves matching successful actions under readable locator names", async ({ page: basePage }, testInfo) => {
   using _environment = environmentVariable("PLAYWRIGHT_SCREENSHOT", "getByText;getByRole");
-  await using plugged = await addPlugins({ page, testInfo, plugins: [screenshot()] });
-  await plugged.setContent(`<a href="#dashboard">dynamic-project-slug</a>`);
+  await using page = await addPlugins({ page: basePage, testInfo, plugins: [screenshot()] });
+  await page.setContent(`<a href="#dashboard">dynamic-project-slug</a>`);
 
-  await plugged.getByRole("link", { name: "dynamic-project-slug" }).waitFor();
-  await plugged.getByRole("link", { name: "dynamic-project-slug" }).waitFor();
+  await page.getByRole("link", { name: "dynamic-project-slug" }).waitFor();
+  await page.getByRole("link", { name: "dynamic-project-slug" }).waitFor();
 
   expect(testInfo.attachments).toMatchObject([
     {
@@ -32,10 +32,14 @@ test("saves matching successful actions under readable locator names", async ({ 
 
 test("does not overwrite a screenshot from another page in the same test", async ({
   context,
-  page,
+  page: basePage,
 }, testInfo) => {
   using _environment = environmentVariable("PLAYWRIGHT_SCREENSHOT", "getByRole");
-  await using firstPage = await addPlugins({ page, testInfo, plugins: [screenshot()] });
+  await using firstPage = await addPlugins({
+    page: basePage,
+    testInfo,
+    plugins: [screenshot()],
+  });
   await using secondPage = await addPlugins({
     page: await context.newPage(),
     testInfo,
@@ -53,12 +57,12 @@ test("does not overwrite a screenshot from another page in the same test", async
   ]);
 });
 
-test("does not capture a failed matching action", async ({ page }, testInfo) => {
+test("does not capture a failed matching action", async ({ page: basePage }, testInfo) => {
   using _environment = environmentVariable("PLAYWRIGHT_SCREENSHOT", "missing");
-  await using plugged = await addPlugins({ page, testInfo, plugins: [screenshot()] });
-  await plugged.setContent(`<main>Nothing matching the locator</main>`);
+  await using page = await addPlugins({ page: basePage, testInfo, plugins: [screenshot()] });
+  await page.setContent(`<main>Nothing matching the locator</main>`);
 
-  const error = await plugged
+  const error = await page
     .locator("#missing")
     .waitFor()
     .catch((caught: Error) => caught);
@@ -67,13 +71,13 @@ test("does not capture a failed matching action", async ({ page }, testInfo) => 
   expect(testInfo.attachments).toEqual([]);
 });
 
-test("is inert when PWDEBUG is set", async ({ page }, testInfo) => {
+test("is inert when PWDEBUG is set", async ({ page: basePage }, testInfo) => {
   using _environment = environmentVariable("PLAYWRIGHT_SCREENSHOT", ".*");
   using _debug = environmentVariable("PWDEBUG", "1");
-  await using plugged = await addPlugins({ page, testInfo, plugins: [screenshot()] });
-  await plugged.setContent(`<button>Save</button>`);
+  await using page = await addPlugins({ page: basePage, testInfo, plugins: [screenshot()] });
+  await page.setContent(`<button>Save</button>`);
 
-  await plugged.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
 
   expect(testInfo.attachments).toEqual([]);
 });

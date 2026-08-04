@@ -1,13 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { addPlugins, uiErrorReporter } from "../src/index.ts";
 
-test("appends visible error UI to failing action errors", async ({ page }, testInfo) => {
-  await using plugged = await addPlugins({
-    page,
+test("appends visible error UI to failing action errors", async ({ page: basePage }, testInfo) => {
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [uiErrorReporter()],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="save">save</button>
     <div id="toasts"></div>
     <script>
@@ -20,9 +20,9 @@ test("appends visible error UI to failing action errors", async ({ page }, testI
     </script>
   `);
 
-  await plugged.locator("#save").click();
+  await page.locator("#save").click();
   // The save "failed" (error toast appeared), so this element never shows up
-  const error = await plugged
+  const error = await page
     .locator("#saved-indicator")
     .waitFor()
     .catch((e: Error) => e);
@@ -32,15 +32,15 @@ test("appends visible error UI to failing action errors", async ({ page }, testI
   expect((error as Error).message).toMatch(/quota exceeded/);
 });
 
-test("leaves errors alone when no error UI is visible", async ({ page }, testInfo) => {
-  await using plugged = await addPlugins({
-    page,
+test("leaves errors alone when no error UI is visible", async ({ page: basePage }, testInfo) => {
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [uiErrorReporter()],
   });
-  await plugged.setContent(`<div>nothing to see here</div>`);
+  await page.setContent(`<div>nothing to see here</div>`);
 
-  const error = await plugged
+  const error = await page
     .locator("#missing")
     .waitFor()
     .catch((e: Error) => e);

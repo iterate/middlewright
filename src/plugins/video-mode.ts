@@ -43,6 +43,7 @@ const VIDEO_MODE_DIALOGS_FILE = "video-mode-dialogs.ass";
 // endpoint without depending on browser-frame delivery latency.
 const VIDEO_MODE_RECORDER_SETTLE_MS = 1100;
 const VIDEO_MODE_FILL_REVEAL_MAX_CHARACTERS = 100;
+const VIDEO_MODE_FILL_PRE_ACTION_FRAME_PADDING = 3;
 // Pointer assets adapted from Pictogrammers Material Design Icons:
 // cursor-default.svg, cursor-pointer.svg, and cursor-text.svg.
 // Source: https://github.com/Templarian/MaterialDesign
@@ -376,7 +377,6 @@ const PAN_MARGIN_PX = 24;
 const PAN_CAPTURE_SETTLE_MS = 150;
 
 type HighlightInput = {
-  durationMs: number;
   image: string;
   inputIndex: number;
   path: string;
@@ -2253,6 +2253,7 @@ const videoPieces = (options: {
   addressBars: VideoModeAddressBar[];
   frameDurationMs: number;
   highlights: VideoModeHighlight[];
+  preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
 }): VideoPiece[] => {
   const pieces: VideoPiece[] = [];
@@ -2299,13 +2300,38 @@ const videoPieces = (options: {
       const nextHighlight = highlights[highlightIndex + 1];
 
       if (highlight.start > cursor) {
-        pieces.push({
-          end: highlight.start,
-          postAction: previousHighlight?.fillReveal ? previousHighlight : undefined,
-          preAction: highlight.fillReveal ? highlight : undefined,
-          speed: segment.speed,
-          start: cursor,
-        });
+        const postAction = previousHighlight?.fillReveal ? previousHighlight : undefined;
+        const preAction = highlight.fillReveal ? highlight : undefined;
+        // `trim` chooses whole source frames. Round down so the boundary frame
+        // belongs to the stabilized piece instead of leaking from the raw gap.
+        const preActionStart = preAction
+          ? Math.max(
+              cursor,
+              Math.floor(
+                (highlight.start - options.preActionStabilizationMs) /
+                  options.frameDurationMs,
+              ) * options.frameDurationMs,
+            )
+          : highlight.start;
+
+        if (preActionStart > cursor) {
+          pieces.push({
+            end: preActionStart,
+            postAction,
+            speed: segment.speed,
+            start: cursor,
+          });
+        }
+
+        if (highlight.start > preActionStart) {
+          pieces.push({
+            end: highlight.start,
+            postAction,
+            preAction,
+            speed: segment.speed,
+            start: preActionStart,
+          });
+        }
       }
 
       const actionEnd =
@@ -2871,6 +2897,7 @@ const renderedVideoFilter = (options: {
   highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
+  preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
   textPointerInput?: PointerInput;
   video: { frameDurationMs: number; width: number; height: number };
@@ -2882,6 +2909,7 @@ const renderedVideoFilter = (options: {
     addressBars: options.addressBars,
     frameDurationMs: options.video.frameDurationMs,
     highlights: options.highlights,
+    preActionStabilizationMs: options.preActionStabilizationMs,
     segments: options.segments,
   });
   const renderedPieces = renderedVideoPieces(pieces);
@@ -2953,6 +2981,34 @@ const renderedVideoFilter = (options: {
       continue;
     }
 
+    // Screencasts can have no frame packet inside these short calibrated
+    // slices. Use the exact action screenshot as the whole boundary frame so
+    // a target crop can never be composited over FFmpeg's empty black canvas.
+    const boundaryFrame =
+      piece.preAction && preActionInput
+        ? {
+            input: preActionInput,
+            viewport: piece.preAction.viewport,
+          }
+        : index === pieces.length - 1 && piece.postAction?.fillReveal && postActionInput
+          ? {
+              input: postActionInput,
+              viewport: piece.postAction.viewport,
+            }
+          : undefined;
+    if (boundaryFrame) {
+      const scaledViewport = scaledViewportSize(boundaryFrame.viewport, options.video);
+      filters.push(
+        [
+          `[${boundaryFrame.input.inputIndex}:v]scale=w=${scaledViewport.width}:h=${scaledViewport.height}`,
+          `pad=w=${options.video.width}:h=${options.video.height}:x=0:y=0:color=gray`,
+          `trim=start=0:end=${formatSeconds(renderedPieceDuration(piece))}`,
+          `setpts=PTS-STARTPTS[${label}]`,
+        ].join(","),
+      );
+      continue;
+    }
+
     if (piece.postAction?.fillReveal && postActionInput) {
       stabilizations.push({
         input: postActionInput,
@@ -2960,32 +3016,14 @@ const renderedVideoFilter = (options: {
         viewport: piece.postAction.viewport,
       });
     }
-    if (piece.preAction?.fillReveal && preActionInput) {
-      stabilizations.push({
-        input: preActionInput,
-        rect: piece.preAction.fillReveal.initialRect,
-        viewport: piece.preAction.viewport,
-      });
-    }
 
     if (stabilizations.length > 0) {
-      const preActionCover = piece.preAction?.fillReveal?.cover;
-      const coverRect = preActionCover
-        ? scaleVideoModeRect(
-            preActionCover.rect,
-            piece.preAction!.viewport,
-            options.video,
-          )
-        : undefined;
       const durationSeconds = formatSeconds(renderedPieceDuration(piece));
       const baseLabel = `stabilizebase${index}`;
       filters.push(
         [
           `[0:v]trim=start=${formatSeconds(piece.start)}:end=${formatSeconds(piece.end)}`,
           `setpts=(PTS-STARTPTS)/${formatFilterNumber(piece.speed)}`,
-          coverRect && preActionCover
-            ? `drawbox=x=${coverRect.x}:y=${coverRect.y}:w=${coverRect.width}:h=${coverRect.height}:color=${preActionCover.color}:t=fill`
-            : undefined,
         ]
           .filter((operation): operation is string => Boolean(operation))
           .join(",") + `[${baseLabel}]`,
@@ -3806,6 +3844,7 @@ const renderVideo = async (options: {
   deadAir: VideoModeSpan[];
   sourceRange: VideoModeSourceRange;
   thresholdMs: number | undefined;
+  timelineOffsetMs: number;
 }) => {
   const info = await videoInfo(options.inputPath);
   const sourceRangeStart = options.sourceRange.start === undefined ? 0 : options.sourceRange.start;
@@ -3816,6 +3855,13 @@ const renderVideo = async (options: {
     0,
     Math.min(Math.round(sourceRangeEnd), info.durationMs),
   );
+  // Highlight times have already moved forward by `timelineOffsetMs`, while
+  // the live completed fill can enter the raw recorder at its original action
+  // time. Stabilize that measured gap plus enough source/concat frame padding
+  // to keep the last completed raw frame behind the synthetic reveal.
+  const preActionStabilizationMs =
+    Math.max(0, options.timelineOffsetMs) +
+    info.frameDurationMs * VIDEO_MODE_FILL_PRE_ACTION_FRAME_PADDING;
 
   if (rangeEnd <= rangeStart) {
     console.warn(
@@ -3830,13 +3876,7 @@ const renderVideo = async (options: {
         highlight.image,
         highlight.fillReveal?.image,
       ].filter((image): image is string => Boolean(image));
-      const panMs = highlight.pan
-        ? highlight.pan.durationMs * (highlight.pan.back ? 2 : 1)
-        : 0;
-      return images.map((image) => ({
-        durationMs: highlight.end - highlight.start + panMs,
-        image,
-      }));
+      return images.map((image) => ({ image }));
     })
     .map((input, index) => ({
       ...input,
@@ -3907,6 +3947,7 @@ const renderVideo = async (options: {
       addressBars: options.addressBars,
       frameDurationMs: info.frameDurationMs,
       highlights: options.highlights,
+      preActionStabilizationMs,
       segments,
     }),
   );
@@ -3957,6 +3998,7 @@ const renderVideo = async (options: {
     highlightMode: options.highlightMode,
     highlightInputs,
     highlights: options.highlights,
+    preActionStabilizationMs,
     segments,
     textPointerInput,
     video: info,
@@ -3975,14 +4017,9 @@ const renderVideo = async (options: {
       "-y",
       "-i",
       options.inputPath,
-      ...highlightInputs.flatMap((input) => [
-        "-loop",
-        "1",
-        "-t",
-        formatSeconds(input.durationMs),
-        "-i",
-        input.path,
-      ]),
+      // Boundary slices can outlast the configured highlight hold. Every
+      // still-image consumer trims itself to its rendered piece.
+      ...highlightInputs.flatMap((input) => ["-loop", "1", "-i", input.path]),
       ...(dialogPostFrameInput
         ? ["-loop", "1", "-i", dialogPostFrameInput.path]
         : []),
@@ -4587,6 +4624,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               outputPath: paths.rendered,
               sourceRange,
               thresholdMs: deadAirThreshold,
+              timelineOffsetMs: timelineOffset,
             });
 
             if (wroteRenderedVideo) {

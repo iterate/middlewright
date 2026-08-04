@@ -213,10 +213,10 @@ Recording begins at browser-context creation. By default, `videoMode` trims setu
 
 ```ts
 const video = videoMode(); // trimStart: "auto" is the default
-await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
+await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
 
 // The rendered video starts here, including this click's auto-wait.
-await plugged.getByRole("button", { name: "Create report" }).click();
+await page.getByRole("button", { name: "Create report" }).click();
 
 // start when a known "ready" element first becomes visible (falls back to
 // blank detection if it never appears):
