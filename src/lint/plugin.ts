@@ -11,11 +11,24 @@ const preferLocatorWaits = {
       text: "Use locator.filter({ hasText }).waitFor() instead of expect(locator).toContainText().",
     },
   },
-  create(context) {
+  create(context: any) {
     return {
-      CallExpression(node) {
+      CallExpression(node: any) {
         const match = expectLocatorMatcher(node);
         if (!match) return;
+
+        if (match.name === "toBeVisible") {
+          context.report({
+            node,
+            messageId: "visible",
+            fix:
+              node.arguments.length === 0
+                ? (fixer: any) =>
+                    fixer.replaceText(node, `${context.sourceCode.getText(match.locator)}.waitFor()`)
+                : undefined,
+          });
+          return;
+        }
 
         if (match.name === "toContainText") {
           const expectedText = node.arguments[0];
@@ -24,33 +37,20 @@ const preferLocatorWaits = {
             messageId: "text",
             fix:
               node.arguments.length === 1 && isFilterText(expectedText)
-                ? (fixer) =>
+                ? (fixer: any) =>
                     fixer.replaceText(
                       node,
                       `${context.sourceCode.getText(match.locator)}.filter({ hasText: ${context.sourceCode.getText(expectedText)} }).waitFor()`,
                     )
                 : undefined,
           });
-          return;
         }
-
-        if (match.name !== "toBeVisible") return;
-
-        context.report({
-          node,
-          messageId: "visible",
-          fix:
-            node.arguments.length === 0
-              ? (fixer) =>
-                  fixer.replaceText(node, `${context.sourceCode.getText(match.locator)}.waitFor()`)
-              : undefined,
-        });
       },
     };
   },
 };
 
-function expectLocatorMatcher(node) {
+function expectLocatorMatcher(node: any) {
   if (
     node.parent?.type !== "AwaitExpression" ||
     node.callee.type !== "MemberExpression" ||
@@ -70,7 +70,7 @@ function expectLocatorMatcher(node) {
   };
 }
 
-function isFilterText(node) {
+function isFilterText(node: any) {
   return (
     node?.type === "TemplateLiteral" ||
     (node?.type === "Literal" && (typeof node.value === "string" || "regex" in node))

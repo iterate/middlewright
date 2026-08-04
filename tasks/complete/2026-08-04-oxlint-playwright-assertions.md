@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Complete. The dependency-free plugin is published through `middlewright/lint-plugin`, the repository enforces it in CI, the requested red/autofix/manual commit checkpoints are preserved, all checks pass, and the current todo-app video is attached to the stacked pull request.
+Complete. The compiled, dependency-free plugin is published through `middlewright/lint-plugin`, the repository enforces its TypeScript source in CI through a local `tsx` loader, the requested red/autofix/manual commit checkpoints are preserved, all checks pass, and the current todo-app video is attached to the pull request.
 
 ## Goal
 
@@ -33,11 +33,11 @@ await locator.filter({ hasText: "Hello" }).waitFor();
 - `oxlint` is a development dependency of this repository; the published plugin adds no runtime dependency to Middlewright.
 - The rule is intentionally syntax-based: Playwright's matcher names identify the locator assertions without TypeScript type information.
 - Autofixes are limited to shapes that preserve behavior: argument-free `toBeVisible()` and string, template, or regular-expression `toContainText(expected)` calls.
-- Consumer configuration uses `jsPlugins: ["middlewright/lint-plugin"]` and enables `middlewright/prefer-locator-waits`.
+- Consumer configuration uses `jsPlugins: ["middlewright/lint-plugin"]`; this repository instead points at a local loader so the checked-in TypeScript source is what gets linted.
 
 ## Commit plan
 
-- [x] Add Oxlint, the exported plugin, public usage docs, and integration specs. *The dependency-free JS plugin is exported from `middlewright/lint-plugin`; five consumer-style Oxlint specs, typecheck, build, publint, and pack validation pass.*
+- [x] Add Oxlint, the exported plugin, public usage docs, and integration specs. *The dependency-free compiled plugin is exported from `middlewright/lint-plugin`; five consumer-style Oxlint specs, typecheck, build, publint, and pack validation pass.*
 - [x] Apply the plugin to this repository and push the intentionally failing lint configuration. *Oxlint runs in CI with warnings denied; the checkpoint exposes an unused import and an unassigned variable warning.*
 - [x] Run `oxlint --fix` and commit only its automatic fixes. *The safe pass changed nothing; `--fix-suggestions` removed the unused `join` import in isolated commit `8363ba4`.*
 - [x] Fix any remaining or malformed cases manually in a final implementation commit. *Directly evaluating the generated recovery function removes the dynamic-assignment false positive without changing the covered recovery behavior.*

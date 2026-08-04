@@ -23,12 +23,14 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./lint-plugin": "./lint-plugin.js"
+    "./lint-plugin": {
+      "types": "./dist/lint/plugin.d.ts",
+      "default": "./dist/lint/plugin.js"
+    }
   },
   "files": [
     "dist",
-    "src",
-    "lint-plugin.js"
+    "src"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -48,6 +50,7 @@
     "oxlint": "^1.77.0",
     "pkg-pr-new": "^0.0.75",
     "publint": "^0.3.14",
+    "tsx": "^4.23.5",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
