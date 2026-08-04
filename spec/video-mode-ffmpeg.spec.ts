@@ -1598,6 +1598,104 @@ test("pans to an offscreen waitFor result without scrolling the live page", asyn
   ).toBe(true);
 });
 
+test("pans to an offscreen click target and stays at the scrolled view", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    trimStart: "never",
+    finalHold: 0,
+    highlight: { mode: "outline", style: "3px solid yellow", duration: highlightDurationMs },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <div style="height: 2100px">
+        <div id="top" style="position: absolute; left: 0; top: 0; width: 800px; height: 80px; background: rgb(0, 190, 0)"></div>
+        <button id="target" style="position: absolute; left: 200px; top: 1500px; width: 240px; height: 120px; border: 0; padding: 0; background: rgb(255, 0, 200)" onclick="document.body.dataset.clicked = 'true'"></button>
+      </div>
+    `);
+
+    await plugged.locator("#target").click();
+    await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
+    // Playwright itself scrolls the live page for the click; the pan must
+    // land exactly where the live footage resumes.
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await plugged.waitForTimeout(400);
+    await page.waitForTimeout(200);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const clickHighlight = metadata.highlights.find(
+    (candidate) => candidate.method === "click",
+  )!;
+  expect(clickHighlight).toMatchObject({ method: "click" });
+  expect(clickHighlight.rect.y).toBeGreaterThanOrEqual(0);
+  expect(clickHighlight.rect.y + clickHighlight.rect.height).toBeLessThanOrEqual(600);
+
+  const isMagenta = (pixel: { blue: number; green: number; red: number }) =>
+    pixel.red > 180 && pixel.green < 80 && pixel.blue > 120;
+  const fullFrameRect = (frame: VideoFrame) => ({
+    height: frame.height,
+    width: frame.width,
+    x: 0,
+    y: 0,
+  });
+
+  const renderedFrames = await videoFrames(paths.rendered, 25);
+  const magentaBoxes = renderedFrames.map((frame) =>
+    pixelBoundingBox(frame, fullFrameRect(frame), isMagenta),
+  );
+  const scale = Math.min(
+    renderedFrames[0].width / clickHighlight.viewport.width,
+    renderedFrames[0].height / clickHighlight.viewport.height,
+  );
+
+  // The capture flash never reaches the rendered video.
+  for (const [index, frame] of renderedFrames.entries()) {
+    if (magentaBoxes[index]) {
+      expect(
+        hasGreen(frame, {
+          height: Math.round(60 * scale),
+          width: Math.round(200 * scale),
+          x: 0,
+          y: 0,
+        }),
+      ).toBe(false);
+    }
+  }
+
+  // The pan slides the element through several positions instead of jump-cutting.
+  const distinctBands = new Set(
+    magentaBoxes.flatMap((box) => (box ? [Math.round(box.y / 12)] : [])),
+  );
+  expect(distinctBands.size).toBeGreaterThanOrEqual(3);
+
+  // The video never returns to the top: it stays at the scrolled view, and the
+  // pan lands exactly where the live post-click footage resumes.
+  const lastBox = magentaBoxes[magentaBoxes.length - 1];
+  expect(lastBox).toBeTruthy();
+  const heldBox = magentaBoxes.findLast(
+    (box, index) =>
+      box &&
+      hasYellow(renderedFrames[index], {
+        height: box.height + 16,
+        width: box.width + 16,
+        x: box.x - 8,
+        y: box.y - 8,
+      }),
+  );
+  expect(heldBox).toBeTruthy();
+  expect(Math.abs(heldBox!.y - lastBox!.y)).toBeLessThanOrEqual(4);
+  expect(Math.abs(heldBox!.x - lastBox!.x)).toBeLessThanOrEqual(4);
+});
+
 test("reveals filled text in post without changing the runtime fill", async ({
   page,
 }, testInfo) => {
