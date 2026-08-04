@@ -82,6 +82,24 @@ test("reports matcher options that cannot be fixed safely", async () => {
   expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
 });
 
+test("reports text lists without replacing them with an invalid filter", async () => {
+  const source = `await expect(page.locator("li")).toContainText(["First", "Second"]);\n`;
+  await using fixture = await lintFixture(source);
+
+  const result = await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    "--fix",
+    fixture.sourcePath,
+  ]).catch((error: any) => error);
+
+  expect(result).toMatchObject({ code: 1 });
+  expect(`${result.stdout}\n${result.stderr}`).toContain("middlewright(prefer-locator-waits)");
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
 async function lintFixture(source: string) {
   const directory = await mkdtemp(join(tmpdir(), "middlewright-lint-"));
   const sourcePath = join(directory, "fixture.ts");

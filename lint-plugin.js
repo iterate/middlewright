@@ -23,7 +23,7 @@ const preferLocatorWaits = {
             node,
             messageId: "text",
             fix:
-              node.arguments.length === 1
+              node.arguments.length === 1 && isFilterText(expectedText)
                 ? (fixer) =>
                     fixer.replaceText(
                       node,
@@ -68,6 +68,13 @@ function expectLocatorMatcher(node) {
     locator: node.callee.object.arguments[0],
     name: node.callee.property.name,
   };
+}
+
+function isFilterText(node) {
+  return (
+    node?.type === "TemplateLiteral" ||
+    (node?.type === "Literal" && (typeof node.value === "string" || "regex" in node))
+  );
 }
 
 export default {
