@@ -3,10 +3,10 @@ import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 
 test("records goto destinations without changing the live page", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const destination = "https://app.middlewright.test/reports?period=this-week";
-  await page.route(destination, async (route) => {
+  await basePage.route(destination, async (route) => {
     await route.fulfill({
       body: `
         <main>Weekly reports</main>
@@ -27,18 +27,18 @@ test("records goto destinations without changing the live page", async ({
     finalHold: 0,
     highlight: false,
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
 
   const startedAt = performance.now();
-  await plugged.goto(destination);
+  await page.goto(destination);
 
   expect(performance.now() - startedAt).toBeLessThan(2000);
-  await expect(plugged.getByRole("main")).toHaveText("Weekly reports");
-  expect(await plugged.evaluate(() => (window as any).addressBarEnteredPage)).toBe(false);
+  await basePage.waitForSelector('main:has-text("Weekly reports")');
+  expect(await page.evaluate(() => (window as any).addressBarEnteredPage)).toBe(false);
   await expect(video.metadata()).resolves.toMatchObject({
     addressBars: [
       {
@@ -51,19 +51,19 @@ test("records goto destinations without changing the live page", async ({
 });
 
 test("keeps a successful fill when its reveal target disappears", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "outline", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <input aria-label="Search" />
     <output></output>
     <script>
@@ -75,9 +75,9 @@ test("keeps a successful fill when its reveal target disappears", async ({
     </script>
   `);
 
-  await plugged.getByLabel("Search").fill("middlewright");
+  await page.getByLabel("Search").fill("middlewright");
 
-  await expect(plugged.locator("output")).toHaveText("middlewright");
+  await basePage.waitForSelector('output:has-text("middlewright")');
   const metadata = await video.metadata();
   expect(metadata).toMatchObject({
     highlights: [
@@ -89,17 +89,17 @@ test("keeps a successful fill when its reveal target disappears", async ({
   expect(metadata.highlights[0]).not.toHaveProperty("fillReveal");
 });
 
-test("records Playwright test steps as captions by default", async ({ page }, testInfo) => {
+test("records Playwright test steps as captions by default", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
 
   await test.step("Create an account", async () => {
-    await plugged.setContent("<button>Create</button>");
-    await plugged.getByText("Create").click();
+    await page.setContent("<button>Create</button>");
+    await page.getByText("Create").click();
   });
 
   await expect(video.metadata()).resolves.toMatchObject({
@@ -116,22 +116,22 @@ test("records Playwright test steps as captions by default", async ({ page }, te
   );
 });
 
-test("records only explicit captions when configured", async ({ page }, testInfo) => {
+test("records only explicit captions when configured", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     captions: "explicit",
     finalHold: 0,
     highlight: false,
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
 
   const result = await test.step("Ignored Playwright step", async () => {
-    return await plugged.videoMode.caption("Create an account", async () => {
-      await plugged.setContent("<button>Create</button>");
-      await plugged.getByText("Create").click();
+    return await page.videoMode.caption("Create an account", async () => {
+      await page.setContent("<button>Create</button>");
+      await page.getByText("Create").click();
       return "created";
     });
   });
@@ -148,24 +148,24 @@ test("records only explicit captions when configured", async ({ page }, testInfo
   });
 });
 
-test("shows the innermost caption and resumes its parent", async ({ page }, testInfo) => {
+test("shows the innermost caption and resumes its parent", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     captions: "explicit",
     finalHold: 0,
     highlight: false,
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
 
-  await plugged.videoMode.caption("Create an account", async () => {
-    await plugged.waitForTimeout(10);
-    await plugged.videoMode.caption("Choose a plan", async () => {
-      await plugged.waitForTimeout(10);
+  await page.videoMode.caption("Create an account", async () => {
+    await page.waitForTimeout(10);
+    await page.videoMode.caption("Choose a plan", async () => {
+      await page.waitForTimeout(10);
     });
-    await plugged.waitForTimeout(10);
+    await page.waitForTimeout(10);
   });
 
   const captions = (await video.metadata()).captions;
@@ -179,14 +179,14 @@ test("shows the innermost caption and resumes its parent", async ({ page }, test
 });
 
 test("records highlight metadata without mutating element styles", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 300 } })],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="btn">press</button>
     <div id="result"></div>
     <script>
@@ -199,11 +199,11 @@ test("records highlight metadata without mutating element styles", async ({
   `);
 
   const start = Date.now();
-  await plugged.locator("#btn").click();
+  await page.locator("#btn").click();
 
   expect(Date.now() - start).toBeLessThan(1000);
-  await expect(plugged.locator("#result")).toContainText("(no style)");
-  await expect(plugged.videoMode.metadata()).resolves.toMatchObject({
+  await basePage.waitForSelector('#result:has-text("(no style)")');
+  await expect(page.videoMode.metadata()).resolves.toMatchObject({
     highlights: expect.arrayContaining([
       expect.objectContaining({
         color: "gold",
@@ -226,19 +226,19 @@ test("records highlight metadata without mutating element styles", async ({
 });
 
 test("records an accepted confirm as a synthetic dialog annotation", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="discard">Discard file</button>
     <output id="result"></output>
     <script>
@@ -249,11 +249,11 @@ test("records an accepted confirm as a synthetic dialog annotation", async ({
       });
     </script>
   `);
-  plugged.once("dialog", (dialog) => dialog.accept());
+  page.once("dialog", (dialog) => dialog.accept());
 
-  await plugged.locator("#discard").click();
+  await page.locator("#discard").click();
 
-  await expect(plugged.locator("#result")).toHaveText("discarded");
+  await basePage.waitForSelector('#result:has-text("discarded")');
   await expect(video.metadata()).resolves.toMatchObject({
     highlights: expect.arrayContaining([
       expect.objectContaining({
@@ -268,18 +268,18 @@ test("records an accepted confirm as a synthetic dialog annotation", async ({
   });
 });
 
-test("records prompt entry before the accepted prompt decision", async ({ page }, testInfo) => {
+test("records prompt entry before the accepted prompt decision", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="rename">Rename file</button>
     <output id="result"></output>
     <script>
@@ -288,11 +288,11 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
       });
     </script>
   `);
-  plugged.once("dialog", (dialog) => dialog.accept("release-notes.md"));
+  page.once("dialog", (dialog) => dialog.accept("release-notes.md"));
 
-  await plugged.locator("#rename").click();
+  await page.locator("#rename").click();
 
-  await expect(plugged.locator("#result")).toHaveText("release-notes.md");
+  await basePage.waitForSelector('#result:has-text("release-notes.md")');
   const metadata = await video.metadata();
   const dialogHighlights = metadata.highlights.filter(
     (candidate) => candidate.dialog?.type === "prompt",
@@ -325,19 +325,19 @@ test("records prompt entry before the accepted prompt decision", async ({ page }
 });
 
 test("records an explicit empty prompt response separately from its default", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="rename">Rename file</button>
     <output id="result"></output>
     <script>
@@ -348,11 +348,11 @@ test("records an explicit empty prompt response separately from its default", as
       });
     </script>
   `);
-  plugged.once("dialog", (dialog) => dialog.accept(""));
+  page.once("dialog", (dialog) => dialog.accept(""));
 
-  await plugged.locator("#rename").click();
+  await page.locator("#rename").click();
 
-  await expect(plugged.locator("#result")).toHaveText('""');
+  await basePage.waitForSelector('#result:has-text(\'""\')');
   const dialogHighlights = (await video.metadata()).highlights.filter(
     (candidate) => candidate.dialog?.type === "prompt",
   );
@@ -380,18 +380,18 @@ test("records an explicit empty prompt response separately from its default", as
   ]);
 });
 
-test("preserves Playwright's automatic dialog dismissal", async ({ page }, testInfo) => {
+test("preserves Playwright's automatic dialog dismissal", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="discard">Discard file</button>
     <output id="result"></output>
     <script>
@@ -401,9 +401,9 @@ test("preserves Playwright's automatic dialog dismissal", async ({ page }, testI
     </script>
   `);
 
-  await plugged.locator("#discard").click();
+  await page.locator("#discard").click();
 
-  await expect(plugged.locator("#result")).toHaveText("kept");
+  await basePage.waitForSelector('#result:has-text("kept")');
   await expect(video.metadata()).resolves.toMatchObject({
     highlights: expect.arrayContaining([
       expect.objectContaining({
@@ -418,18 +418,18 @@ test("preserves Playwright's automatic dialog dismissal", async ({ page }, testI
   });
 });
 
-test("records an alert acknowledgement", async ({ page }, testInfo) => {
+test("records an alert acknowledgement", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="publish">Publish</button>
     <output id="result"></output>
     <script>
@@ -439,11 +439,11 @@ test("records an alert acknowledgement", async ({ page }, testInfo) => {
       });
     </script>
   `);
-  plugged.once("dialog", (dialog) => dialog.accept());
+  page.once("dialog", (dialog) => dialog.accept());
 
-  await plugged.locator("#publish").click();
+  await page.locator("#publish").click();
 
-  await expect(plugged.locator("#result")).toHaveText("done");
+  await basePage.waitForSelector('#result:has-text("done")');
   await expect(video.metadata()).resolves.toMatchObject({
     highlights: expect.arrayContaining([
       expect.objectContaining({
@@ -458,18 +458,18 @@ test("records an alert acknowledgement", async ({ page }, testInfo) => {
   });
 });
 
-test("records automatic alert dismissal as an OK acknowledgement", async ({ page }, testInfo) => {
+test("records automatic alert dismissal as an OK acknowledgement", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="publish">Publish</button>
     <output id="result"></output>
     <script>
@@ -480,9 +480,9 @@ test("records automatic alert dismissal as an OK acknowledgement", async ({ page
     </script>
   `);
 
-  await plugged.locator("#publish").click();
+  await page.locator("#publish").click();
 
-  await expect(plugged.locator("#result")).toHaveText("acknowledged");
+  await basePage.waitForSelector('#result:has-text("acknowledged")');
   await expect(video.metadata()).resolves.toMatchObject({
     highlights: expect.arrayContaining([
       expect.objectContaining({
@@ -497,20 +497,20 @@ test("records automatic alert dismissal as an OK acknowledgement", async ({ page
 });
 
 test("records dialogs handled by a listener registered before video mode", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
-  page.once("dialog", (dialog) => dialog.accept());
+  basePage.once("dialog", (dialog) => dialog.accept());
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="continue">Continue</button>
     <output id="result"></output>
     <script>
@@ -520,9 +520,9 @@ test("records dialogs handled by a listener registered before video mode", async
     </script>
   `);
 
-  await plugged.locator("#continue").click();
+  await page.locator("#continue").click();
 
-  await expect(plugged.locator("#result")).toHaveText("yes");
+  await basePage.waitForSelector('#result:has-text("yes")');
   expect((await video.metadata()).highlights).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -532,18 +532,18 @@ test("records dialogs handled by a listener registered before video mode", async
   );
 });
 
-test("records back-to-back dialogs in order", async ({ page }, testInfo) => {
+test("records back-to-back dialogs in order", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: { mode: "pointer", duration: 300 },
     trimStart: "never",
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="discard">Discard file</button>
     <output id="result"></output>
     <script>
@@ -556,11 +556,11 @@ test("records back-to-back dialogs in order", async ({ page }, testInfo) => {
       });
     </script>
   `);
-  plugged.on("dialog", (dialog) => void dialog.accept());
+  page.on("dialog", (dialog) => void dialog.accept());
 
-  await plugged.locator("#discard").click();
+  await page.locator("#discard").click();
 
-  await expect(plugged.locator("#result")).toHaveText("discarded");
+  await basePage.waitForSelector('#result:has-text("discarded")');
   const dialogHighlights = (await video.metadata()).highlights.filter(
     (highlight) => highlight.dialog,
   );
@@ -571,18 +571,18 @@ test("records back-to-back dialogs in order", async ({ page }, testInfo) => {
   expect(dialogHighlights.map((highlight) => highlight.image)).toEqual([undefined, undefined]);
 });
 
-test("skipped methods are not highlighted", async ({ page }, testInfo) => {
+test("skipped methods are not highlighted", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 50,
     highlight: { mode: "pointer", duration: 5000 },
     skipMethods: ["click"],
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <script>
       setTimeout(() => {
         document.body.insertAdjacentHTML(
@@ -594,25 +594,25 @@ test("skipped methods are not highlighted", async ({ page }, testInfo) => {
   `);
 
   const start = Date.now();
-  await plugged.locator("#btn").click();
+  await page.locator("#btn").click();
   expect(Date.now() - start).toBeLessThan(2000);
   const metadata = await video.metadata();
   expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
   expect(metadata.highlights).toEqual([]);
 });
 
-test("waitFor highlighting can be skipped explicitly", async ({ page }, testInfo) => {
+test("waitFor highlighting can be skipped explicitly", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 50,
     highlight: { mode: "pointer", duration: 5000 },
     skipMethods: ["waitFor"],
   });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <div id="ready" hidden>ready</div>
     <script>
       setTimeout(() => {
@@ -622,7 +622,7 @@ test("waitFor highlighting can be skipped explicitly", async ({ page }, testInfo
   `);
 
   const start = Date.now();
-  await plugged.locator("#ready").waitFor();
+  await page.locator("#ready").waitFor();
 
   expect(Date.now() - start).toBeLessThan(2000);
   const metadata = await video.metadata();
@@ -630,14 +630,14 @@ test("waitFor highlighting can be skipped explicitly", async ({ page }, testInfo
   expect(metadata.highlights).toEqual([]);
 });
 
-test("marks pre-action waits for attachment as dead air", async ({ page }, testInfo) => {
+test("marks pre-action waits for attachment as dead air", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <div id="result"></div>
     <script>
       setTimeout(() => {
@@ -649,9 +649,9 @@ test("marks pre-action waits for attachment as dead air", async ({ page }, testI
     </script>
   `);
 
-  await plugged.locator("#late").click();
+  await page.locator("#late").click();
 
-  await expect(plugged.locator("#result")).toContainText("clicked");
+  await basePage.waitForSelector('#result:has-text("clicked")');
   const metadata = await video.metadata();
   expect(metadata.deadAir).toContainEqual(
     expect.objectContaining({
@@ -662,13 +662,13 @@ test("marks pre-action waits for attachment as dead air", async ({ page }, testI
   expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
-test("pre-action attached waits honor action timeout", async ({ page }, testInfo) => {
-  await using plugged = await addPlugins({
-    page,
+test("pre-action attached waits honor action timeout", async ({ page: basePage }, testInfo) => {
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } })],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <script>
       setTimeout(() => {
         document.body.insertAdjacentHTML('beforeend', '<button id="late">late</button>');
@@ -677,21 +677,21 @@ test("pre-action attached waits honor action timeout", async ({ page }, testInfo
   `);
 
   const start = Date.now();
-  const error = await plugged.locator("#late").click({ timeout: 100 }).catch((e: Error) => e);
+  const error = await page.locator("#late").click({ timeout: 100 }).catch((e: Error) => e);
 
   expect(Date.now() - start).toBeLessThan(250);
   expect(error).toBeInstanceOf(Error);
   expect(String(error)).toContain("Timeout 100ms exceeded");
 });
 
-test("marks explicit attached waitFor calls as dead air", async ({ page }, testInfo) => {
+test("marks explicit attached waitFor calls as dead air", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <script>
       setTimeout(() => {
         document.body.insertAdjacentHTML('beforeend', '<div id="late">attached</div>');
@@ -699,19 +699,19 @@ test("marks explicit attached waitFor calls as dead air", async ({ page }, testI
     </script>
   `);
 
-  await plugged.locator("#late").waitFor({ state: "attached" });
+  await page.locator("#late").waitFor({ state: "attached" });
 
   expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
-test("marks default visible waitFor calls as dead air", async ({ page }, testInfo) => {
+test("marks default visible waitFor calls as dead air", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50 });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <div id="ready" hidden>ready</div>
     <script>
       setTimeout(() => {
@@ -720,7 +720,7 @@ test("marks default visible waitFor calls as dead air", async ({ page }, testInf
     </script>
   `);
 
-  await plugged.locator("#ready").waitFor();
+  await page.locator("#ready").waitFor();
 
   const metadata = await video.metadata();
   expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
@@ -728,14 +728,14 @@ test("marks default visible waitFor calls as dead air", async ({ page }, testInf
   expect(metadata.highlights[0].end - metadata.highlights[0].start).toBe(1000);
 });
 
-test("marks explicit visible waitFor calls as dead air", async ({ page }, testInfo) => {
+test("marks explicit visible waitFor calls as dead air", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <script>
       setTimeout(() => {
         document.body.insertAdjacentHTML('beforeend', '<div id="late">visible</div>');
@@ -743,19 +743,19 @@ test("marks explicit visible waitFor calls as dead air", async ({ page }, testIn
     </script>
   `);
 
-  await plugged.locator("#late").waitFor({ state: "visible" });
+  await page.locator("#late").waitFor({ state: "visible" });
 
   expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
-test("does not highlight a waitFor result that is no longer visible", async ({ page }, testInfo) => {
+test("does not highlight a waitFor result that is no longer visible", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <div id="notice" style="width: 200px; height: 80px">Temporary notice</div>
     <script>
       setTimeout(() => {
@@ -764,21 +764,21 @@ test("does not highlight a waitFor result that is no longer visible", async ({ p
     </script>
   `);
 
-  await plugged.locator("#notice").waitFor({ state: "hidden" });
+  await page.locator("#notice").waitFor({ state: "hidden" });
 
   const metadata = await video.metadata();
   expect(metadata.deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
   expect(metadata.highlights).toEqual([]);
 });
 
-test("marks attached actionability waits as dead air", async ({ page }, testInfo) => {
+test("marks attached actionability waits as dead air", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <button id="ready" hidden>ready</button>
     <div id="result"></div>
     <script>
@@ -791,31 +791,31 @@ test("marks attached actionability waits as dead air", async ({ page }, testInfo
     </script>
   `);
 
-  await plugged.locator("#ready").click();
+  await page.locator("#ready").click();
 
-  await expect(plugged.locator("#result")).toContainText("clicked");
+  await basePage.waitForSelector('#result:has-text("clicked")');
   expect((await video.metadata()).deadAir.some((span) => span.end - span.start >= 100)).toBe(true);
 });
 
-test("sets video source range from current timestamps", async ({ page }, testInfo) => {
+test("sets video source range from current timestamps", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [video],
   });
 
-  const startBefore = plugged.videoMode.getVideoTimestamp();
-  plugged.videoMode.setStartTime();
-  const startAfter = plugged.videoMode.getVideoTimestamp();
-  await plugged.setContent(`<button>first locator action</button>`);
-  await plugged.locator("button").click();
-  await plugged.waitForTimeout(20);
-  const endBefore = plugged.videoMode.getVideoTimestamp();
-  plugged.videoMode.setEndTime();
-  const endAfter = plugged.videoMode.getVideoTimestamp();
+  const startBefore = page.videoMode.getVideoTimestamp();
+  page.videoMode.setStartTime();
+  const startAfter = page.videoMode.getVideoTimestamp();
+  await page.setContent(`<button>first locator action</button>`);
+  await page.locator("button").click();
+  await page.waitForTimeout(20);
+  const endBefore = page.videoMode.getVideoTimestamp();
+  page.videoMode.setEndTime();
+  const endAfter = page.videoMode.getVideoTimestamp();
 
-  const metadata = await plugged.videoMode.metadata();
+  const metadata = await page.videoMode.metadata();
   expect(metadata).toMatchObject({
     sourceRange: {
       end: expect.any(Number),
@@ -829,17 +829,17 @@ test("sets video source range from current timestamps", async ({ page }, testInf
 });
 
 test("deadAir runs actions without video highlighting and records metadata", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 5000 } });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
 
-    await plugged.setContent(`
+    await page.setContent(`
       <button id="btn">press</button>
       <div id="result"></div>
       <script>
@@ -850,24 +850,24 @@ test("deadAir runs actions without video highlighting and records metadata", asy
     `);
 
     const start = Date.now();
-    const videoTimestamp = plugged.videoMode.getVideoTimestamp();
-    await plugged.videoMode.deadAir(async () => {
+    const videoTimestamp = page.videoMode.getVideoTimestamp();
+    await page.videoMode.deadAir(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
-      await plugged.locator("#btn").click();
+      await page.locator("#btn").click();
     });
 
     expect(Date.now() - start).toBeLessThan(2000);
-    expect(plugged.videoMode.getVideoTimestamp()).toBeGreaterThanOrEqual(videoTimestamp);
-    await expect(plugged.locator("#result")).toContainText("(no style)");
-    await expect(plugged.videoMode.metadata()).resolves.toMatchObject({
+    expect(page.videoMode.getVideoTimestamp()).toBeGreaterThanOrEqual(videoTimestamp);
+    await basePage.waitForSelector('#result:has-text("(no style)")');
+    await expect(page.videoMode.metadata()).resolves.toMatchObject({
       outputs: {},
       schemaVersion: 1,
       timebase: "ms",
     });
-    expect((await plugged.videoMode.metadata()).deadAir).toContainEqual(
+    expect((await page.videoMode.metadata()).deadAir).toContainEqual(
       expect.objectContaining({ end: expect.any(Number), start: expect.any(Number) }),
     );
-    expect((await plugged.videoMode.metadata()).highlights).toEqual([]);
+    expect((await page.videoMode.metadata()).highlights).toEqual([]);
   }
 
   const paths = video.outputPaths();

@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Just started. Scope and conventions are captured; implementation and verification remain.
+Implementation is complete. Specs and snippets now use `basePage`/`page`, and UI checks use actions or waits instead of locator matchers. Type/build checks and focused specs pass; the full baseline run and PR video remain.
 
 ## Goal
 
@@ -28,9 +28,9 @@ Make the repository's tests and demo snippets follow the Playwright guidance alr
 ## Checklist
 
 - [x] Capture the intended naming and assertion conventions. *Documented above before implementation.*
-- [ ] Rename wrapped Playwright page variables and fixture aliases consistently.
-- [ ] Replace redundant expect-based UI assertions with locator-driven behavior.
-- [ ] Update user-facing snippets that teach the old `plugged` naming.
+- [x] Rename wrapped Playwright page variables and fixture aliases consistently. *Updated plugin-using specs to reserve `page` for the enhanced page and `basePage` for Playwright's fixture.*
+- [x] Replace redundant expect-based UI assertions with locator-driven behavior. *Removed action-repeating assertions and used observation waits for meaningful UI outcomes; metadata/value assertions remain.*
+- [x] Update user-facing snippets that teach the old `plugged` naming. *Updated the README, demo-video fixture snippet, and the test-writing anti-example.*
 - [ ] Run formatting, type checks, and relevant specs.
 - [ ] Render `spec/todo-app.spec.ts` and attach its video to the pull request.
 - [ ] Move this task to `tasks/complete/` and update the pull request when done.
@@ -38,3 +38,5 @@ Make the repository's tests and demo snippets follow the Playwright guidance alr
 ## Implementation log
 
 - 2026-08-04: Created from the user's edited `spec/video-mode-ffmpeg.spec.ts`; the root-worktree edit is reference only and will not be copied wholesale.
+- 2026-08-04: Typecheck and build pass. Changed non-ffmpeg specs pass after moving observation-only video checks to page-level waits so they do not become recorded middleware actions.
+- 2026-08-04: The ffmpeg spec run passed 31 tests with one expected skip; one pixel-timing test failed under eight-way concurrency and passed immediately in isolation.

@@ -83,24 +83,24 @@ const recordStartTimeline = async (options: {
   video: ReturnType<typeof videoMode>;
 }) => {
   {
-    await using plugged = await addPlugins({
+    await using page = await addPlugins({
       page: options.page,
       testInfo: options.testInfo,
       plugins: [options.video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(startTimelinePage);
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(startTimelinePage);
 
     if (options.manualStartAtMs !== false) {
-      await plugged.waitForTimeout(options.manualStartAtMs);
-      plugged.videoMode.setStartTime();
-      await plugged.waitForTimeout(FIRST_LOCATOR_AT_MS - options.manualStartAtMs);
+      await page.waitForTimeout(options.manualStartAtMs);
+      page.videoMode.setStartTime();
+      await page.waitForTimeout(FIRST_LOCATOR_AT_MS - options.manualStartAtMs);
     } else {
-      await plugged.waitForTimeout(FIRST_LOCATOR_AT_MS);
+      await page.waitForTimeout(FIRST_LOCATOR_AT_MS);
     }
 
-    await plugged.locator("#ready").waitFor();
-    await plugged.waitForTimeout(400);
+    await page.locator("#ready").waitFor();
+    await page.waitForTimeout(400);
   }
 
   return await options.video.metadata();

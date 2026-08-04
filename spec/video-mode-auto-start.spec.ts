@@ -36,40 +36,40 @@ const blankThenContent = (options: { blankMs: number; markerAtMs?: number }) => 
   </script>
 `;
 
-test("starts at the first locator invocation by default", async ({ page }, testInfo) => {
+test("starts at the first locator invocation by default", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setContent(`
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setContent(`
       <button id="ready" hidden>Ready</button>
       <button id="next">Next</button>
       <script>setTimeout(() => { document.querySelector('#ready').hidden = false; }, 600)</script>
     `);
 
-    const firstLocatorBefore = plugged.videoMode.getVideoTimestamp();
-    await plugged.locator("#ready").waitFor();
-    const firstLocatorAfter = plugged.videoMode.getVideoTimestamp();
+    const firstLocatorBefore = page.videoMode.getVideoTimestamp();
+    await page.locator("#ready").waitFor();
+    const firstLocatorAfter = page.videoMode.getVideoTimestamp();
     const firstStart = (await video.metadata()).sourceRange.start;
 
     expect(firstLocatorAfter - firstLocatorBefore).toBeGreaterThan(400);
     expect(firstStart).toBeGreaterThanOrEqual(firstLocatorBefore);
     expect(firstStart).toBeLessThan(firstLocatorBefore + 100);
 
-    await plugged.waitForTimeout(100);
-    await plugged.locator("#next").click();
+    await page.waitForTimeout(100);
+    await page.locator("#next").click();
     expect((await video.metadata()).sourceRange).toMatchObject({ start: firstStart });
   }
 });
 
-test("detects the blank startup lead-in when requested", async ({ page }, testInfo) => {
+test("detects the blank startup lead-in when requested", async ({ page: basePage }, testInfo) => {
   const blankMs = 2000;
   const video = videoMode({ finalHold: 0, highlight: false, trimStart: "detect-blank" });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(blankThenContent({ blankMs }));
-    await plugged.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
-    await plugged.waitForTimeout(800);
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(blankThenContent({ blankMs }));
+    await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForTimeout(800);
   }
 
   const metadata = await video.metadata();
@@ -93,20 +93,20 @@ test("detects the blank startup lead-in when requested", async ({ page }, testIn
   expect(renderedOpening.red).toBeGreaterThan(renderedOpening.blue + 60);
 });
 
-test("starts from a selector the moment it becomes visible", async ({ page }, testInfo) => {
+test("starts from a selector the moment it becomes visible", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
     highlight: false,
     trimStart: ["selector", "#marker"],
   });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 600 });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 800, height: 600 });
     // marker (the "ready" signal) shows well before the busy content paints, so a
     // selector-driven start must land earlier than the pixel detector would.
-    await plugged.setContent(blankThenContent({ blankMs: 2800, markerAtMs: 1000 }));
-    await plugged.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
-    await plugged.waitForTimeout(500);
+    await page.setContent(blankThenContent({ blankMs: 2800, markerAtMs: 1000 }));
+    await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForTimeout(500);
   }
 
   const metadata = await video.metadata();
@@ -122,16 +122,16 @@ test("starts from a selector the moment it becomes visible", async ({ page }, te
 });
 
 test('trimStart: "detect-blank" leaves a video that was never blank untrimmed', async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false, trimStart: "detect-blank" });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 600 });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 800, height: 600 });
     // content is on screen from the first frame — nothing to trim
-    await plugged.setContent(blankThenContent({ blankMs: 0 }));
-    await plugged.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
-    await plugged.waitForTimeout(800);
+    await page.setContent(blankThenContent({ blankMs: 0 }));
+    await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForTimeout(800);
   }
 
   const metadata = await video.metadata();
@@ -139,15 +139,15 @@ test('trimStart: "detect-blank" leaves a video that was never blank untrimmed', 
 });
 
 test('trimStart: "never" disables trimming even with a long blank lead-in', async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({ finalHold: 0, highlight: false, trimStart: "never" });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(blankThenContent({ blankMs: 2000 }));
-    await plugged.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
-    await plugged.waitForTimeout(500);
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(blankThenContent({ blankMs: 2000 }));
+    await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForTimeout(500);
   }
 
   const metadata = await video.metadata();
