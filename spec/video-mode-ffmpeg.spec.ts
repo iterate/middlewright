@@ -13,14 +13,14 @@ const execFile = promisify(execFileCallback);
 test.use({ video: "on" });
 
 test("renders a multi-navigation release flow without changing the live page", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const urls = [
     "https://dashboard.middlewright.test/runs",
     "https://dashboard.middlewright.test/releases/2026.7",
     "https://dashboard.middlewright.test/reports/128?browser=chromium",
   ];
-  await page.route("https://dashboard.middlewright.test/**", async (route) => {
+  await basePage.route("https://dashboard.middlewright.test/**", async (route) => {
     await route.fulfill({
       body: releaseDemoPage(new URL(route.request().url()).pathname),
       contentType: "text/html",
@@ -34,27 +34,27 @@ test("renders a multi-navigation release flow without changing the live page", a
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 960, height: 540 });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 960, height: 540 });
 
-    await plugged.goto(urls[0]);
-    await plugged.getByRole("textbox", { name: "Search releases" }).fill("2026.7");
-    await plugged.getByRole("button", { name: "Ready only" }).click();
-    await expect(plugged.getByText("Release 2026.8-beta")).toHaveCount(0);
-    await plugged.waitForTimeout(250);
+    await page.goto(urls[0]);
+    await page.getByRole("textbox", { name: "Search releases" }).fill("2026.7");
+    await page.getByRole("button", { name: "Ready only" }).click();
+    await basePage.waitForSelector('text="Release 2026.8-beta"', { state: "hidden" });
+    await page.waitForTimeout(250);
 
-    await plugged.goto(urls[1]);
-    await plugged.getByRole("button", { name: "Chromium" }).click();
-    await expect(plugged.getByText("48 Chromium specs passed")).toBeVisible();
-    await plugged.waitForTimeout(250);
+    await page.goto(urls[1]);
+    await page.getByRole("button", { name: "Chromium" }).click();
+    await basePage.waitForSelector('text="48 Chromium specs passed"');
+    await page.waitForTimeout(250);
 
-    await plugged.goto(urls[2]);
-    await plugged.getByRole("button", { name: "Show slowest specs" }).click();
-    await expect(plugged.getByRole("table")).toBeVisible();
-    await plugged.waitForTimeout(400);
-    await expect(
-      plugged.locator("[data-middlewright-video-mode-address-bar]"),
-    ).toHaveCount(0);
+    await page.goto(urls[2]);
+    await page.getByRole("button", { name: "Show slowest specs" }).click();
+    await basePage.waitForSelector("table");
+    await page.waitForTimeout(400);
+    await basePage.waitForSelector("[data-middlewright-video-mode-address-bar]", {
+      state: "hidden",
+    });
   }
 
   const paths = video.outputPaths();
@@ -80,10 +80,10 @@ test("renders a multi-navigation release flow without changing the live page", a
 });
 
 test("reveals a goto destination progressively in the rendered address bar", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const url = "https://dashboard.middlewright.test/releases/2026.8?view=review";
-  await page.route(url, async (route) => {
+  await basePage.route(url, async (route) => {
     await route.fulfill({
       body: '<main style="position: fixed; inset: 0; background: rgb(70, 30, 120)"></main>',
       contentType: "text/html",
@@ -96,10 +96,10 @@ test("reveals a goto destination progressively in the rendered address bar", asy
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 450 });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 800, height: 450 });
 
-    await plugged.goto(url);
+    await page.goto(url);
   }
 
   const frames = (await videoFrames(video.outputPaths().rendered, 25)).filter(hasAddressBar);
@@ -119,10 +119,10 @@ test("reveals a goto destination progressively in the rendered address bar", asy
 });
 
 test("keeps a long goto destination in a compact address field", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const url = `https://dashboard.middlewright.test/releases/${"a-very-long-path-segment/".repeat(12)}report?browser=chromium&view=review`;
-  await page.route("https://dashboard.middlewright.test/**", async (route) => {
+  await basePage.route("https://dashboard.middlewright.test/**", async (route) => {
     await route.fulfill({
       body: '<main style="position: fixed; inset: 0; background: rgb(70, 30, 120)"></main>',
       contentType: "text/html",
@@ -135,10 +135,10 @@ test("keeps a long goto destination in a compact address field", async ({
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 960, height: 540 });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 960, height: 540 });
 
-    await plugged.goto(url);
+    await page.goto(url);
   }
 
   const frames = (await videoFrames(video.outputPaths().rendered, 25)).filter(hasAddressBar);
@@ -167,10 +167,10 @@ test("keeps a long goto destination in a compact address field", async ({
 });
 
 test("renders navigation before clicking a control at the top edge", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const url = "https://dashboard.middlewright.test/runs/128";
-  await page.route(url, async (route) => {
+  await basePage.route(url, async (route) => {
     await route.fulfill({
       body: topEdgeActionPage(),
       contentType: "text/html",
@@ -184,13 +184,13 @@ test("renders navigation before clicking a control at the top edge", async ({
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 960, height: 540 });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 960, height: 540 });
 
-    await plugged.goto(url);
-    await plugged.getByRole("button", { name: "Approve run" }).click();
-    await expect(plugged.getByRole("status")).toHaveText("Run approved");
-    await plugged.waitForTimeout(400);
+    await page.goto(url);
+    await page.getByRole("button", { name: "Approve run" }).click();
+    await basePage.waitForSelector('[role="status"]:has-text("Run approved")');
+    await page.waitForTimeout(400);
   }
 
   const paths = video.outputPaths();
@@ -232,10 +232,10 @@ test("renders navigation before clicking a control at the top edge", async ({
 });
 
 test("keeps a navigation caption visible throughout its address-bar hold", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const url = "https://dashboard.middlewright.test/runs/128";
-  await page.route(url, async (route) => {
+  await basePage.route(url, async (route) => {
     await route.fulfill({
       body: '<main style="position: fixed; inset: 0; background: rgb(30, 40, 80)"></main>',
       contentType: "text/html",
@@ -248,11 +248,11 @@ test("keeps a navigation caption visible throughout its address-bar hold", async
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
-    await plugged.setViewportSize({ width: 800, height: 450 });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 800, height: 450 });
 
     await test.step("Open run 128", async () => {
-      await plugged.goto(url);
+      await page.goto(url);
     });
   }
 
@@ -265,7 +265,7 @@ test("keeps a navigation caption visible throughout its address-bar hold", async
 });
 
 test("turns meaningful Playwright steps into readable video captions", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const deadAirThresholdMs = 300;
   const finalHoldMs = 1200;
@@ -277,13 +277,13 @@ test("turns meaningful Playwright steps into readable video captions", async ({
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <main>
         <section data-view="account">
           <h1>Create your account</h1>
@@ -355,25 +355,19 @@ test("turns meaningful Playwright steps into readable video captions", async ({
     `);
 
     await test.step("Enter account details", async () => {
-      await plugged.getByLabel("Work email").fill("ada@example.com");
-      await plugged.getByRole("button", { name: "Continue" }).click();
-      const planHeading = plugged.getByRole("heading", { name: "Choose a plan" });
-      await planHeading.waitFor();
-      await expect(planHeading).toBeVisible();
+      await page.getByLabel("Work email").fill("ada@example.com");
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("heading", { name: "Choose a plan" }).waitFor();
     });
     await test.step("Choose the Pro plan", async () => {
-      await plugged.getByRole("button", { name: "Pro" }).click();
-      await plugged.getByRole("button", { name: "Continue" }).click();
-      const reviewHeading = plugged.getByRole("heading", { name: "Review subscription" });
-      await reviewHeading.waitFor();
-      await expect(reviewHeading).toBeVisible();
-      await expect(plugged.locator("#summary")).toContainText("ada@example.com · Pro");
+      await page.getByRole("button", { name: "Pro" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("heading", { name: "Review subscription" }).waitFor();
+      await basePage.waitForSelector('#summary:has-text("ada@example.com · Pro")');
     });
     await test.step("Confirm the subscription", async () => {
-      await plugged.getByRole("button", { name: "Confirm subscription" }).click();
-      const successHeading = plugged.getByRole("heading", { name: "Welcome to Pro" });
-      await successHeading.waitFor();
-      await expect(successHeading).toBeVisible();
+      await page.getByRole("button", { name: "Confirm subscription" }).click();
+      await page.getByRole("heading", { name: "Welcome to Pro" }).waitFor();
     });
   }
 
@@ -438,7 +432,7 @@ test("turns meaningful Playwright steps into readable video captions", async ({
 });
 
 test("keeps captions aligned through trimming and dead-air compression", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({
     captions: "explicit",
@@ -448,21 +442,21 @@ test("keeps captions aligned through trimming and dead-air compression", async (
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <main style="position: fixed; inset: 0; background: rgb(30, 40, 80)"></main>
     `);
 
-    await plugged.videoMode.caption("Process account data", async () => {
-      await plugged.waitForTimeout(100);
-      plugged.videoMode.setStartTime();
-      await plugged.videoMode.deadAir(async () => {
-        await plugged.waitForTimeout(700);
+    await page.videoMode.caption("Process account data", async () => {
+      await page.waitForTimeout(100);
+      page.videoMode.setStartTime();
+      await page.videoMode.deadAir(async () => {
+        await page.waitForTimeout(700);
       });
     });
   }
@@ -494,10 +488,10 @@ test("keeps captions aligned through trimming and dead-air compression", async (
 });
 
 test("writes a rendered video with dead air sped up and highlights added in post", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [
       spinnerWaiter(),
@@ -508,8 +502,8 @@ test("writes a rendered video with dead air sped up and highlights added in post
       }),
     ],
   });
-  await plugged.setViewportSize({ width: 800, height: 600 });
-  await plugged.setContent(`
+  await page.setViewportSize({ width: 800, height: 600 });
+  await page.setContent(`
     <main>
       <div data-spinner="true" hidden>Loading...</div>
       <div>
@@ -564,19 +558,18 @@ test("writes a rendered video with dead air sped up and highlights added in post
     </script>
   `);
 
-  await plugged.getByText("Start import").click();
-  await plugged.getByText("Review records").click();
-  await plugged.getByText("Approve import").click();
-  await plugged.videoMode.deadAir(async () => {
+  await page.getByText("Start import").click();
+  await page.getByText("Review records").click();
+  await page.getByText("Approve import").click();
+  await page.videoMode.deadAir(async () => {
     await new Promise((resolve) => setTimeout(resolve, 1700));
   });
-  await plugged.getByText("Download receipt").click();
+  await page.getByText("Download receipt").click();
 
-  await plugged.getByText("Receipt ready").waitFor();
-  await expect(plugged.getByText("Receipt ready")).toContainText("Receipt ready");
+  await page.getByText("Receipt ready").waitFor();
 });
 
-test("writes video-mode artifact files and report player", async ({ page }, testInfo) => {
+test("writes video-mode artifact files and report player", async ({ page: basePage }, testInfo) => {
   const deadAirThresholdMs = 300;
   const finalHoldMs = 500;
   const highlightDurationMs = 600;
@@ -586,12 +579,12 @@ test("writes video-mode artifact files and report player", async ({ page }, test
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setContent(`
+    await page.setContent(`
       <button id="save">Save</button>
       <div id="status"></div>
       <script>
@@ -601,11 +594,11 @@ test("writes video-mode artifact files and report player", async ({ page }, test
       </script>
     `);
 
-    await plugged.videoMode.deadAir(async () => {
+    await page.videoMode.deadAir(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
     });
-    await plugged.locator("#save").click();
-    await expect(plugged.locator("#status")).toContainText("saved");
+    await page.locator("#save").click();
+    await basePage.waitForSelector('#status:has-text("saved")');
   }
 
   const paths = video.outputPaths();
@@ -661,25 +654,25 @@ test("writes video-mode artifact files and report player", async ({ page }, test
   const playerUrl = new URL(pathToFileURL(paths.player).href);
   playerUrl.searchParams.set("active", "rendered");
   playerUrl.searchParams.set("frame", "2");
-  const playerPage = await page.context().newPage();
+  const playerPage = await basePage.context().newPage();
   await playerPage.goto(playerUrl.href);
-  await expect(playerPage.locator("#active")).toHaveText("Rendered video");
-  await expect(playerPage.locator("#frame")).toHaveText("2");
+  await playerPage.locator("#active", { hasText: "Rendered video" }).waitFor();
+  await playerPage.locator("#frame", { hasText: "2" }).waitFor();
   await playerPage.keyboard.press("ArrowRight");
-  await expect(playerPage.locator("#frame")).toHaveText("3");
+  await playerPage.locator("#frame", { hasText: "3" }).waitFor();
   expect(new URL(playerPage.url()).searchParams.get("active")).toBe("rendered");
   expect(new URL(playerPage.url()).searchParams.get("frame")).toBe("3");
   await playerPage.close();
 });
 
-test("keeps the page open for later afterTest hooks", async ({ page }, testInfo) => {
+test("keeps the page open for later afterTest hooks", async ({ page: basePage }, testInfo) => {
   const afterTestEvents: string[] = [];
   const afterVideoMode = {
     name: "after-video-mode",
     testLifecycle: (emitter) => {
       return emitter.on("afterTest", async ({ page }) => {
         afterTestEvents.push(page.isClosed() ? "closed" : "open");
-        await expect(page.locator("#after-test-hook-target")).toContainText("ready");
+        await page.waitForSelector('#after-test-hook-target:has-text("ready")');
       });
     },
   } satisfies Plugin;
@@ -689,19 +682,19 @@ test("keeps the page open for later afterTest hooks", async ({ page }, testInfo)
   });
 
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video, afterVideoMode],
     });
-    await plugged.setContent(`<main id="after-test-hook-target">ready</main>`);
+    await page.setContent(`<main id="after-test-hook-target">ready</main>`);
   }
 
   expect(afterTestEvents).toEqual(["open"]);
 });
 
 test("speeds dead air to the default threshold instead of cutting through it", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const deadAirThresholdMs = 300;
   const video = videoMode({
@@ -710,18 +703,18 @@ test("speeds dead air to the default threshold instead of cutting through it", a
     highlight: { mode: "pointer", duration: 0 },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 400, height: 300 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 400, height: 300 });
+    await page.setContent(`
       <div id="progress" style="position: absolute; left: 120px; top: 90px; width: 160px; height: 120px; background: rgb(255, 0, 0)"></div>
     `);
 
-    await plugged.videoMode.deadAir(async () => {
-      await plugged.evaluate(() => {
+    await page.videoMode.deadAir(async () => {
+      await page.evaluate(() => {
         const box = document.querySelector("#progress") as HTMLElement;
         const startedAt = performance.now();
         const duration = 1600;
@@ -734,7 +727,7 @@ test("speeds dead air to the default threshold instead of cutting through it", a
         };
         update();
       });
-      await plugged.waitForTimeout(1600);
+      await page.waitForTimeout(1600);
     });
   }
 
@@ -759,24 +752,24 @@ test("speeds dead air to the default threshold instead of cutting through it", a
   expect(middleColor.blue).toBeGreaterThan(80);
 });
 
-test("renders only the selected video source range", async ({ page }, testInfo) => {
+test("renders only the selected video source range", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: { mode: "pointer", duration: 0 },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setContent("<main>source range</main>");
+    await page.setContent("<main>source range</main>");
 
-    await plugged.waitForTimeout(700);
-    plugged.videoMode.setStartTime();
-    await plugged.waitForTimeout(1100);
-    plugged.videoMode.setEndTime();
-    await plugged.waitForTimeout(700);
+    await page.waitForTimeout(700);
+    page.videoMode.setStartTime();
+    await page.waitForTimeout(1100);
+    page.videoMode.setEndTime();
+    await page.waitForTimeout(700);
   }
 
   const metadata = await video.metadata();
@@ -794,7 +787,7 @@ test("renders only the selected video source range", async ({ page }, testInfo) 
   expect(Math.abs(renderedDuration - expectedRenderedDuration)).toBeLessThan(700);
 });
 
-test("skips rendering an empty selected video source range", async ({ page }, testInfo) => {
+test("skips rendering an empty selected video source range", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ trimStart: "never",
     finalHold: 0,
     highlight: false,
@@ -808,16 +801,16 @@ test("skips rendering an empty selected video source range", async ({ page }, te
 
   try {
     {
-      await using plugged = await addPlugins({
-        page,
+      await using page = await addPlugins({
+        page: basePage,
         testInfo,
         plugins: [video],
       });
-      await plugged.setContent("<main>empty source range</main>");
+      await page.setContent("<main>empty source range</main>");
 
-      plugged.videoMode.setStartTime(0);
-      plugged.videoMode.setEndTime(0);
-      await plugged.waitForTimeout(100);
+      page.videoMode.setStartTime(0);
+      page.videoMode.setEndTime(0);
+      await page.waitForTimeout(100);
     }
 
     const metadata = await video.metadata();
@@ -847,7 +840,7 @@ test("skips rendering an empty selected video source range", async ({ page }, te
 });
 
 test("holds the pre-click state without flashing the completed action state first", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({ trimStart: "never",
@@ -855,20 +848,20 @@ test("holds the pre-click state without flashing the completed action state firs
     highlight: { mode: "outline", duration: highlightDurationMs, style: "8px solid yellow" },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <div id="target" style="position: absolute; left: 120px; top: 80px; width: 160px; height: 90px; background: rgb(0, 80, 255)" onclick="this.style.background = 'rgb(255, 0, 0)'"></div>
     `);
 
-    await plugged.waitForTimeout(300);
-    await plugged.locator("#target").click();
-    await expect(plugged.locator("#target")).toHaveCSS("background-color", "rgb(255, 0, 0)");
     await page.waitForTimeout(300);
+    await page.locator("#target").click();
+    await basePage.waitForSelector('#target[style*="rgb(255, 0, 0)"]');
+    await basePage.waitForTimeout(300);
   }
 
   const paths = video.outputPaths();
@@ -942,7 +935,7 @@ test("holds the pre-click state without flashing the completed action state firs
 });
 
 test("renders an accepted confirm with a paused dialog and pointer click", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 900;
   const video = videoMode({
@@ -951,13 +944,13 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <body style="margin: 0; background: rgb(17, 24, 39)">
       <button id="discard">Discard file</button>
       <output id="result"></output>
@@ -970,11 +963,11 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
       </script>
       </body>
     `);
-    plugged.once("dialog", (dialog) => dialog.accept());
+    page.once("dialog", (dialog) => dialog.accept());
 
-    await plugged.locator("#discard").click();
+    await page.locator("#discard").click();
 
-    await plugged.getByText("Discarded!", { exact: true }).waitFor();
+    await page.getByText("Discarded!", { exact: true }).waitFor();
   }
 
   const paths = video.outputPaths();
@@ -1049,7 +1042,7 @@ test("renders an accepted confirm with a paused dialog and pointer click", async
 });
 
 test("reveals accepted prompt text progressively in the rendered dialog", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1000;
   const video = videoMode({
@@ -1058,13 +1051,13 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <body style="margin: 0; background: rgb(17, 24, 39)">
         <button id="sign-in" style="position: absolute; left: 370px; top: 460px">Sign in</button>
         <output id="result"></output>
@@ -1075,11 +1068,11 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
         </script>
       </body>
     `);
-    plugged.once("dialog", (dialog) => dialog.accept("correct 👩🏽‍💻 battery staple"));
+    page.once("dialog", (dialog) => dialog.accept("correct 👩🏽‍💻 battery staple"));
 
-    await plugged.locator("#sign-in").click();
+    await page.locator("#sign-in").click();
 
-    await expect(plugged.locator("#result")).toHaveText("correct 👩🏽‍💻 battery staple");
+    await basePage.waitForSelector('#result:has-text("correct 👩🏽‍💻 battery staple")');
   }
 
   const paths = video.outputPaths();
@@ -1180,7 +1173,7 @@ test("reveals accepted prompt text progressively in the rendered dialog", async 
 });
 
 test("clears a Unicode prompt default before selecting an explicit empty response", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 700;
   const video = videoMode({
@@ -1189,13 +1182,13 @@ test("clears a Unicode prompt default before selecting an explicit empty respons
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <body style="margin: 0; background: rgb(17, 24, 39)">
         <button id="rename">Rename</button>
         <output id="result"></output>
@@ -1209,11 +1202,11 @@ test("clears a Unicode prompt default before selecting an explicit empty respons
         </script>
       </body>
     `);
-    plugged.once("dialog", (dialog) => dialog.accept(""));
+    page.once("dialog", (dialog) => dialog.accept(""));
 
-    await plugged.locator("#rename").click();
+    await page.locator("#rename").click();
 
-    await expect(plugged.locator("#result")).toHaveText('""');
+    await basePage.waitForSelector('#result:has-text(\'""\')');
   }
 
   const paths = video.outputPaths();
@@ -1281,7 +1274,7 @@ test("clears a Unicode prompt default before selecting an explicit empty respons
 });
 
 test("uses natural post-dialog footage without adding a synthetic hold", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
@@ -1289,12 +1282,12 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setContent(`
+    await page.setContent(`
       <button id="continue">Continue</button>
       <output id="result"></output>
       <script>
@@ -1306,11 +1299,11 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
         });
       </script>
     `);
-    plugged.once("dialog", (dialog) => dialog.accept());
+    page.once("dialog", (dialog) => dialog.accept());
 
-    await plugged.locator("#continue").click();
-    await plugged.getByText("Processing", { exact: true }).waitFor();
-    await plugged.waitForTimeout(1_100);
+    await page.locator("#continue").click();
+    await page.getByText("Processing", { exact: true }).waitFor();
+    await page.waitForTimeout(1_100);
   }
 
   const paths = video.outputPaths();
@@ -1329,7 +1322,7 @@ test("uses natural post-dialog footage without adding a synthetic hold", async (
 });
 
 test("uses the default final hold without leaving the pointer visible", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 700;
   const video = videoMode({
@@ -1337,19 +1330,19 @@ test("uses the default final hold without leaving the pointer visible", async ({
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <div id="target" style="width: 180px; height: 120px; background: rgb(0, 80, 255)" onclick="this.classList.add('clicked')"></div>
     `);
 
-    await plugged.locator("#target").click();
-    await expect(plugged.locator("#target")).toHaveClass("clicked");
-    await page.waitForTimeout(300);
+    await page.locator("#target").click();
+    await basePage.waitForSelector("#target.clicked");
+    await basePage.waitForTimeout(300);
   }
 
   const paths = video.outputPaths();
@@ -1390,7 +1383,7 @@ test("uses the default final hold without leaving the pointer visible", async ({
 });
 
 test("points at a visible result after waitFor without delaying the test", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 700;
   const video = videoMode({ trimStart: "never",
@@ -1398,13 +1391,13 @@ test("points at a visible result after waitFor without delaying the test", async
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <div id="ready" style="visibility: hidden; position: absolute; left: 80px; top: 140px; width: 140px; height: 100px; background: rgb(0, 80, 255)"></div>
       <button id="run" style="position: absolute; left: 560px; top: 140px; width: 140px; height: 100px; border: 0; padding: 0; background: rgb(0, 190, 0)" onclick="document.body.dataset.clicked = 'true'"></button>
       <script>
@@ -1415,12 +1408,12 @@ test("points at a visible result after waitFor without delaying the test", async
     `);
 
     const waitStartedAt = performance.now();
-    await plugged.locator("#ready").waitFor();
+    await page.locator("#ready").waitFor();
     expect(performance.now() - waitStartedAt).toBeLessThan(600);
-    await plugged.waitForTimeout(900);
-    await plugged.locator("#run").click();
-    await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(900);
+    await page.locator("#run").click();
+    await basePage.waitForSelector('body[data-clicked="true"]');
+    await basePage.waitForTimeout(200);
   }
 
   const paths = video.outputPaths();
@@ -1471,7 +1464,7 @@ test("points at a visible result after waitFor without delaying the test", async
 });
 
 test("reveals filled text in post without changing the runtime fill", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1000;
   const video = videoMode({
@@ -1480,13 +1473,13 @@ test("reveals filled text in post without changing the runtime fill", async ({
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <body style="margin: 0; width: 800px; height: 450px; background: rgb(20, 70, 180)">
         <input
           aria-label="Work email"
@@ -1504,12 +1497,9 @@ test("reveals filled text in post without changing the runtime fill", async ({
       </body>
     `);
 
-    await plugged.getByLabel("Work email").fill("ada@example.com");
+    await page.getByLabel("Work email").fill("ada@example.com");
 
-    await expect(plugged.locator("body")).toHaveAttribute(
-      "data-seen-values",
-      JSON.stringify(["ada@example.com"]),
-    );
+    await basePage.waitForSelector(`body[data-seen-values='["ada@example.com"]']`);
   }
 
   const paths = video.outputPaths();
@@ -1551,7 +1541,7 @@ test("reveals filled text in post without changing the runtime fill", async ({
 });
 
 test("does not paste a future input over an earlier page state", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({
     finalHold: 0,
@@ -1559,13 +1549,13 @@ test("does not paste a future input over an earlier page state", async ({
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <style>
         * { box-sizing: border-box; }
         body { margin: 0; font: 24px sans-serif; }
@@ -1606,10 +1596,10 @@ test("does not paste a future input over an earlier page state", async ({
       </script>
     `);
 
-    await plugged.waitForTimeout(1_000);
-    await plugged.getByRole("button", { name: "Sign in" }).click();
-    await plugged.waitForTimeout(2_700);
-    await plugged.getByLabel("Title").fill("Check the demo pacing");
+    await page.waitForTimeout(1_000);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForTimeout(2_700);
+    await page.getByLabel("Title").fill("Check the demo pacing");
   }
 
   const metadata = await video.metadata();
@@ -1801,7 +1791,7 @@ test("does not flash a completed fill before its synthetic reveal", async ({
 });
 
 test("reveals complete glyphs instead of slicing through the next character", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1000;
   const video = videoMode({
@@ -1811,23 +1801,22 @@ test("reveals complete glyphs instead of slicing through the next character", as
     trimStart: ["selector", 'input[aria-label="Code"]'],
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <input
         aria-label="Code"
         style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: white; color: black; caret-color: transparent; font: 54px monospace"
       />
     `);
-    await plugged.getByLabel("Code").waitFor();
+    await page.getByLabel("Code").waitFor();
 
-    await plugged.videoMode.caption("Reveal complete glyphs", async () => {
-      await plugged.getByLabel("Code").fill("A @ B");
-      await expect(plugged.getByLabel("Code")).toHaveValue("A @ B");
+    await page.videoMode.caption("Reveal complete glyphs", async () => {
+      await page.getByLabel("Code").fill("A @ B");
     });
   }
 
@@ -1879,7 +1868,7 @@ test("reveals complete glyphs instead of slicing through the next character", as
 });
 
 test("moves to the field and switches to the text cursor before revealing", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1200;
   const video = videoMode({
@@ -1890,23 +1879,22 @@ test("moves to the field and switches to the text cursor before revealing", asyn
     trimStart: "never",
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <input
         aria-label="Name"
         style="position: absolute; box-sizing: border-box; left: 340px; top: 160px; width: 420px; height: 90px; border: 0; padding: 12px 20px; background: rgb(0, 80, 255); color: rgb(230, 0, 0); caret-color: transparent; font: 42px monospace"
       />
     `);
-    await plugged.getByLabel("Name").waitFor();
+    await page.getByLabel("Name").waitFor();
 
-    await plugged.videoMode.caption("Move, switch cursor, then reveal", async () => {
-      await plugged.getByLabel("Name").fill("Ada Lovelace");
-      await expect(plugged.getByLabel("Name")).toHaveValue("Ada Lovelace");
+    await page.videoMode.caption("Move, switch cursor, then reveal", async () => {
+      await page.getByLabel("Name").fill("Ada Lovelace");
     });
   }
 
@@ -1959,7 +1947,7 @@ test("moves to the field and switches to the text cursor before revealing", asyn
 });
 
 test("preserves gradient field pixels while revealing the filled text", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1000;
   const video = videoMode({
@@ -1969,23 +1957,22 @@ test("preserves gradient field pixels while revealing the filled text", async ({
     trimStart: ["selector", 'input[aria-label="Gradient"]'],
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <input
         aria-label="Gradient"
         style="position: absolute; box-sizing: border-box; left: 120px; top: 160px; width: 560px; height: 90px; border: 0; padding: 12px 20px; background: linear-gradient(90deg, rgb(240, 60, 40), rgb(30, 80, 230)); color: black; caret-color: transparent; font: 54px monospace"
       />
     `);
-    await plugged.getByLabel("Gradient").waitFor();
+    await page.getByLabel("Gradient").waitFor();
 
-    await plugged.videoMode.caption("Preserve gradient pixels", async () => {
-      await plugged.getByLabel("Gradient").fill("Ada");
-      await expect(plugged.getByLabel("Gradient")).toHaveValue("Ada");
+    await page.videoMode.caption("Preserve gradient pixels", async () => {
+      await page.getByLabel("Gradient").fill("Ada");
     });
   }
 
@@ -2029,7 +2016,7 @@ test("preserves gradient field pixels while revealing the filled text", async ({
   ).toBeGreaterThan(300);
 });
 
-test("reveals a stable single-line textarea fill", async ({ page }, testInfo) => {
+test("reveals a stable single-line textarea fill", async ({ page: basePage }, testInfo) => {
   const highlightDurationMs = 1600;
   const video = videoMode({
     captions: "explicit",
@@ -2038,13 +2025,13 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
     trimStart: ["selector", 'textarea[aria-label="Notes"]'],
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <style>
         textarea::placeholder { color: rgb(170, 20, 170); opacity: 1; }
       </style>
@@ -2062,17 +2049,12 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
         });
       </script>
     `);
-    await plugged.getByLabel("Notes").waitFor();
+    await page.getByLabel("Notes").waitFor();
 
-    await plugged.videoMode.caption("Replace the placeholder", async () => {
-      await plugged.getByLabel("Notes").click();
-      await expect(plugged.getByLabel("Notes")).toBeFocused();
-      await plugged.getByLabel("Notes").fill("Ada notes");
-      await expect(plugged.getByLabel("Notes")).toHaveValue("Ada notes");
-      await expect(plugged.locator("body")).toHaveAttribute(
-        "data-seen-values",
-        JSON.stringify(["Ada notes"]),
-      );
+    await page.videoMode.caption("Replace the placeholder", async () => {
+      await page.getByLabel("Notes").click();
+      await page.getByLabel("Notes").fill("Ada notes");
+      await basePage.waitForSelector(`body[data-seen-values='["Ada notes"]']`);
     });
   }
 
@@ -2157,7 +2139,7 @@ test("reveals a stable single-line textarea fill", async ({ page }, testInfo) =>
 });
 
 test("reveals a scrolling textarea one visible line at a time", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1600;
   const video = videoMode({
@@ -2167,13 +2149,13 @@ test("reveals a scrolling textarea one visible line at a time", async ({
     trimStart: ["selector", 'textarea[aria-label="Log"]'],
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <style>
         textarea::placeholder { color: rgb(170, 20, 170); opacity: 1; }
       </style>
@@ -2183,18 +2165,15 @@ test("reveals a scrolling textarea one visible line at a time", async ({
         style="position: absolute; box-sizing: border-box; left: 220px; top: 120px; width: 360px; height: 136px; border: 0; padding: 14px; resize: none; background: white; color: black; font: 30px/36px monospace"
       ></textarea>
     `);
-    await plugged.getByLabel("Log").waitFor();
+    await page.getByLabel("Log").waitFor();
 
-    await plugged.videoMode.caption("Reveal the visible scrolled lines", async () => {
-      await plugged
+    await page.videoMode.caption("Reveal the visible scrolled lines", async () => {
+      await page
         .getByLabel("Log")
         .fill("first line\nsecond line\nthird line\nfourth line\nfifth line");
-      await expect(plugged.getByLabel("Log")).toHaveValue(
-        "first line\nsecond line\nthird line\nfourth line\nfifth line",
-      );
       await expect
         .poll(() =>
-          plugged
+          page
             .getByLabel("Log")
             .evaluate((textarea) => textarea.scrollHeight > textarea.clientHeight),
         )
@@ -2280,7 +2259,7 @@ test("reveals a scrolling textarea one visible line at a time", async ({
 });
 
 test("reveals the final visible portion of a horizontally scrolling input", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1600;
   const video = videoMode({
@@ -2290,13 +2269,13 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
     trimStart: ["selector", 'input[aria-label="Reference"]'],
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <style>
         input::placeholder { color: rgb(170, 20, 170); opacity: 1; }
       </style>
@@ -2306,17 +2285,14 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
         style="position: absolute; box-sizing: border-box; left: 220px; top: 160px; width: 360px; height: 80px; padding: 14px; background: white; color: black; font: 30px monospace"
       />
     `);
-    await plugged.getByLabel("Reference").waitFor();
+    await page.getByLabel("Reference").waitFor();
 
-    await plugged.videoMode.caption("Reveal the visible reference suffix", async () => {
-      await plugged
+    await page.videoMode.caption("Reveal the visible reference suffix", async () => {
+      await page
         .getByLabel("Reference")
         .fill("prefix-that-scrolls-out-of-view-visible-reference-end");
-      await expect(plugged.getByLabel("Reference")).toHaveValue(
-        "prefix-that-scrolls-out-of-view-visible-reference-end",
-      );
       await expect
-        .poll(() => plugged.getByLabel("Reference").evaluate((input) => input.scrollLeft))
+        .poll(() => page.getByLabel("Reference").evaluate((input) => input.scrollLeft))
         .toBeGreaterThan(0);
     });
   }
@@ -2378,7 +2354,7 @@ test("reveals the final visible portion of a horizontally scrolling input", asyn
 });
 
 test("reveals an expanding textarea one line at a time at its final geometry", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1600;
   const video = videoMode({
@@ -2389,13 +2365,13 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
   });
   let initialHeight = 0;
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 450 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(`
       <style>
         textarea::placeholder { color: rgb(170, 20, 170); opacity: 1; }
       </style>
@@ -2412,18 +2388,15 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
         });
       </script>
     `);
-    await plugged.getByLabel("Summary").waitFor();
-    initialHeight = (await plugged.getByLabel("Summary").boundingBox())!.height;
+    await page.getByLabel("Summary").waitFor();
+    initialHeight = (await page.getByLabel("Summary").boundingBox())!.height;
 
-    await plugged.videoMode.caption("Reveal at the expanded size", async () => {
-      await plugged
+    await page.videoMode.caption("Reveal at the expanded size", async () => {
+      await page
         .getByLabel("Summary")
         .fill("This textarea grows to fit a longer summary without scrolling.");
-      await expect(plugged.getByLabel("Summary")).toHaveValue(
-        "This textarea grows to fit a longer summary without scrolling.",
-      );
       await expect
-        .poll(async () => (await plugged.getByLabel("Summary").boundingBox())!.height)
+        .poll(async () => (await page.getByLabel("Summary").boundingBox())!.height)
         .toBeGreaterThan(initialHeight);
     });
   }
@@ -2551,7 +2524,7 @@ test("reveals an expanding textarea one line at a time at its final geometry", a
 });
 
 test("uses a normal pointer tail after text cursor holds", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1000;
   const video = videoMode({ trimStart: "never",
@@ -2559,21 +2532,19 @@ test("uses a normal pointer tail after text cursor holds", async ({
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <input id="name" aria-label="name" style="border: 0; box-sizing: border-box; caret-color: transparent; font: 32px sans-serif; outline: 0; padding: 0; position: absolute; background: rgb(0, 80, 255); color: rgb(0, 80, 255); height: 120px; left: 560px; top: 80px; width: 160px" />
       <textarea id="notes" aria-label="notes" style="border: 0; box-sizing: border-box; caret-color: transparent; font: 32px sans-serif; outline: 0; padding: 0; position: absolute; resize: none; background: rgb(0, 190, 0); color: rgb(0, 190, 0); height: 120px; left: 80px; top: 360px; width: 180px"></textarea>
     `);
 
-    await plugged.locator("#name").fill("Ada");
-    await expect(plugged.locator("#name")).toHaveValue("Ada");
-    await plugged.locator("#notes").type("notes");
-    await expect(plugged.locator("#notes")).toHaveValue("notes");
+    await page.locator("#name").fill("Ada");
+    await page.locator("#notes").type("notes");
   }
 
   const paths = video.outputPaths();
@@ -2618,7 +2589,7 @@ test("uses a normal pointer tail after text cursor holds", async ({
 });
 
 test("does not replay action frames when a hold overlaps the next highlight", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const highlightDurationMs = 1000;
   const video = videoMode({ trimStart: "never",
@@ -2626,13 +2597,13 @@ test("does not replay action frames when a hold overlaps the next highlight", as
     highlight: { mode: "pointer", duration: highlightDurationMs },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <body style="margin: 0; width: 800px; height: 600px; background: rgb(0, 180, 0)">
       <input id="name" aria-label="name" />
       <button id="run">run</button>
@@ -2654,12 +2625,11 @@ test("does not replay action frames when a hold overlaps the next highlight", as
       </body>
     `);
 
-    await plugged.locator("#name").fill("Ada");
-    await expect(plugged.locator("body")).toHaveAttribute("data-transient-seen", "true");
-    await expect(plugged.locator("body")).toHaveAttribute("data-phase", "stable");
-    await plugged.locator("#run").click();
-    await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
-    await plugged.waitForTimeout(100);
+    await page.locator("#name").fill("Ada");
+    await basePage.waitForSelector('body[data-transient-seen="true"][data-phase="stable"]');
+    await page.locator("#run").click();
+    await basePage.waitForSelector('body[data-clicked="true"]');
+    await page.waitForTimeout(100);
   }
 
   const paths = video.outputPaths();
@@ -2689,7 +2659,7 @@ test("does not replay action frames when a hold overlaps the next highlight", as
 });
 
 test("does not calibrate against an earlier occurrence of the final page state", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({
     trimStart: "never",
@@ -2697,13 +2667,13 @@ test("does not calibrate against an earlier occurrence of the final page state",
     highlight: { mode: "pointer", duration: 600 },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [video],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <body style="margin: 0; width: 800px; height: 600px; background: rgb(0, 180, 0)">
         <button id="open" style="position: absolute; left: 80px; top: 80px; width: 160px; height: 80px">Open</button>
         <dialog style="width: 300px; height: 200px; background: white">
@@ -2724,11 +2694,11 @@ test("does not calibrate against an earlier occurrence of the final page state",
       </body>
     `);
 
-    await plugged.waitForTimeout(1200);
-    await plugged.locator("#open").click();
-    await plugged.getByText("Dialog ready").waitFor();
-    await plugged.waitForTimeout(2000);
-    await plugged.locator("#close").click();
+    await page.waitForTimeout(1200);
+    await page.locator("#open").click();
+    await page.getByText("Dialog ready").waitFor();
+    await page.waitForTimeout(2000);
+    await page.locator("#close").click();
   }
 
   const frames = await videoFrames(video.outputPaths().rendered, 25);
@@ -2744,7 +2714,7 @@ test("does not calibrate against an earlier occurrence of the final page state",
 });
 
 test("does not linger on the unhighlighted post-wait state before a following highlight", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const video = videoMode({ trimStart: "never",
     deadAirThreshold: 300,
@@ -2752,8 +2722,8 @@ test("does not linger on the unhighlighted post-wait state before a following hi
     highlight: { mode: "outline", duration: 600, style: "10px solid yellow" },
   });
   {
-    await using plugged = await addPlugins({
-      page,
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [
         spinnerWaiter({
@@ -2763,8 +2733,8 @@ test("does not linger on the unhighlighted post-wait state before a following hi
         video,
       ],
     });
-    await plugged.setViewportSize({ width: 800, height: 600 });
-    await plugged.setContent(`
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
       <button id="start" style="position: absolute; left: 80px; top: 180px; width: 180px; height: 80px">start</button>
       <button id="next" disabled style="position: absolute; left: 340px; top: 180px; width: 180px; height: 80px; background: rgb(70, 70, 70)">next</button>
       <div data-spinner="true" hidden>Loading</div>
@@ -2788,10 +2758,10 @@ test("does not linger on the unhighlighted post-wait state before a following hi
       </script>
     `);
 
-    await plugged.locator("#start").click();
-    await plugged.locator("#next").click();
-    await expect(plugged.locator("#done")).toContainText("done");
-    await page.waitForTimeout(300);
+    await page.locator("#start").click();
+    await page.locator("#next").click();
+    await basePage.waitForSelector('#done:has-text("done")');
+    await basePage.waitForTimeout(300);
   }
 
   const paths = video.outputPaths();

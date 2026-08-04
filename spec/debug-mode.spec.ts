@@ -10,12 +10,12 @@ import {
   videoMode,
 } from "../src/index.ts";
 
-test("action middleware plugins are inert when PWDEBUG is set", async ({ page }, testInfo) => {
+test("action middleware plugins are inert when PWDEBUG is set", async ({ page: basePage }, testInfo) => {
   using _debug = withPwdebug();
   let recoveryCalls = 0;
 
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [
       llmRecover({
@@ -29,7 +29,7 @@ test("action middleware plugins are inert when PWDEBUG is set", async ({ page },
       spinnerWaiter({ spinnerTimeout: 3001 }),
     ],
   });
-  await plugged.setContent(`
+  await page.setContent(`
     <div data-hydrated="false">hydrating forever</div>
     <div data-type="error">Exploded visibly</div>
     <button disabled>Submit approval</button>
@@ -37,7 +37,7 @@ test("action middleware plugins are inert when PWDEBUG is set", async ({ page },
   `);
 
   const start = Date.now();
-  const error = await plugged
+  const error = await page
     .getByRole("button", { name: "Submit approval" })
     .click({ timeout: 100 })
     .catch((e: Error) => e);
@@ -50,32 +50,32 @@ test("action middleware plugins are inert when PWDEBUG is set", async ({ page },
   expect(recoveryCalls).toBe(0);
 });
 
-test("videoMode controls are inert when PWDEBUG is set", async ({ page }, testInfo) => {
+test("videoMode controls are inert when PWDEBUG is set", async ({ page: basePage }, testInfo) => {
   using _debug = withPwdebug();
 
-  const plugged = await addPlugins({
-    page,
+  const page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } })],
   });
-  await plugged.setContent(`<button>press</button>`);
+  await page.setContent(`<button>press</button>`);
 
-  plugged.videoMode.setStartTime();
-  await plugged.videoMode.deadAir(async () => {
-    await plugged.waitForTimeout(20);
+  page.videoMode.setStartTime();
+  await page.videoMode.deadAir(async () => {
+    await page.waitForTimeout(20);
   });
-  await plugged.getByRole("button", { name: "press" }).click();
-  plugged.videoMode.setEndTime();
+  await page.getByRole("button", { name: "press" }).click();
+  page.videoMode.setEndTime();
 
-  await expect(plugged.videoMode.metadata()).resolves.toMatchObject({
+  await expect(page.videoMode.metadata()).resolves.toMatchObject({
     deadAir: [],
     highlights: [],
     outputs: {},
     sourceRange: {},
   });
-  expect(plugged.videoMode.getVideoTimestamp()).toBe(0);
+  expect(page.videoMode.getVideoTimestamp()).toBe(0);
 
-  await plugged[Symbol.asyncDispose]();
+  await page[Symbol.asyncDispose]();
   expect(existsSync(join(testInfo.outputDir, "video-mode.json"))).toBe(false);
 });
 

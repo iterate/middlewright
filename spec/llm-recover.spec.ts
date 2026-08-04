@@ -6,21 +6,21 @@ import { addPlugins, llmRecover, type LlmRecoverOptions } from "../src/index.ts"
 // --- Provider-injected tests (no API key needed, always run) ---
 
 test("recovers using the injected provider and records a soft failure", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
-  const { plugged, assertions } = await plug(page, testInfo, {
+  const { page, assertions } = await plug(basePage, testInfo, {
     requestRecoveryCode: async () => ({
       code: `async function recover({ page }) { await page.getByText("Create your profile").click(); }`,
       description: "stale copy: the button says 'Create your profile'",
     }),
   });
-  await plugged.setContent(getProfilePageHtml());
+  await page.setContent(getProfilePageHtml());
 
   // Stale copy — the button actually says "Create your profile"
-  await plugged.getByText("Create profile").click();
+  await page.getByText("Create profile").click();
 
   // The injected recovery code found and clicked the real button
-  await plugged.getByText("profile created").waitFor();
+  await page.getByText("profile created").waitFor();
 
   expect(assertions).toHaveLength(1);
   expect(assertions[0]).toMatch(/click failed and was recovered by LLM/);
@@ -28,10 +28,10 @@ test("recovers using the injected provider and records a soft failure", async ({
 });
 
 test("retries with attempt history, then rethrows with a summary", async ({
-  page,
+  page: basePage,
 }, testInfo) => {
   const historySizes: number[] = [];
-  const { plugged } = await plug(page, testInfo, {
+  const { page } = await plug(basePage, testInfo, {
     maxAttempts: 2,
     requestRecoveryCode: async (_context, attemptHistory) => {
       historySizes.push(attemptHistory.length);
@@ -41,9 +41,9 @@ test("retries with attempt history, then rethrows with a summary", async ({
       };
     },
   });
-  await plugged.setContent(`<div>no buttons here</div>`);
+  await page.setContent(`<div>no buttons here</div>`);
 
-  const error = await plugged
+  const error = await page
     .getByText("Create profile")
     .click()
     .catch((e: Error) => e);
@@ -62,16 +62,16 @@ test("retries with attempt history, then rethrows with a summary", async ({
   expect(artifact).toMatchObject({ recovered: false, method: "click" });
 });
 
-test("provider returning no code rethrows the original error", async ({ page }, testInfo) => {
-  const { plugged, assertions } = await plug(page, testInfo, {
+test("provider returning no code rethrows the original error", async ({ page: basePage }, testInfo) => {
+  const { page, assertions } = await plug(basePage, testInfo, {
     requestRecoveryCode: async () => ({
       code: null,
       description: "Not recoverable: this page has no profile creation at all.",
     }),
   });
-  await plugged.setContent(`<div>no buttons here</div>`);
+  await page.setContent(`<div>no buttons here</div>`);
 
-  const error = await plugged
+  const error = await page
     .getByText("Create profile")
     .click()
     .catch((e: Error) => e);
@@ -87,15 +87,15 @@ test("provider returning no code rethrows the original error", async ({ page }, 
 
 const apiTest = process.env.LLM_RECOVER ? test : test.skip;
 
-apiTest("recovers from out-of-date copy", async ({ page }, testInfo) => {
-  const { plugged, assertions } = await plug(page, testInfo, {});
-  await plugged.setContent(getProfilePageHtml());
+apiTest("recovers from out-of-date copy", async ({ page: basePage }, testInfo) => {
+  const { page, assertions } = await plug(basePage, testInfo, {});
+  await page.setContent(getProfilePageHtml());
 
   // The test uses stale copy — button actually says "Create your profile"
-  await plugged.getByText("Create profile").click();
+  await page.getByText("Create profile").click();
 
   // Recovery should have found and clicked the real button
-  await plugged.getByText("profile created").waitFor();
+  await page.getByText("profile created").waitFor();
 
   expect(assertions).toHaveLength(1);
   expect(assertions[0]).toMatch(/click failed and was recovered by LLM/);
@@ -106,9 +106,9 @@ apiTest("recovers from out-of-date copy", async ({ page }, testInfo) => {
   expect(flat).toMatch(/Recovery code: await page\.getBy\w+\(.*'Create your profile'.*\)\.click\(\)/);
 });
 
-apiTest("recovers from timing issue by waiting", async ({ page }, testInfo) => {
-  const { plugged, assertions } = await plug(page, testInfo, {});
-  await plugged.setContent(`
+apiTest("recovers from timing issue by waiting", async ({ page: basePage }, testInfo) => {
+  const { page, assertions } = await plug(basePage, testInfo, {});
+  await page.setContent(`
     <body>
       <h1>Welcome</h1>
       <p>You'll be able to create your profile in five seconds - hang tight</p>
@@ -127,18 +127,18 @@ apiTest("recovers from timing issue by waiting", async ({ page }, testInfo) => {
   `);
 
   // Button doesn't exist yet — appears after 5s
-  await plugged.getByText("Create profile").click();
+  await page.getByText("Create profile").click();
 
   // Recovery should have waited and then clicked
-  await plugged.getByText("profile created").waitFor();
+  await page.getByText("profile created").waitFor();
 
   expect(assertions).toHaveLength(1);
   expect(assertions[0]).toMatch(/click failed and was recovered by LLM/);
 });
 
-apiTest("rethrows with context for genuine error", async ({ page }, testInfo) => {
-  const { plugged } = await plug(page, testInfo, {});
-  await plugged.setContent(`
+apiTest("rethrows with context for genuine error", async ({ page: basePage }, testInfo) => {
+  const { page } = await plug(basePage, testInfo, {});
+  await page.setContent(`
     <body>
       <h1>Welcome</h1>
       <p>Creating profile not allowed for preview users</p>
@@ -146,14 +146,14 @@ apiTest("rethrows with context for genuine error", async ({ page }, testInfo) =>
   `);
 
   await expect(async () => {
-    await plugged.getByText("Create profile").click();
+    await page.getByText("Create profile").click();
   }).rejects.toThrow(/Not recoverable/i);
 });
 
 // --- helpers ---
 
 /** Add the llm-recover plugin with a shimmed `expect.soft` that records instead of failing. */
-async function plug(page: Page, testInfo: TestInfo, options: LlmRecoverOptions) {
+async function plug(basePage: Page, testInfo: TestInfo, options: LlmRecoverOptions) {
   const assertions: string[] = [];
   const mockExpectSoft = (actual: unknown, message: string) => {
     return {
@@ -167,12 +167,12 @@ async function plug(page: Page, testInfo: TestInfo, options: LlmRecoverOptions) 
     soft: mockExpectSoft,
   }) as typeof expect;
 
-  const plugged = await addPlugins({
-    page,
+  const page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [llmRecover({ expect: shimmedExpect, ...options })],
   });
-  return { plugged, assertions };
+  return { page, assertions };
 }
 
 function getProfilePageHtml() {

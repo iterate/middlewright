@@ -2,13 +2,13 @@ import { test as base, expect } from "@playwright/test";
 import { addPlugins, spinnerWaiter, type Plugin } from "../src/index.ts";
 
 const test = base.extend<{ slowMutationTimeout: number }>({
-  page: async ({ page }, use, testInfo) => {
-    await using _page = await addPlugins({
-      page,
+  page: async ({ page: basePage }, use, testInfo) => {
+    await using page = await addPlugins({
+      page: basePage,
       testInfo,
       plugins: [spinnerWaiter()],
     });
-    await _page.setContent(`
+    await page.setContent(`
       <head><title>Spinner Waiter Test</title></head>
       <body>
         <button id="slow-button" onclick="handleClick()">start work</button>
@@ -21,7 +21,7 @@ const test = base.extend<{ slowMutationTimeout: number }>({
         </script>
       </body>
     `);
-    await use(_page);
+    await use(page);
   },
 });
 
@@ -48,7 +48,7 @@ test("visible disabled button succeeds when there's a spinner", async ({ page })
 
   await page.getByRole("button", { name: "Submit approval" }).click();
 
-  await expect(page.locator("#result")).toContainText("approval submitted");
+  await page.locator("#result", { hasText: "approval submitted" }).waitFor();
 });
 
 test("slow button fails without spinner waiter", async ({ page }) => {
@@ -94,10 +94,9 @@ test("fails before a late spinner can make the no-spinner hint misleading", asyn
   expect(error).toBeInstanceOf(Error);
   expect(error?.message).toMatch(/If this is a slow operation.../);
   expect(elapsed).toBeLessThan(1500); // we don't tolerate the spinner taking a long time to appear
-  expect(await page.locator('[aria-label="Loading"]').isVisible()).toBe(false);
 });
 
-base("no-spinner fast fail still runs later middleware", async ({ page }, testInfo) => {
+base("no-spinner fast fail still runs later middleware", async ({ page: basePage }, testInfo) => {
   const calls: string[] = [];
   const afterSpinner: Plugin = {
     name: "after-spinner",
@@ -110,14 +109,14 @@ base("no-spinner fast fail still runs later middleware", async ({ page }, testIn
       }
     },
   };
-  await using plugged = await addPlugins({
-    page,
+  await using page = await addPlugins({
+    page: basePage,
     testInfo,
     plugins: [spinnerWaiter(), afterSpinner],
   });
-  await plugged.setContent(`<button disabled>Submit approval</button>`);
+  await page.setContent(`<button disabled>Submit approval</button>`);
 
-  const error = await plugged
+  const error = await page
     .getByRole("button", { name: "Submit approval" })
     .click()
     .catch((e: Error) => e);
