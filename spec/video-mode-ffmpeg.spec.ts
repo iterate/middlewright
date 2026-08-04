@@ -1696,6 +1696,80 @@ test("pans to an offscreen click target and stays at the scrolled view", async (
   expect(Math.abs(heldBox!.x - lastBox!.x)).toBeLessThanOrEqual(4);
 });
 
+test("holds through a wait-then-click on an offscreen element without panning back between", async ({
+  page,
+}, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    trimStart: "never",
+    finalHold: 0,
+    highlight: { mode: "outline", style: "3px solid yellow", duration: highlightDurationMs },
+  });
+  {
+    await using plugged = await addPlugins({
+      page,
+      testInfo,
+      plugins: [video],
+    });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <div style="height: 2100px">
+        <div id="top" style="position: absolute; left: 0; top: 0; width: 800px; height: 80px; background: rgb(0, 190, 0)"></div>
+        <button id="target" style="visibility: hidden; position: absolute; left: 200px; top: 1500px; width: 240px; height: 120px; border: 0; padding: 0; background: rgb(255, 0, 200)" onclick="document.body.dataset.clicked = 'true'"></button>
+      </div>
+      <script>
+        setTimeout(() => {
+          document.querySelector('#target').style.visibility = 'visible';
+        }, 200);
+      </script>
+    `);
+
+    await plugged.locator("#target").waitFor();
+    await plugged.locator("#target").click();
+    await expect(plugged.locator("body")).toHaveAttribute("data-clicked", "true");
+    await plugged.waitForTimeout(400);
+    await page.waitForTimeout(200);
+  }
+
+  const paths = video.outputPaths();
+  const isMagenta = (pixel: { blue: number; green: number; red: number }) =>
+    pixel.red > 180 && pixel.green < 80 && pixel.blue > 120;
+  const fullFrameRect = (frame: VideoFrame) => ({
+    height: frame.height,
+    width: frame.width,
+    x: 0,
+    y: 0,
+  });
+
+  const renderedFrames = await videoFrames(paths.rendered, 25);
+  const magentaBoxes = renderedFrames.map((frame) =>
+    pixelBoundingBox(frame, fullFrameRect(frame), isMagenta),
+  );
+  const firstMagenta = magentaBoxes.findIndex(Boolean);
+  expect(firstMagenta).toBeGreaterThan(0);
+
+  // The wait's pan does not yo-yo back to the top before the click's pan:
+  // once the awaited element is on camera it stays on camera to the end.
+  for (let index = firstMagenta; index < renderedFrames.length; index += 1) {
+    expect({ index, magenta: Boolean(magentaBoxes[index]) }).toEqual({ index, magenta: true });
+  }
+
+  // Both holds still outline the element.
+  const outlinedFrames = magentaBoxes.filter(
+    (box, index) =>
+      box &&
+      hasYellow(renderedFrames[index], {
+        height: box.height + 16,
+        width: box.width + 16,
+        x: box.x - 8,
+        y: box.y - 8,
+      }),
+  );
+  expect(outlinedFrames.length).toBeGreaterThanOrEqual(
+    Math.floor(((highlightDurationMs * 2) / 40) * 0.5),
+  );
+});
+
 test("reveals filled text in post without changing the runtime fill", async ({
   page,
 }, testInfo) => {
