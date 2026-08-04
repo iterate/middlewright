@@ -1748,6 +1748,34 @@ test("does not flash a completed fill before its synthetic reveal", async ({
     },
     Math.round(16 * scale),
   );
+  const editorMarker = {
+    height: Math.round(60 * scale),
+    width: Math.round(60 * scale),
+    x: Math.round(20 * scale),
+    y: Math.round(350 * scale),
+  };
+  const isolatedInputFrames = frames.flatMap((frame, index) => {
+    const hasInput =
+      countPixels(
+        frame,
+        textBox,
+        ({ blue, green, red }) => blue > 150 && red < 80 && green < 130,
+      ) >
+      textBox.width * textBox.height * 0.6;
+    const hasEditorBackground =
+      countPixels(
+        frame,
+        editorMarker,
+        ({ blue, green, red }) => green > 130 && red < 80 && blue < 100,
+      ) >
+      editorMarker.width * editorMarker.height * 0.9;
+
+    return hasInput && !hasEditorBackground ? [index] : [];
+  });
+  expect(
+    isolatedInputFrames,
+    "the pre-action input must never be composited without its current page",
+  ).toEqual([]);
   const textPixels = frames.map((frame) =>
     countPixels(
       frame,
