@@ -9,9 +9,9 @@ test.use({
 // A watchable demo of offscreen pans and the pull-request media fixture: a
 // deploy-log page with targets above and below the fold. Queries (waitFor)
 // never scroll the live page, so their pans return; interactions (click)
-// really scroll via Playwright actionability, so their pans stay. test.step
-// titles render as captions in the video. AGENTS.md asks for this render in
-// pull requests that change pan behavior, alongside the todo-app baseline.
+// really scroll via Playwright actionability, so their pans stay. AGENTS.md
+// asks for this render in pull requests that change pan behavior, alongside
+// the todo-app baseline.
 test("deploy log demo: pans both directions while only clicks really scroll", async ({
   page,
 }, testInfo) => {
@@ -20,27 +20,23 @@ test("deploy log demo: pans both directions while only clicks really scroll", as
     await using plugged = await addPlugins({ page, testInfo, plugins: [video] });
     await plugged.setContent(getDemoHtml());
 
-    await test.step("waitFor below the fold: no real scroll, the video pans down and back", async () => {
-      await plugged.getByText("Deploy succeeded").waitFor();
-      expect(await page.evaluate(() => window.scrollY)).toBe(0);
-    });
+    // A wait never scrolls the live page; its rendered pan hands the camera
+    // directly to the following click instead of returning first.
+    await plugged.getByText("Deploy succeeded").waitFor();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
 
-    await test.step("click below the fold: Playwright really scrolls down, the video pans and stays", async () => {
-      await plugged.getByRole("button", { name: "View summary" }).click();
-      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-      await plugged.getByText("All 34 checks passed").waitFor();
-    });
+    await plugged.getByRole("button", { name: "View summary" }).click();
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await plugged.getByText("All 34 checks passed").waitFor();
 
-    await test.step("waitFor above the fold: no real scroll, the video pans up and back", async () => {
-      await plugged.getByText("Deploy is live").waitFor();
-      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-    });
+    // Repeat in the other direction: wait without a real scroll, then let
+    // Playwright actionability scroll for the click.
+    await plugged.getByText("Deploy is live").waitFor();
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 
-    await test.step("click above the fold: Playwright really scrolls up, the video pans and stays", async () => {
-      await plugged.getByRole("button", { name: "Copy status link" }).click();
-      expect(await page.evaluate(() => window.scrollY)).toBe(0);
-      await plugged.getByText("Link copied").waitFor();
-    });
+    await plugged.getByRole("button", { name: "Copy status link" }).click();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await plugged.getByText("Link copied").waitFor();
 
     await page.waitForTimeout(300);
   }
