@@ -27,6 +27,22 @@ test("recovers using the injected provider and records a soft failure", async ({
   expect(assertions[0]).toMatch(/Create your profile/);
 });
 
+test("accepts recovery functions with a trailing semicolon", async ({
+  page: basePage,
+}, testInfo) => {
+  const { page } = await plug(basePage, testInfo, {
+    requestRecoveryCode: async () => ({
+      code: `async function recover({ page }) { await page.getByText("Create your profile").click(); };`,
+      description: "stale copy with statement-style generated code",
+    }),
+  });
+  await page.setContent(getProfilePageHtml());
+
+  await page.getByText("Create profile").click();
+
+  await page.getByText("profile created").waitFor();
+});
+
 test("retries with attempt history, then rethrows with a summary", async ({
   page: basePage,
 }, testInfo) => {

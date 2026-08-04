@@ -16,6 +16,7 @@ const preferLocatorWaits = {
       CallExpression(node: any) {
         const match = expectLocatorMatcher(node);
         if (!match) return;
+        const locator = locatorReceiver(context, match.locator);
 
         if (match.name === "toBeVisible") {
           context.report({
@@ -23,8 +24,7 @@ const preferLocatorWaits = {
             messageId: "visible",
             fix:
               node.arguments.length === 0
-                ? (fixer: any) =>
-                    fixer.replaceText(node, `${context.sourceCode.getText(match.locator)}.waitFor()`)
+                ? (fixer: any) => fixer.replaceText(node, `${locator}.waitFor()`)
                 : undefined,
           });
           return;
@@ -40,7 +40,7 @@ const preferLocatorWaits = {
                 ? (fixer: any) =>
                     fixer.replaceText(
                       node,
-                      `${context.sourceCode.getText(match.locator)}.filter({ hasText: ${context.sourceCode.getText(expectedText)} }).waitFor()`,
+                      `${locator}.filter({ hasText: ${context.sourceCode.getText(expectedText)} }).waitFor()`,
                     )
                 : undefined,
           });
@@ -68,6 +68,13 @@ function expectLocatorMatcher(node: any) {
     locator: node.callee.object.arguments[0],
     name: node.callee.property.name,
   };
+}
+
+function locatorReceiver(context: any, node: any) {
+  const text = context.sourceCode.getText(node);
+  return ["CallExpression", "ChainExpression", "Identifier", "MemberExpression"].includes(node.type)
+    ? text
+    : `(${text})`;
 }
 
 function isFilterText(node: any) {

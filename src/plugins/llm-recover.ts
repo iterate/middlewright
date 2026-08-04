@@ -123,9 +123,12 @@ export const llmRecover = (options: LlmRecoverOptions = {}): Plugin => {
 
           const start = Date.now();
           try {
+            // Assigned by the direct eval below.
+            // oxlint-disable-next-line no-unassigned-vars
+            let recoveryFn!: Function;
             // eval is intentional: the LLM writes a recovery function, we run it
-            // eslint-disable-next-line no-eval
-            const recoveryFn: Function = eval(`(${code.trim()})`);
+            // oxlint-disable-next-line no-eval
+            eval(`recoveryFn = ${code.trim()}`);
             if (typeof recoveryFn !== "function") {
               adjustError(
                 originalError,

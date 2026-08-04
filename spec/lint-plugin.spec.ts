@@ -45,6 +45,35 @@ test("fixes text locator assertions to filtered locator waits", async () => {
   );
 });
 
+test("parenthesizes locator expressions before appending methods", async () => {
+  await using fixture = await lintFixture(
+    [
+      `await expect(page.locator("button") as Locator).toBeVisible();`,
+      `await expect(ready ? first : second).toContainText("Ready");`,
+      `await expect(await locatorPromise).toBeVisible();`,
+      ``,
+    ].join("\n"),
+  );
+
+  await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    "--fix",
+    fixture.sourcePath,
+  ]);
+
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(
+    [
+      `await (page.locator("button") as Locator).waitFor();`,
+      `await (ready ? first : second).filter({ hasText: "Ready" }).waitFor();`,
+      `await (await locatorPromise).waitFor();`,
+      ``,
+    ].join("\n"),
+  );
+});
+
 test("leaves unawaited matcher calls alone", async () => {
   await using fixture = await lintFixture(
     `expect(page.getByText("Ready")).toBeVisible();\n`,
