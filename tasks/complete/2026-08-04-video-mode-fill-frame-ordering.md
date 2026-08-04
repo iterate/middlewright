@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 size: medium
 ---
 
@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation is green under focused stress. Separate frame regressions now protect both time-travel directions, and fill stabilization is limited to the measured recorder offset at a frame-aligned action boundary. Missing: full validation and refreshed PR media.
+Done. Separate frame regressions protect both time-travel directions and sparse boundary slices. Fill stabilization is limited to the measured recorder offset at a frame-aligned action boundary; full validation is green and PR #20 has focused before/after media.
 
 ## Goal
 
@@ -30,10 +30,10 @@ Rendered fills must remain chronological in both directions: never paste a futur
 - [x] Bind pre-action stabilization to measured boundary frames rather than an entire preceding gap. *The renderer splits the raw gap at the original action clock plus a three-frame guard, rounded down to the source-frame grid.*
 - [x] Keep the original earlier-page/future-input regression green under the boundary fix. *The earlier-page and pre-reveal-flash regressions pass together 20/20 under two workers.*
 - [x] Stress both ordering regressions and the scrolling, resizing, gradient, cursor, and text-reveal fill slice. *Both ordering cases pass 20/20 and all 11 focused fill cases pass.*
-- [ ] Run the complete suite, typecheck, build, and publint; regenerate and inspect the focused before/after PR media.
+- [x] Run the complete suite, typecheck, build, and publint; regenerate and inspect the focused before/after PR media. *Final code passes 104 tests with 3 provider skips, typecheck, build, and publint; every native boundary frame and the replacement PR comparison were inspected.*
 - [x] Stress-run the regression and full fill-rendering slice, then run the complete suite, typecheck, build, and publint. *Regression passes 10/10; cursor assertion passes 30/30; full suite passes 103 with 3 provider skips, plus typecheck, build, and publint.*
 - [x] Render and inspect the todo app; attach its current video to the PR body as the repository visual baseline requires. *Sampled the 21.96-second render every two seconds and attached it as a native player in PR #20.*
-- [ ] Return this task to `tasks/complete/` when both ordering bugs and PR handoff are complete.
+- [x] Return this task to `tasks/complete/` when both ordering bugs and PR handoff are complete. *PR #20 is broadened to both ordering directions, has one focused replacement player, and its Bugbot thread is answered and resolved.*
 
 ## Implementation log
 
@@ -51,3 +51,4 @@ Rendered fills must remain chronological in both directions: never paste a futur
 - 2026-08-04: Stress found one frame left on the wrong side of an unaligned FFmpeg trim boundary. Rounding the source cut down to its native frame grid made both chronological-order regressions pass 20/20; the 11-case fill slice also passes.
 - 2026-08-04: Native-frame review caught sparse screencast slices rendering an isolated target crop over black. The regression now requires every visible input to retain the editor page; it found 16 bad frames before the fix.
 - 2026-08-04: Boundary slices now use their exact full-page action screenshot, including the final post-fill tail, while ordinary raw gaps keep crop-only stabilization so outside-page changes remain live. Both ordering cases pass another 20/20 and the 11-case fill slice remains green.
+- 2026-08-04: Final validation passes 104 tests with 3 provider-gated skips, typecheck, build, and publint. PR #20 now has a single refreshed before/after player: the left exposes the future-field overlay, while the right stays chronological through the empty hold and reveal.
