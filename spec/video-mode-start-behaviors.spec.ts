@@ -3,12 +3,12 @@ import { addPlugins, videoMode } from "../src/index.ts";
 
 test.use({ video: "on" });
 
-test("default starts at the first locator invocation", async ({ page }, testInfo) => {
+test("default starts at the first locator invocation", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 700, highlight: false });
 
   const metadata = await recordStartTimeline({
     manualStartAtMs: false,
-    page,
+    basePage,
     testInfo,
     video,
   });
@@ -17,12 +17,12 @@ test("default starts at the first locator invocation", async ({ page }, testInfo
   expect(metadata.sourceRange.start).toBeLessThan(2200);
 });
 
-test("manual start time overrides the default", async ({ page }, testInfo) => {
+test("manual start time overrides the default", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 700, highlight: false });
 
   const metadata = await recordStartTimeline({
     manualStartAtMs: 1400,
-    page,
+    basePage,
     testInfo,
     video,
   });
@@ -31,7 +31,7 @@ test("manual start time overrides the default", async ({ page }, testInfo) => {
   expect(metadata.sourceRange.start).toBeLessThan(1700);
 });
 
-test("selector start begins when its marker becomes visible", async ({ page }, testInfo) => {
+test("selector start begins when its marker becomes visible", async ({ page: basePage }, testInfo) => {
   const video = videoMode({
     finalHold: 700,
     highlight: false,
@@ -40,7 +40,7 @@ test("selector start begins when its marker becomes visible", async ({ page }, t
 
   const metadata = await recordStartTimeline({
     manualStartAtMs: false,
-    page,
+    basePage,
     testInfo,
     video,
   });
@@ -49,12 +49,12 @@ test("selector start begins when its marker becomes visible", async ({ page }, t
   expect(metadata.sourceRange.start).toBeLessThan(1900);
 });
 
-test("blank detection begins when the loading shell paints", async ({ page }, testInfo) => {
+test("blank detection begins when the loading shell paints", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 700, highlight: false, trimStart: "detect-blank" });
 
   const metadata = await recordStartTimeline({
     manualStartAtMs: false,
-    page,
+    basePage,
     testInfo,
     video,
   });
@@ -63,12 +63,12 @@ test("blank detection begins when the loading shell paints", async ({ page }, te
   expect(metadata.sourceRange.start).toBeLessThan(1800);
 });
 
-test('trimStart: "never" keeps the whole recording', async ({ page }, testInfo) => {
+test('trimStart: "never" keeps the whole recording', async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 700, highlight: false, trimStart: "never" });
 
   const metadata = await recordStartTimeline({
     manualStartAtMs: false,
-    page,
+    basePage,
     testInfo,
     video,
   });
@@ -78,13 +78,13 @@ test('trimStart: "never" keeps the whole recording', async ({ page }, testInfo) 
 
 const recordStartTimeline = async (options: {
   manualStartAtMs: false | number;
-  page: any;
+  basePage: any;
   testInfo: any;
   video: ReturnType<typeof videoMode>;
 }) => {
   {
     await using page = await addPlugins({
-      page: options.page,
+      page: options.basePage,
       testInfo: options.testInfo,
       plugins: [options.video],
     });
