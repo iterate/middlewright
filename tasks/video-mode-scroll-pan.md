@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation complete and green: waitFor pans (down, hold, back), action pans (down, hold, stay at the browser's real scroll destination), horizontal axis, and the inner-scroll-container fallback. Full suite 106 passed, typecheck/build/publint clean. PR #22 has a narrow 480×720 demo and a raw/rendered side-by-side comparison plus the todo-app baseline. Remaining: review feedback.
+Implementation is back in review follow-up: the main pan paths, narrow raw/rendered comparison, and merged-main validation are green, but an offscreen `blur()` exposes a missing return path when an action leaves the live scroll unchanged. A failing rendered-video regression and proof clip capture the bug. Remaining: make that action pan show the target and return to live footage, then rerun validation.
 
 ## Goal
 
@@ -49,6 +49,7 @@ Today, `getByText(...).waitFor()` on an element below the fold records a viewpor
 - [x] Stop adjacent pans from yo-yoing. *A return pan directly followed by another pan skips its back leg and hands the camera over; the next pan enters from the previous destination (zero travel when equal). FFmpeg spec: once the awaited element is on camera it stays on camera through the click.*
 - [x] Center pan destinations. *Matches Chromium's scroll-for-action alignment so wait-then-act pairs land on the same view, and keeps held elements out of the caption band (the bottom-aligned minimal scroll parked targets exactly under the captions).*
 - [x] Match the todo demo's narrow viewport and replace the separate review clips with a raw/rendered side-by-side. *The checked-in scroll demo now uses 480×720; PR media pairs the fresh recordings in one labelled comparison video.*
+- [ ] Return from an offscreen action pan when the action leaves the browser scroll unchanged. *Red FFmpeg repro uses an offscreen focused field's `blur()`: the live page stays at the top, but the broken renderer collapses the estimated destination to that scroll and never shows the field.*
 
 ## Implementation log
 
@@ -61,3 +62,4 @@ Today, `getByText(...).waitFor()` on an element below the fold records a viewpor
 - 2026-08-04: Media: a gitignored deploy-log fixture (34 log rows, success card + summary button below the fold) rendered on main ("before": pointer drifts at the top pointing at nothing, footage jump-cuts after the click) and on this branch ("after": two smooth pans). Attached with the todo-app baseline (21.8s, no pans triggered — everything fits the viewport) and its raw recording.
 - 2026-08-04: Review follow-up narrowed the checked-in demo from 800×600 to the todo app's 480×720 viewport, removed its `test.step` captions, and combined its newly generated raw and rendered recordings side by side for the PR body; the old before-rendered comparison is no longer needed.
 - 2026-08-04: Review feedback: the demo was confusing — the waitFor pan returned to the top only for the click pan to travel straight back down, and the demo spec was gitignored so its `test.step` code was invisible in the PR. Frame classification confirmed the yo-yo (2 frames at the top between pans). Added pan handover (suppress the return leg, enter the next pan from the previous destination), centered pan destinations (the bottom-aligned target sat exactly under the caption band), rebuilt the demo with four pans in both directions plus step captions, and checked it in as a real spec. The coalesced demo timeline is header → pan down → card (wait hold, handover, click, summary) → pan up → header for the badge wait and the copy click.
+- 2026-08-05: Bugbot review found that `finalizePanHighlightAfterAction()` collapses a stay-pan destination when an action does not move the page. An offscreen `blur()` reproduces deterministically: runtime scroll remains zero, metadata rewrites the hold rect offscreen and keeps a 400ms minimum no-op pan, and rendered video never shows the magenta field. Added the failing public-video spec before changing production code.

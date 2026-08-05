@@ -1689,6 +1689,89 @@ test("pans to an offscreen click target and stays at the scrolled view", async (
   expect(Math.abs(heldBox!.x - lastBox!.x)).toBeLessThanOrEqual(4);
 });
 
+test("returns from an offscreen blur pan when the live page does not scroll", async ({
+  page: basePage,
+}, testInfo) => {
+  const highlightDurationMs = 700;
+  const video = videoMode({
+    trimStart: "never",
+    finalHold: 0,
+    highlight: { mode: "outline", style: "3px solid yellow", duration: highlightDurationMs },
+  });
+  {
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`
+      <div style="height: 2100px">
+        <div id="top" style="position: absolute; left: 0; top: 0; width: 800px; height: 80px; padding: 20px; box-sizing: border-box; background: rgb(0, 190, 0); color: white; font: 24px sans-serif">Top of page — blur target is below</div>
+        <input aria-label="Offscreen note" value="Blurred without scrolling" style="position: absolute; left: 200px; top: 1500px; width: 320px; height: 120px; border: 0; padding: 20px; box-sizing: border-box; background: rgb(255, 0, 200); font: 20px sans-serif" />
+      </div>
+      <script>
+        const target = document.querySelector('input');
+        target.focus({ preventScroll: true });
+        target.addEventListener('blur', () => document.body.dataset.blurred = 'true');
+      </script>
+    `);
+
+    await page.getByRole("textbox", { name: "Offscreen note" }).blur();
+    await expect(page.locator("body")).toHaveAttribute("data-blurred", "true");
+    expect(await basePage.evaluate(() => window.scrollY)).toBe(0);
+    await page.waitForTimeout(400);
+    await basePage.waitForTimeout(200);
+  }
+
+  const paths = video.outputPaths();
+  const metadata = await video.metadata();
+  const blurHighlight = metadata.highlights.find(
+    (candidate) => candidate.method === "blur",
+  )!;
+  const isMagenta = (pixel: { blue: number; green: number; red: number }) =>
+    pixel.red > 180 && pixel.green < 80 && pixel.blue > 120;
+  const fullFrameRect = (frame: VideoFrame) => ({
+    height: frame.height,
+    width: frame.width,
+    x: 0,
+    y: 0,
+  });
+
+  const renderedFrames = await videoFrames(paths.rendered, 25);
+  const magentaBoxes = renderedFrames.map((frame) =>
+    pixelBoundingBox(frame, fullFrameRect(frame), isMagenta),
+  );
+  const scale = Math.min(
+    renderedFrames[0].width / blurHighlight.viewport.width,
+    renderedFrames[0].height / blurHighlight.viewport.height,
+  );
+  const heldIndexes = magentaBoxes.flatMap((box, index) =>
+    box && box.width >= Math.round(320 * scale) - 4 ? [index] : [],
+  );
+
+  // The action itself left the browser at the top. The rendered video should
+  // still pan to the offscreen field, hold its outline, then return to the
+  // unchanged live viewport.
+  expect(heldIndexes.length).toBeGreaterThan(3);
+  expect(
+    new Set(magentaBoxes.flatMap((box) => (box ? [Math.round(box.y / 12)] : []))).size,
+  ).toBeGreaterThanOrEqual(3);
+  expect(
+    heldIndexes.some((index) => {
+      const box = magentaBoxes[index]!;
+      return hasYellow(renderedFrames[index], {
+        height: box.height + 16,
+        width: box.width + 16,
+        x: box.x - 8,
+        y: box.y - 8,
+      });
+    }),
+  ).toBe(true);
+
+  const lastFrame = renderedFrames.at(-1)!;
+  expect(countPixels(lastFrame, fullFrameRect(lastFrame), isMagenta)).toBe(0);
+  expect(
+    hasGreen(lastFrame, { height: Math.round(60 * scale), width: lastFrame.width, x: 0, y: 0 }),
+  ).toBe(true);
+});
+
 test("holds through a wait-then-click on an offscreen element without panning back between", async ({
   page,
 }, testInfo) => {
