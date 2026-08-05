@@ -1,0 +1,42 @@
+---
+status: ready
+size: medium
+---
+
+# Require explanations for explicit timeouts
+
+## Status
+
+Ready to implement. The rule syntax, comment scope, repository adoption, and test path are defined below; no implementation has started.
+
+## Goal
+
+Add `middlewright/require-timeout-comment`, an Oxlint rule that reports explicit timeout options unless a nearby `//` comment contains the word `timeout`.
+
+```ts
+await page.getByRole("button").click({ timeout: 10_000 }); // reported
+
+// timeout is longer because the export runs asynchronously
+await page.getByRole("button").click({ timeout: 10_000 }); // allowed
+```
+
+## Assumptions
+
+- The syntax-only rule checks direct `timeout` properties in object arguments to member calls. This covers `waitFor`, `click`, `fill`, and other timeout-bearing APIs without maintaining a method-name list.
+- Direct identifier, string-literal, and shorthand `timeout` properties count; computed and spread properties do not because their keys cannot be known statically.
+- Only `//` comments count. `timeout` is matched as a case-insensitive whole word.
+- For one-line calls, the comment may trail the call or appear on the previous physical line. For multiline calls, a comment may instead sit on the timeout property's line or the line immediately above it.
+- The rule reports but does not autofix because it cannot invent a useful explanation.
+
+## Checklist
+
+- [ ] Add a failing consumer-style spec for an unexplained timeout and make the new rule report it.
+- [ ] Add passing specs for same-line and preceding-line timeout comments, including multiline options.
+- [ ] Cover method and property shapes without broadening into nested object values or block comments.
+- [ ] Enable the rule in this repository and document consumer configuration.
+- [ ] Run lint, typecheck, build, package validation, the full test suite, and the todo-app visual baseline.
+- [ ] Attach the current todo-app render to the draft pull request and monitor CI/review comments.
+
+## Implementation log
+
+- 2026-08-05: Based the worktree on `origin/main` after PR #23 merged as `453d540`.
