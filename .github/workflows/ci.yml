@@ -16,6 +16,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm exec publint

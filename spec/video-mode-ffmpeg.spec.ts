@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";

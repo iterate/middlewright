@@ -22,6 +22,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./lint-plugin": {
+      "types": "./dist/lint/plugin.d.ts",
+      "default": "./dist/lint/plugin.js"
     }
   },
   "files": [
@@ -30,6 +34,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "lint": "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
     "prepack": "pnpm build"
@@ -41,8 +47,10 @@
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@types/node": "^24.10.9",
+    "oxlint": "^1.77.0",
     "pkg-pr-new": "^0.0.75",
     "publint": "^0.3.14",
+    "tsx": "^4.23.5",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
