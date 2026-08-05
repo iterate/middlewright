@@ -62,6 +62,10 @@ const requireTimeoutComment = {
     },
   },
   create(context: any) {
+    const timeoutComments = context.sourceCode
+      .getAllComments()
+      .filter((comment: any) => comment.type === "Line" && /\btimeout\b/i.test(comment.value));
+
     return {
       CallExpression(node: any) {
         if (node.callee.type !== "MemberExpression") return;
@@ -70,7 +74,7 @@ const requireTimeoutComment = {
           if (argument.type !== "ObjectExpression") continue;
 
           for (const property of argument.properties) {
-            if (isTimeoutProperty(property)) {
+            if (isTimeoutProperty(property) && !hasTimeoutComment(node, property, timeoutComments)) {
               context.report({ node: property, messageId: "unexplained" });
             }
           }
@@ -121,6 +125,16 @@ function isTimeoutProperty(node: any) {
     ((node.key.type === "Identifier" && node.key.name === "timeout") ||
       (node.key.type === "Literal" && node.key.value === "timeout"))
   );
+}
+
+function hasTimeoutComment(call: any, property: any, comments: any[]) {
+  const acceptedLines = new Set([
+    call.loc.start.line - 1,
+    call.loc.start.line,
+    property.loc.start.line - 1,
+    property.loc.start.line,
+  ]);
+  return comments.some((comment) => acceptedLines.has(comment.loc.start.line));
 }
 
 export default {

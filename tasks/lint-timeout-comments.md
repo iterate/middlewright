@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Implementation underway. The first consumer-style slice reports unexplained direct timeout options; nearby-comment exemptions, shape coverage, repository adoption, and full verification remain.
+Implementation is roughly 60% complete. Consumer-style specs now cover reporting, nearby line-comment exemptions, multiline options, and static property boundaries; repository adoption, docs, and full verification remain.
 
 ## Goal
 
@@ -31,8 +31,8 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 ## Checklist
 
 - [x] Add a failing consumer-style spec for an unexplained timeout and make the new rule report it. *`middlewright/require-timeout-comment` now reports direct timeout properties in object arguments to member calls.*
-- [ ] Add passing specs for same-line and preceding-line timeout comments, including multiline options.
-- [ ] Cover method and property shapes without broadening into nested object values or block comments.
+- [x] Add passing specs for same-line and preceding-line timeout comments, including multiline options. *Whole-word, case-insensitive `//` comments are accepted beside the call or timeout property.*
+- [x] Cover method and property shapes without broadening into nested object values or block comments. *Identifier, quoted, and shorthand properties report; computed, spread, nested, block-comment, and plural-word shapes are covered explicitly.*
 - [ ] Enable the rule in this repository and document consumer configuration.
 - [ ] Run lint, typecheck, build, package validation, the full test suite, and the todo-app visual baseline.
 - [ ] Attach the current todo-app render to the draft pull request and monitor CI/review comments.
@@ -41,3 +41,4 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 
 - 2026-08-05: Based the worktree on `origin/main` after PR #23 merged as `453d540`.
 - 2026-08-05: Completed the first red/green slice through the published `middlewright/lint-plugin` path.
+- 2026-08-05: Added nearby-comment exemptions as two vertical slices: one-line calls first, then multiline timeout properties.

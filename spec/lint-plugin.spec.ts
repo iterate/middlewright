@@ -152,6 +152,80 @@ test("reports timeout options without an explanation", async () => {
   expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
 });
 
+test("allows timeout comments on the call line or the previous line", async () => {
+  const source = [
+    `// timeout is longer because the export runs asynchronously`,
+    `await page.getByText("Export").click({ timeout: 10_000 });`,
+    `await page.getByText("Import").click({ timeout: 10_000 }); // TIMEOUT covers ingestion`,
+    ``,
+  ].join("\n");
+  await using fixture = await lintFixture(source, requireTimeoutCommentRules);
+
+  await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]);
+
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
+test("allows timeout comments beside multiline timeout properties", async () => {
+  const source = [
+    `await page.getByText("Export").click({`,
+    `  // timeout is longer because the export runs asynchronously`,
+    `  timeout: 10_000,`,
+    `});`,
+    `await page.getByText("Import").click({`,
+    `  timeout: 10_000, // timeout covers ingestion`,
+    `});`,
+    ``,
+  ].join("\n");
+  await using fixture = await lintFixture(source, requireTimeoutCommentRules);
+
+  await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]);
+
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
+test("reports static timeout properties without guessing dynamic shapes", async () => {
+  const source = [
+    `await locator.click({ timeout });`,
+    `await locator.fill("value", { "timeout": 1_000 });`,
+    `/* timeout is explained in a block */`,
+    `await locator.waitFor({ timeout: 1_000 });`,
+    `// timeouts are generally slow`,
+    `await locator.waitFor({ timeout: 1_000 });`,
+    `await locator.click({ ["timeout"]: 1_000 });`,
+    `await locator.click({ nested: { timeout: 1_000 } });`,
+    `await locator.click({ ...options });`,
+    ``,
+  ].join("\n");
+  await using fixture = await lintFixture(source, requireTimeoutCommentRules);
+
+  const result = await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]).catch((error: any) => error);
+
+  expect(result).toMatchObject({ code: 1 });
+  expect(`${result.stdout}\n${result.stderr}`.match(/middlewright\(require-timeout-comment\)/g)).toHaveLength(
+    4,
+  );
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
 async function lintFixture(source: string, rules: Record<string, string>) {
   const directory = await mkdtemp(join(tmpdir(), "middlewright-lint-"));
   const sourcePath = join(directory, "fixture.ts");
