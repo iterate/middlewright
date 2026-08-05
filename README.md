@@ -396,7 +396,8 @@ Middlewright ships a zero-dependency Oxlint plugin at `middlewright/lint-plugin`
 {
   "jsPlugins": ["middlewright/lint-plugin"],
   "rules": {
-    "middlewright/prefer-locator-waits": "error"
+    "middlewright/prefer-locator-waits": "error",
+    "middlewright/require-timeout-comment": "error"
   }
 }
 ```
@@ -410,6 +411,18 @@ await expect(page.getByRole("status")).toContainText("Receipt ready");
 // oxlint --fix
 await page.getByText("Ready").waitFor();
 await page.getByRole("status").filter({ hasText: "Receipt ready" }).waitFor();
+```
+
+`middlewright/require-timeout-comment` requires every explicit timeout option on a method call
+to have a nearby `//` comment containing the word `timeout`. The comment can trail the call or
+appear on the line immediately before the call. Multiline options can put it beside the timeout
+property instead. The rule does not autofix because it cannot invent the reason.
+
+```ts
+await page.getByText("Export").click({ timeout: 30_000 }); // lint error
+
+// timeout allows the asynchronous export to finish
+await page.getByText("Export").click({ timeout: 30_000 });
 ```
 
 ## How it works

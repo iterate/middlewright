@@ -4040,6 +4040,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const trimStartLocator = page
             .locator(trimStart.selector)
             .first() as LocatorWithOriginal;
+          // timeout bounds selector-based trimming before blank detection takes over.
           trimStartLocator
             .waitFor_original({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
             .then(() => {

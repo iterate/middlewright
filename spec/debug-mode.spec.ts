@@ -39,6 +39,7 @@ test("action middleware plugins are inert when PWDEBUG is set", async ({ page: b
   const start = Date.now();
   const error = await page
     .getByRole("button", { name: "Submit approval" })
+    // timeout keeps this failure-path assertion fast.
     .click({ timeout: 100 })
     .catch((e: Error) => e);
 
