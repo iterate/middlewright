@@ -1330,6 +1330,16 @@ const finalizePanHighlightAfterAction = async (options: {
       x: options.highlight.rect.x + pan.to.x,
       y: options.highlight.rect.y + pan.to.y,
     };
+    const actionEnd =
+      Math.round(performance.now() - options.state.startedAt) + PAN_CAPTURE_SETTLE_MS;
+    if (Math.hypot(scroll.x - pan.from.x, scroll.y - pan.from.y) < 1) {
+      // The action left live footage at its original viewport. Keep the
+      // estimated destination (where the target is visible), then return to
+      // the unchanged page instead of collapsing into an idle offscreen hold.
+      pan.back = true;
+      options.highlight.actionEnd = actionEnd;
+      return;
+    }
     pan.durationMs = panDurationMs(pan.from, scroll);
     pan.to = scroll;
     options.highlight.rect = {
@@ -1337,8 +1347,7 @@ const finalizePanHighlightAfterAction = async (options: {
       x: documentRect.x - scroll.x,
       y: documentRect.y - scroll.y,
     };
-    options.highlight.actionEnd =
-      Math.round(performance.now() - options.state.startedAt) + PAN_CAPTURE_SETTLE_MS;
+    options.highlight.actionEnd = actionEnd;
   } catch {
     // Element may disappear during the action; keep the estimated pan.
   }

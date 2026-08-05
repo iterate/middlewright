@@ -1696,7 +1696,7 @@ test("returns from an offscreen blur pan when the live page does not scroll", as
   const video = videoMode({
     trimStart: "never",
     finalHold: 0,
-    highlight: { mode: "outline", style: "3px solid yellow", duration: highlightDurationMs },
+    highlight: { mode: "outline", style: "8px solid yellow", duration: highlightDurationMs },
   });
   {
     await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
@@ -1742,8 +1742,11 @@ test("returns from an offscreen blur pan when the live page does not scroll", as
     renderedFrames[0].width / blurHighlight.viewport.width,
     renderedFrames[0].height / blurHighlight.viewport.height,
   );
+  const outlinedTargetWidth = Math.round(
+    (320 - blurHighlight.thickness * 2) * scale,
+  );
   const heldIndexes = magentaBoxes.flatMap((box, index) =>
-    box && box.width >= Math.round(320 * scale) - 4 ? [index] : [],
+    box && box.width >= outlinedTargetWidth - 4 ? [index] : [],
   );
 
   // The action itself left the browser at the top. The rendered video should
@@ -1757,10 +1760,10 @@ test("returns from an offscreen blur pan when the live page does not scroll", as
     heldIndexes.some((index) => {
       const box = magentaBoxes[index]!;
       return hasYellow(renderedFrames[index], {
-        height: box.height + 16,
-        width: box.width + 16,
-        x: box.x - 8,
-        y: box.y - 8,
+        height: box.height + 24,
+        width: box.width + 24,
+        x: box.x - 12,
+        y: box.y - 12,
       });
     }),
   ).toBe(true);
