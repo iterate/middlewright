@@ -630,6 +630,71 @@ test("waitFor highlighting can be skipped explicitly", async ({ page: basePage }
   expect(metadata.highlights).toEqual([]);
 });
 
+test("records a horizontal pan for a waitFor target beyond the right edge", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({ finalHold: 0 });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setViewportSize({ width: 800, height: 600 });
+  await plugged.setContent(`
+    <div style="width: 3000px; height: 100px">
+      <div id="wide" style="position: absolute; left: 2000px; top: 40px; width: 200px; height: 50px; background: teal"></div>
+    </div>
+  `);
+
+  await plugged.locator("#wide").waitFor();
+
+  expect(await page.evaluate(() => window.scrollX)).toBe(0);
+  const metadata = await video.metadata();
+  const [highlight] = metadata.highlights;
+  expect(highlight).toMatchObject({
+    method: "waitFor",
+    pan: {
+      back: true,
+      from: { x: 0, y: 0 },
+      // The destination centers the element, matching Chromium's own
+      // scroll-for-action alignment: element center minus half a viewport.
+      to: { x: 2000 + 100 - 400, y: 0 },
+    },
+  });
+  // The held rect is viewport-relative at the panned-to position.
+  expect(highlight.rect.x + highlight.rect.width).toBeLessThanOrEqual(800);
+  expect(highlight.rect.x).toBeGreaterThanOrEqual(0);
+});
+
+test("keeps plain highlighting for a target clipped by an inner scroll container", async ({
+  page,
+}, testInfo) => {
+  const video = videoMode({ finalHold: 0 });
+  await using plugged = await addPlugins({
+    page,
+    testInfo,
+    plugins: [video],
+  });
+  await plugged.setViewportSize({ width: 800, height: 600 });
+  await plugged.setContent(`
+    <div style="height: 200px; overflow: auto; position: relative">
+      <div style="height: 900px">
+        <div id="buried" style="position: absolute; left: 20px; top: 700px; width: 200px; height: 50px; background: teal"></div>
+      </div>
+    </div>
+  `);
+
+  await plugged.locator("#buried").waitFor();
+
+  // Scrolling the window cannot reveal this element, so no pan is fabricated
+  // and the offscreen rect is recorded as before.
+  const metadata = await video.metadata();
+  const [highlight] = metadata.highlights;
+  // 708 = 700 within the container plus the default body margin.
+  expect(highlight).toMatchObject({ method: "waitFor", rect: { y: 708 } });
+  expect(highlight.pan).toBeUndefined();
+});
+
 test("marks pre-action waits for attachment as dead air", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 50, highlight: { mode: "pointer", duration: 20 } });
   await using page = await addPlugins({
