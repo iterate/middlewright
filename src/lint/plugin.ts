@@ -50,6 +50,36 @@ const preferLocatorWaits = {
   },
 };
 
+const requireTimeoutComment = {
+  meta: {
+    type: "suggestion",
+    docs: {
+      description: "Require explicit timeout options to explain why the timeout is needed",
+    },
+    schema: [],
+    messages: {
+      unexplained: "Add a nearby // comment explaining why this timeout is needed.",
+    },
+  },
+  create(context: any) {
+    return {
+      CallExpression(node: any) {
+        if (node.callee.type !== "MemberExpression") return;
+
+        for (const argument of node.arguments) {
+          if (argument.type !== "ObjectExpression") continue;
+
+          for (const property of argument.properties) {
+            if (isTimeoutProperty(property)) {
+              context.report({ node: property, messageId: "unexplained" });
+            }
+          }
+        }
+      },
+    };
+  },
+};
+
 function expectLocatorMatcher(node: any) {
   if (
     node.parent?.type !== "AwaitExpression" ||
@@ -84,9 +114,19 @@ function isFilterText(node: any) {
   );
 }
 
+function isTimeoutProperty(node: any) {
+  return (
+    node.type === "Property" &&
+    !node.computed &&
+    ((node.key.type === "Identifier" && node.key.name === "timeout") ||
+      (node.key.type === "Literal" && node.key.value === "timeout"))
+  );
+}
+
 export default {
   meta: { name: "middlewright" },
   rules: {
     "prefer-locator-waits": preferLocatorWaits,
+    "require-timeout-comment": requireTimeoutComment,
   },
 };

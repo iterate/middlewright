@@ -7,7 +7,7 @@ size: medium
 
 ## Status
 
-Ready to implement. The rule syntax, comment scope, repository adoption, and test path are defined below; no implementation has started.
+Implementation underway. The first consumer-style slice reports unexplained direct timeout options; nearby-comment exemptions, shape coverage, repository adoption, and full verification remain.
 
 ## Goal
 
@@ -30,7 +30,7 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 
 ## Checklist
 
-- [ ] Add a failing consumer-style spec for an unexplained timeout and make the new rule report it.
+- [x] Add a failing consumer-style spec for an unexplained timeout and make the new rule report it. *`middlewright/require-timeout-comment` now reports direct timeout properties in object arguments to member calls.*
 - [ ] Add passing specs for same-line and preceding-line timeout comments, including multiline options.
 - [ ] Cover method and property shapes without broadening into nested object values or block comments.
 - [ ] Enable the rule in this repository and document consumer configuration.
@@ -40,3 +40,4 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 ## Implementation log
 
 - 2026-08-05: Based the worktree on `origin/main` after PR #23 merged as `453d540`.
+- 2026-08-05: Completed the first red/green slice through the published `middlewright/lint-plugin` path.
