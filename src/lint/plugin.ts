@@ -56,15 +56,33 @@ const requireTimeoutComment = {
     docs: {
       description: "Require explicit timeout options to explain why the timeout is needed",
     },
-    schema: [],
+    schema: [
+      {
+        type: "object",
+        properties: {
+          requiredPatterns: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+          },
+        },
+        additionalProperties: false,
+      },
+    ],
     messages: {
-      unexplained: "Add a nearby // comment explaining why this timeout is needed.",
+      unexplained:
+        "Usually remove the timeout and add loading UI for spinnerWaiter. If a product or Middlewright limit prevents that, add a nearby // comment matching every required pattern: {{patterns}}. See https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts",
     },
   },
   create(context: any) {
-    const timeoutComments = context.sourceCode
+    const lineComments = context.sourceCode
       .getAllComments()
-      .filter((comment: any) => comment.type === "Line" && /\btimeout\b/i.test(comment.value));
+      .filter((comment: any) => comment.type === "Line");
+    const requiredPatternSources = context.options[0]?.requiredPatterns || [
+      "timeout",
+      "spinner.?waiter",
+    ];
+    const requiredPatterns = requiredPatternSources.map((source: string) => new RegExp(source, "i"));
 
     return {
       CallExpression(node: any) {
@@ -74,8 +92,15 @@ const requireTimeoutComment = {
           if (argument.type !== "ObjectExpression") continue;
 
           for (const property of argument.properties) {
-            if (isTimeoutProperty(property) && !hasTimeoutComment(node, property, timeoutComments)) {
-              context.report({ node: property, messageId: "unexplained" });
+            if (
+              isTimeoutProperty(property) &&
+              !hasTimeoutComment(node, property, lineComments, requiredPatterns)
+            ) {
+              context.report({
+                node: property,
+                messageId: "unexplained",
+                data: { patterns: requiredPatternSources.join(", ") },
+              });
             }
           }
         }
@@ -127,14 +152,18 @@ function isTimeoutProperty(node: any) {
   );
 }
 
-function hasTimeoutComment(call: any, property: any, comments: any[]) {
+function hasTimeoutComment(call: any, property: any, comments: any[], requiredPatterns: RegExp[]) {
   const acceptedLines = new Set([
     call.loc.start.line - 1,
     call.loc.start.line,
     property.loc.start.line - 1,
     property.loc.start.line,
   ]);
-  return comments.some((comment) => acceptedLines.has(comment.loc.start.line));
+  return comments.some(
+    (comment) =>
+      acceptedLines.has(comment.loc.start.line) &&
+      requiredPatterns.every((pattern) => pattern.test(comment.value)),
+  );
 }
 
 export default {

@@ -677,7 +677,7 @@ test("pre-action attached waits honor action timeout", async ({ page: basePage }
   `);
 
   const start = Date.now();
-  // timeout keeps this failure-path assertion below the button's 300ms delay.
+  // timeout tests this failure budget; spinner waiter is absent to isolate video mode.
   const error = await page.locator("#late").click({ timeout: 100 }).catch((e: Error) => e);
 
   expect(Date.now() - start).toBeLessThan(250);

@@ -74,6 +74,16 @@ If Playwright ever ships official action middleware, use that instead and let th
 
 It started with action timeouts. A good test suite fails *fast* — a 1-second `actionTimeout` catches real bugs immediately instead of burning 30 seconds per failed assertion. But real apps have operations that legitimately take 20 seconds, and the user-facing contract for those is "show a spinner". So the timeout you actually want is conditional: **1 second normally, 30 seconds while a spinner is visible**. That also creates a nice incentive loop: if a slow operation makes a test flaky, the fix is to add a loading state to the product — which is what your users wanted anyway.
 
+### Don't fix slow tests with longer timeouts
+
+An explicit action timeout makes a test wait longer whether the app is working or stuck. Keep Playwright's `actionTimeout` short so broken tests fail fast. If a real operation is slow, give users loading UI and let `spinnerWaiter` extend the wait only while that progress is visible.
+
+When a timeout looks necessary:
+
+1. Fix the slow product behavior if practical.
+2. Otherwise add visible loading UI that `spinnerWaiter` can detect.
+3. Keep an explicit timeout only when a product or Middlewright limit makes spinner-based waiting impossible. Explain that exact limit beside the timeout.
+
 We [asked Playwright for this in 2022](https://github.com/microsoft/playwright/issues/16007). The maintainers' verdict:
 
 > This would be tricky since it might be that spinner shows up after the action has started. \[…\] I don't think it is technically feasible.
@@ -414,15 +424,31 @@ await page.getByRole("status").filter({ hasText: "Receipt ready" }).waitFor();
 ```
 
 `middlewright/require-timeout-comment` requires every explicit timeout option on a method call
-to have a nearby `//` comment containing the word `timeout`. The comment can trail the call or
-appear on the line immediately before the call. Multiline options can put it beside the timeout
-property instead. The rule does not autofix because it cannot invent the reason.
+to have a nearby `//` comment matching both `timeout` and `spinner.?waiter`, case-insensitively.
+This forces the exception to say why [`spinnerWaiter`](#dont-fix-slow-tests-with-longer-timeouts)
+cannot replace the timeout. The comment can trail the call or appear on the line immediately
+before the call. Multiline options can put it beside the timeout property instead. The rule does
+not autofix because it cannot invent the reason.
 
 ```ts
 await page.getByText("Export").click({ timeout: 30_000 }); // lint error
 
-// timeout allows the asynchronous export to finish
+// timeout is needed because the third-party export exposes no state for spinner waiter
 await page.getByText("Export").click({ timeout: 30_000 });
+```
+
+Override the required case-insensitive regex sources when your loading convention differs. Every
+configured pattern must match the nearby comment:
+
+```json
+{
+  "rules": {
+    "middlewright/require-timeout-comment": [
+      "error",
+      { "requiredPatterns": ["timeout", "loading.?ui"] }
+    ]
+  }
+}
 ```
 
 ## How it works
