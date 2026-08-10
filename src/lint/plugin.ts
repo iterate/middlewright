@@ -110,6 +110,28 @@ const requireTimeoutComment = {
   },
 };
 
+const preferPositiveWaits = {
+  meta: {
+    type: "suggestion",
+    docs: {
+      description: "Prefer waiting for positive UI over element detachment",
+    },
+    schema: [],
+    messages: {
+      detached:
+        "Wait for positive UI instead of element detachment. See https://github.com/iterate/middlewright#prefer-positive-waits-over-absence",
+    },
+  },
+  create(context: any) {
+    return {
+      CallExpression(node: any) {
+        const stateProperty = detachedWaitState(node);
+        if (stateProperty) context.report({ node: stateProperty, messageId: "detached" });
+      },
+    };
+  },
+};
+
 function expectLocatorMatcher(node: any) {
   if (
     node.parent?.type !== "AwaitExpression" ||
@@ -153,6 +175,34 @@ function isTimeoutProperty(node: any) {
   );
 }
 
+function detachedWaitState(node: any) {
+  if (
+    node.callee.type !== "MemberExpression" ||
+    node.callee.computed ||
+    node.callee.property.type !== "Identifier" ||
+    node.callee.property.name !== "waitFor"
+  ) {
+    return;
+  }
+
+  for (const argument of node.arguments) {
+    if (argument.type !== "ObjectExpression") continue;
+
+    for (const property of argument.properties) {
+      if (
+        property.type === "Property" &&
+        !property.computed &&
+        ((property.key.type === "Identifier" && property.key.name === "state") ||
+          (property.key.type === "Literal" && property.key.value === "state")) &&
+        property.value.type === "Literal" &&
+        property.value.value === "detached"
+      ) {
+        return property;
+      }
+    }
+  }
+}
+
 function hasTimeoutComment(
   call: any,
   property: any,
@@ -182,6 +232,7 @@ export default {
   meta: { name: "middlewright" },
   rules: {
     "prefer-locator-waits": preferLocatorWaits,
+    "prefer-positive-waits": preferPositiveWaits,
     "require-timeout-comment": requireTimeoutComment,
   },
 };

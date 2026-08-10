@@ -7,6 +7,7 @@ import { test, expect } from "@playwright/test";
 
 const execFileAsync = promisify(execFile);
 const preferLocatorWaitsRules = { "middlewright/prefer-locator-waits": "error" };
+const preferPositiveWaitsRules = { "middlewright/prefer-positive-waits": "error" };
 const requireTimeoutCommentRules = { "middlewright/require-timeout-comment": "error" };
 
 test("fixes visible locator assertions to locator waits", async () => {
@@ -132,6 +133,27 @@ test("reports text lists without replacing them with an invalid filter", async (
 
   expect(result).toMatchObject({ code: 1 });
   expect(`${result.stdout}\n${result.stderr}`).toContain("middlewright(prefer-locator-waits)");
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
+test("reports detached waits without an explanation", async () => {
+  const source = `await page.getByText("Florence").waitFor({ state: "detached" });\n`;
+  await using fixture = await lintFixture(source, preferPositiveWaitsRules);
+
+  const result = await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]).catch((error: any) => error);
+
+  expect(result).toMatchObject({ code: 1 });
+  const output = `${result.stdout}\n${result.stderr}`;
+  expect(output).toContain("Wait for positive UI instead of element detachment");
+  expect(output).toContain(
+    "https://github.com/iterate/middlewright#prefer-positive-waits-over-absence",
+  );
   expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
 });
 

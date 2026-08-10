@@ -8,7 +8,7 @@ issue: https://github.com/iterate/middlewright/issues/27
 
 ## Status
 
-Ready to implement. The intended public rule, syntax boundary, exception comments, docs, and verification are specified below. No product code has changed yet.
+Implementation is roughly 25% complete. The exported rule now reports a direct static detached wait through the packed consumer path. Exception comments, syntax boundaries, repo config, docs, and full verification remain.
 
 ## Goal
 
@@ -31,7 +31,7 @@ await page.getByText("No results found").waitFor(); // preferred
 
 ## Checklist
 
-- [ ] Add a failing consumer-style spec for an unexplained detached wait and make the exported rule report it.
+- [x] Add a failing consumer-style spec for an unexplained detached wait and make the exported rule report it. *`middlewright/prefer-positive-waits` reports a direct `.waitFor({ state: "detached" })` and links to the planned positive-wait guidance.*
 - [ ] Add a passing spec for nearby exception comments and configurable required patterns.
 - [ ] Cover static and dynamic call/property boundaries without broadening into unrelated waits.
 - [ ] Enable the rule in this repository and document positive-wait guidance and consumer config.
@@ -41,3 +41,4 @@ await page.getByText("No results found").waitFor(); // preferred
 ## Implementation log
 
 - 2026-08-10: Created from current `origin/main` after PR #25 merged as `5dd4fae`.
+- 2026-08-10: Completed the first red/green slice through the published `middlewright/lint-plugin` path.
