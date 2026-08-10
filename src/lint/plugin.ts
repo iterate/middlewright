@@ -75,6 +75,7 @@ const requireTimeoutComment = {
     },
   },
   create(context: any) {
+    const sourceLines = context.sourceCode.getText().split(/\r?\n/);
     const lineComments = context.sourceCode
       .getAllComments()
       .filter((comment: any) => comment.type === "Line");
@@ -94,7 +95,7 @@ const requireTimeoutComment = {
           for (const property of argument.properties) {
             if (
               isTimeoutProperty(property) &&
-              !hasTimeoutComment(node, property, lineComments, requiredPatterns)
+              !hasTimeoutComment(node, property, lineComments, requiredPatterns, sourceLines)
             ) {
               context.report({
                 node: property,
@@ -152,19 +153,27 @@ function isTimeoutProperty(node: any) {
   );
 }
 
-function hasTimeoutComment(call: any, property: any, comments: any[], requiredPatterns: RegExp[]) {
+function hasTimeoutComment(
+  call: any,
+  property: any,
+  comments: any[],
+  requiredPatterns: RegExp[],
+  sourceLines: string[],
+) {
   const methodLine = call.callee.property.loc.start.line;
-  const acceptedLines = new Set([
-    call.loc.start.line - 1,
+  const sameLines = new Set([
     call.loc.start.line,
-    methodLine - 1,
     methodLine,
-    property.loc.start.line - 1,
     property.loc.start.line,
   ]);
+  const previousLines = new Set([...sameLines].map((line) => line - 1));
   return comments.some(
     (comment) =>
-      acceptedLines.has(comment.loc.start.line) &&
+      (sameLines.has(comment.loc.start.line) ||
+        (previousLines.has(comment.loc.start.line) &&
+          sourceLines[comment.loc.start.line - 1]
+            .slice(0, comment.loc.start.column)
+            .trim() === "")) &&
       requiredPatterns.every((pattern) => pattern.test(comment.value)),
   );
 }

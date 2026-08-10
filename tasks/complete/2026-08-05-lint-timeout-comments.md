@@ -39,6 +39,7 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 - [x] Make required explanation patterns configurable and strengthen the defaults. *`requiredPatterns` accepts case-insensitive regex sources; the defaults are `timeout` and `spinner.?waiter`, and every pattern must match the nearby line comment.*
 - [x] Point lint failures to clear timeout guidance. *The rule recommends loading UI plus `spinnerWaiter` before an override and links to the new focused README section.*
 - [x] Accept explanations beside terminal methods in multiline chains. *The location check now includes the member method line, with a consumer regression covering a comment directly above `.click({`.*
+- [x] Keep trailing explanations scoped to their own call. *Previous-line comments must start their line, so a justified timeout cannot silently exempt the next call.*
 
 ## Implementation log
 
@@ -49,3 +50,4 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 - 2026-08-05: Verified the packed export, attached the todo-app render to PR #25, and confirmed GitHub produced an inline video player.
 - 2026-08-06: Handled review feedback with two more red/green slices for stronger defaults and configurable patterns, then added the linked product-guidance docs.
 - 2026-08-10: Reproduced Bugbot's chained-call finding and fixed it by anchoring nearby comments to the terminal member method as well as the chain head and timeout property.
+- 2026-08-10: Reproduced Bugbot's consecutive-call finding and split same-line comments from standalone previous-line comments in the location check.
