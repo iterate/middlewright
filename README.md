@@ -255,6 +255,12 @@ videoMode({
 
 A successful visible `locator.waitFor()` points at and holds the resolved locator using the same highlight mode and duration. The elapsed wait remains dead air, so `deadAirThreshold` can compress it before the resolved-state hold. Use `skipMethods: ["waitFor"]` to keep waits as dead air without highlighting their result.
 
+#### Panning to offscreen elements
+
+When a highlighted target sits outside the viewport, the rendered video pans to it. The live page is never scrolled: at highlight time video mode captures a beyond-viewport screenshot (Chromium renders offscreen content without scrolling — no scroll event fires, scroll position is untouched, and IntersectionObservers never see the element), and the renderer animates a smooth camera travel over that still. A `waitFor()` pans to the element, holds the highlight, and pans back, since the real page never moved. Actions like `click()` pan and stay: Playwright scrolls the live page as part of the action, and the pan lands exactly where the post-action footage resumes, replacing the instant scroll jump with a readable travel. `fill()` keeps its reveal pipeline unpanned.
+
+Known limitations: the pan is a frozen still, so page animations pause during the travel, and `position: fixed`/`sticky` elements slide with the content instead of staying pinned. Elements hidden inside a scrollable container (not the window) keep plain highlighting, since window scrolling could not reveal them. Chromium leaks one zoomed-out frame into the raw screencast while capturing beyond the viewport; the renderer consumes that span so it never appears in the rendered video, and the page observes only a no-op `resize` event with unchanged dimensions.
+
 Put `spinnerWaiter` before `videoMode` when you use both. Spinner-waiter still owns spinner-specific waiting and errors, while video-mode records the preceding middleware wait as dead air and records the action target immediately before the action.
 
 ### llmRecover
