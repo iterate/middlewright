@@ -222,6 +222,29 @@ test("allows timeout comments on the call line or the previous line", async () =
   expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
 });
 
+test("allows timeout comments before a chained method with multiline options", async () => {
+  const source = [
+    `await page`,
+    `  .getByText("Export")`,
+    `  // timeout is needed because spinner waiter cannot observe the export state`,
+    `  .click({`,
+    `    timeout: 10_000,`,
+    `  });`,
+    ``,
+  ].join("\n");
+  await using fixture = await lintFixture(source, requireTimeoutCommentRules);
+
+  await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]);
+
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
 test("allows timeout comments beside multiline timeout properties", async () => {
   const source = [
     `await page.getByText("Export").click({`,

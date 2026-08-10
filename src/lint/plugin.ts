@@ -153,9 +153,12 @@ function isTimeoutProperty(node: any) {
 }
 
 function hasTimeoutComment(call: any, property: any, comments: any[], requiredPatterns: RegExp[]) {
+  const methodLine = call.callee.property.loc.start.line;
   const acceptedLines = new Set([
     call.loc.start.line - 1,
     call.loc.start.line,
+    methodLine - 1,
+    methodLine,
     property.loc.start.line - 1,
     property.loc.start.line,
   ]);

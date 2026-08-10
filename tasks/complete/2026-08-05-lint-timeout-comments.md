@@ -38,6 +38,7 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 - [x] Attach the current todo-app render to the draft pull request and monitor CI/review comments. *PR #25 renders the user-attachment WebM inline; the foreground PR monitor is checking the final head.*
 - [x] Make required explanation patterns configurable and strengthen the defaults. *`requiredPatterns` accepts case-insensitive regex sources; the defaults are `timeout` and `spinner.?waiter`, and every pattern must match the nearby line comment.*
 - [x] Point lint failures to clear timeout guidance. *The rule recommends loading UI plus `spinnerWaiter` before an override and links to the new focused README section.*
+- [x] Accept explanations beside terminal methods in multiline chains. *The location check now includes the member method line, with a consumer regression covering a comment directly above `.click({`.*
 
 ## Implementation log
 
@@ -47,3 +48,4 @@ await page.getByRole("button").click({ timeout: 10_000 }); // allowed
 - 2026-08-05: Enabling the rule exposed eight repository violations; each now has a local reason instead of a generic suppression.
 - 2026-08-05: Verified the packed export, attached the todo-app render to PR #25, and confirmed GitHub produced an inline video player.
 - 2026-08-06: Handled review feedback with two more red/green slices for stronger defaults and configurable patterns, then added the linked product-guidance docs.
+- 2026-08-10: Reproduced Bugbot's chained-call finding and fixed it by anchoring nearby comments to the terminal member method as well as the chain head and timeout property.
