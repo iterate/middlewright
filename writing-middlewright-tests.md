@@ -1,12 +1,12 @@
 ## Timeouts
 
-The default `actionTimeout` in your playwright config should be *very aggressive* and short. The `spinner-waiter` plugin allows this. If and when test fail because of this, there are two recommended courses of action, neither of which involves just bumping an assertion timeout. The first is of course to just figure out why the UI is sometimes slow and fix it. But if that's not possible, or beyond the scope of the work you're doing, the second recommended fix is to add a loading spinner to the product UI - we've identified a slow part of your app, so real users should also see a loading spinner, or some text like "Loading..."/"Pending..."/"Creating foobar..." etc.
+Keep the default `actionTimeout` aggressive and short. If an operation is slow, fix it or add loading UI for users; `spinnerWaiter` then extends the wait only while that progress is visible. Keep an explicit action timeout only when a product or Middlewright limit makes spinner-based waiting impossible, and explain that limit beside the timeout. See [Don't fix slow tests with longer timeouts](https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts).
 
 ## Locators over `expect`
 
 Avoid using the expect-based API for asserting that UI is visible/in a particular state. For example, don't bother with `await expect(page.getByRole("button", { name: "Run" })).toBeEnabled()` before clicking a button. Just call `await page.getByRole("button", { name: "Run" }).click()` directly. The `.click` implementation already waits for the button to exist, be visible, and to be enabled. Similarly if you want to assert that something is present on the page you can just do `await page.getByText("Welcome").waitFor()`. No need for any `await expect(...).toBeVisible()` rubbish. Similarly, no stupid assertions like `await expect(page.getByText("Receipt ready")).toContainText("Receipt ready");`. Just use `await page.getByText("Receipt ready").waitFor()`.
 
-Avoid using `timeout` for actions like `click`, `waitFor` etc. Read the [middlewright docs](https://github.com/iterate/middlewright) for why (TL;DR: we should have progress UI in our app rather than bumping test timeouts): `.waitFor({ timeout: 5_000 })`
+Avoid using `timeout` for actions like `click` and `waitFor`: `.waitFor({ timeout: 5_000 })`.
 
 Avoid doing `await myButton.waitFor()` and then `await runButton.click()`. It's another code-smell. `.click()` should _already_ wait for the button to be clickable so the `.waitFor()` is doing nothing other than give you another chance to run the test and hope for the flake gods to smile on you this time.
 

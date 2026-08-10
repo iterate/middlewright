@@ -68,6 +68,7 @@ test("detects the blank startup lead-in when requested", async ({ page: basePage
     await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
     await page.setViewportSize({ width: 800, height: 600 });
     await page.setContent(blankThenContent({ blankMs }));
+    // timeout bounds this synthetic transition; spinner waiter is absent to isolate video mode.
     await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForTimeout(800);
   }
@@ -105,6 +106,7 @@ test("starts from a selector the moment it becomes visible", async ({ page: base
     // marker (the "ready" signal) shows well before the busy content paints, so a
     // selector-driven start must land earlier than the pixel detector would.
     await page.setContent(blankThenContent({ blankMs: 2800, markerAtMs: 1000 }));
+    // timeout bounds this synthetic transition; spinner waiter is absent to isolate video mode.
     await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForTimeout(500);
   }
@@ -130,6 +132,7 @@ test('trimStart: "detect-blank" leaves a video that was never blank untrimmed', 
     await page.setViewportSize({ width: 800, height: 600 });
     // content is on screen from the first frame — nothing to trim
     await page.setContent(blankThenContent({ blankMs: 0 }));
+    // timeout bounds this synthetic transition; spinner waiter is absent to isolate video mode.
     await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForTimeout(800);
   }
@@ -146,6 +149,7 @@ test('trimStart: "never" disables trimming even with a long blank lead-in', asyn
     await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
     await page.setViewportSize({ width: 800, height: 600 });
     await page.setContent(blankThenContent({ blankMs: 2000 }));
+    // timeout bounds this synthetic transition; spinner waiter is absent to isolate video mode.
     await page.locator("#tl").waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForTimeout(500);
   }

@@ -4439,6 +4439,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const trimStartLocator = page
             .locator(trimStart.selector)
             .first() as LocatorWithOriginal;
+          // timeout bounds trimming; waitFor_original bypasses spinner waiter before blank detection.
           trimStartLocator
             .waitFor_original({ state: "visible", timeout: TRIM_START_SELECTOR_TIMEOUT_MS })
             .then(() => {

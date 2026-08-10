@@ -41,6 +41,7 @@ export const hydrationWaiter = (options: HydrationWaiterOptions = {}): Plugin =>
       const isUnhydrated = await unhydratedLocator.isVisible();
 
       if (isUnhydrated) {
+        // timeout is this plugin's hydration budget; waitFor_original bypasses spinner waiter.
         await unhydratedLocator.waitFor_original({ state: "hidden", timeout });
       }
 
