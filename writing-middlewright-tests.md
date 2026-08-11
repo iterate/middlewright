@@ -10,6 +10,8 @@ Avoid using `timeout` for actions like `click` and `waitFor`: `.waitFor({ timeou
 
 Avoid doing `await myButton.waitFor()` and then `await runButton.click()`. It's another code-smell. `.click()` should _already_ wait for the button to be clickable so the `.waitFor()` is doing nothing other than give you another chance to run the test and hope for the flake gods to smile on you this time.
 
+Avoid `.waitFor({ state: "detached" })`. Absence is ambiguous: the intended action may have worked, or the app may be showing the wrong page or an error. Wait for explicit result, empty-state, or error UI instead. If the product has no observable outcome, add one for users and tests.
+
 
 ## Error UI
 

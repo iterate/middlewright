@@ -1,3 +1,17 @@
+const requiredPatternsSchema = [
+  {
+    type: "object",
+    properties: {
+      requiredPatterns: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+      },
+    },
+    additionalProperties: false,
+  },
+];
+
 const preferLocatorWaits = {
   meta: {
     type: "suggestion",
@@ -56,19 +70,7 @@ const requireTimeoutComment = {
     docs: {
       description: "Require explicit timeout options to explain why the timeout is needed",
     },
-    schema: [
-      {
-        type: "object",
-        properties: {
-          requiredPatterns: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 1,
-          },
-        },
-        additionalProperties: false,
-      },
-    ],
+    schema: requiredPatternsSchema,
     messages: {
       unexplained:
         "Usually remove the timeout and add loading UI for spinnerWaiter. If a product or Middlewright limit prevents that, add a nearby // comment matching every required pattern: {{patterns}}. See https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts",
@@ -95,7 +97,7 @@ const requireTimeoutComment = {
           for (const property of argument.properties) {
             if (
               isTimeoutProperty(property) &&
-              !hasTimeoutComment(node, property, lineComments, requiredPatterns, sourceLines)
+              !hasNearbyComment(node, property, lineComments, requiredPatterns, sourceLines)
             ) {
               context.report({
                 node: property,
@@ -104,6 +106,44 @@ const requireTimeoutComment = {
               });
             }
           }
+        }
+      },
+    };
+  },
+};
+
+const preferPositiveWaits = {
+  meta: {
+    type: "suggestion",
+    docs: {
+      description: "Prefer waiting for positive UI over element detachment",
+    },
+    schema: requiredPatternsSchema,
+    messages: {
+      detached:
+        "Wait for positive UI instead of element detachment, or explain an exceptional detached wait in a nearby // comment matching every required pattern: {{patterns}}. See https://github.com/iterate/middlewright#prefer-positive-waits-over-absence",
+    },
+  },
+  create(context: any) {
+    const sourceLines = context.sourceCode.getText().split(/\r?\n/);
+    const lineComments = context.sourceCode
+      .getAllComments()
+      .filter((comment: any) => comment.type === "Line");
+    const requiredPatternSources = context.options[0]?.requiredPatterns || ["detached"];
+    const requiredPatterns = requiredPatternSources.map((source: string) => new RegExp(source, "i"));
+
+    return {
+      CallExpression(node: any) {
+        const stateProperty = detachedWaitState(node);
+        if (
+          stateProperty &&
+          !hasNearbyComment(node, stateProperty, lineComments, requiredPatterns, sourceLines)
+        ) {
+          context.report({
+            node: stateProperty,
+            messageId: "detached",
+            data: { patterns: requiredPatternSources.join(", ") },
+          });
         }
       },
     };
@@ -153,7 +193,35 @@ function isTimeoutProperty(node: any) {
   );
 }
 
-function hasTimeoutComment(
+function detachedWaitState(node: any) {
+  if (
+    node.callee.type !== "MemberExpression" ||
+    node.callee.computed ||
+    node.callee.property.type !== "Identifier" ||
+    node.callee.property.name !== "waitFor"
+  ) {
+    return;
+  }
+
+  for (const argument of node.arguments) {
+    if (argument.type !== "ObjectExpression") continue;
+
+    for (const property of argument.properties) {
+      if (
+        property.type === "Property" &&
+        !property.computed &&
+        ((property.key.type === "Identifier" && property.key.name === "state") ||
+          (property.key.type === "Literal" && property.key.value === "state")) &&
+        property.value.type === "Literal" &&
+        property.value.value === "detached"
+      ) {
+        return property;
+      }
+    }
+  }
+}
+
+function hasNearbyComment(
   call: any,
   property: any,
   comments: any[],
@@ -182,6 +250,7 @@ export default {
   meta: { name: "middlewright" },
   rules: {
     "prefer-locator-waits": preferLocatorWaits,
+    "prefer-positive-waits": preferPositiveWaits,
     "require-timeout-comment": requireTimeoutComment,
   },
 };

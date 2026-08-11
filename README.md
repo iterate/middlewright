@@ -84,6 +84,20 @@ When a timeout looks necessary:
 2. Otherwise add visible loading UI that `spinnerWaiter` can detect.
 3. Keep an explicit timeout only when a product or Middlewright limit makes spinner-based waiting impossible. Explain that exact limit beside the timeout.
 
+### Prefer positive waits over absence
+
+An element disappearing proves only that it is gone. The intended action may have succeeded, but the app may instead have navigated to an error page, crashed, or rendered the wrong empty state. Wait for UI that identifies the outcome:
+
+```ts
+// Ambiguous: Florence could be absent for many reasons.
+await page.getByText("Florence").waitFor({ state: "detached" });
+
+// Positive evidence for the intended empty result.
+await page.getByText("No results found").waitFor();
+```
+
+If the product has no result, empty, loading, or error UI that a test can observe, add it. That state helps users understand what happened and gives the test a useful product contract.
+
 We [asked Playwright for this in 2022](https://github.com/microsoft/playwright/issues/16007). The maintainers' verdict:
 
 > This would be tricky since it might be that spinner shows up after the action has started. \[…\] I don't think it is technically feasible.
@@ -413,6 +427,7 @@ Middlewright ships a zero-dependency Oxlint plugin at `middlewright/lint-plugin`
   "jsPlugins": ["middlewright/lint-plugin"],
   "rules": {
     "middlewright/prefer-locator-waits": "error",
+    "middlewright/prefer-positive-waits": "error",
     "middlewright/require-timeout-comment": "error"
   }
 }
@@ -427,6 +442,31 @@ await expect(page.getByRole("status")).toContainText("Receipt ready");
 // oxlint --fix
 await page.getByText("Ready").waitFor();
 await page.getByRole("status").filter({ hasText: "Receipt ready" }).waitFor();
+```
+
+`middlewright/prefer-positive-waits` reports `.waitFor({ state: "detached" })`. Prefer explicit
+result, empty-state, or error UI; see [Prefer positive waits over absence](#prefer-positive-waits-over-absence).
+An exceptional detached wait needs a nearby `//` comment matching `detached`, case-insensitively:
+
+```ts
+await page.getByText("Florence").waitFor({ state: "detached" }); // lint error
+
+// detached is the only completion signal exposed by this browser-owned element
+await page.getByText("Exporting").waitFor({ state: "detached" });
+```
+
+Override the required case-insensitive regex sources when a project needs stronger exception
+comments. Every configured pattern must match the nearby comment:
+
+```json
+{
+  "rules": {
+    "middlewright/prefer-positive-waits": [
+      "error",
+      { "requiredPatterns": ["detached", "browser.?owned"] }
+    ]
+  }
+}
 ```
 
 `middlewright/require-timeout-comment` requires every explicit timeout option on a method call

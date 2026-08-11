@@ -3,6 +3,7 @@
   "jsPlugins": ["./lint-plugin.local.js"],
   "rules": {
     "middlewright/prefer-locator-waits": "error",
+    "middlewright/prefer-positive-waits": "error",
     "middlewright/require-timeout-comment": "error"
   }
 }
