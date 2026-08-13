@@ -1,5 +1,7 @@
+import { execFile as execFileCallback } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
 import { routeAuthDemoApp } from "./auth-demo-app.ts";
@@ -25,17 +27,62 @@ test("captures an auto-wrapped popup's raw screencast for the composite", async 
   const metadata = await video.metadata();
   expect(metadata.children).toMatchObject([
     {
+      // The demo popup closes itself after Approve, like a real OAuth popup —
+      // closedAt comes from the close event, and there is no settled
+      // recordingEndedAt (the screencast start approximates the timeline).
       closedAt: expect.any(Number),
       highlights: [{ method: "click" }],
       openedAt: expect.any(Number),
       raw: "video-raw-popup-1.webm",
-      recordingEndedAt: expect.any(Number),
       viewport: { height: expect.any(Number), width: expect.any(Number) },
     },
   ]);
   const [child] = metadata.children;
   expect(child.closedAt!).toBeGreaterThan(child.openedAt);
   expect((await stat(join(testInfo.outputDir, child.raw!))).size).toBeGreaterThan(0);
+});
+
+test("renders the popup as a dimmed overlay in one composed video", async ({
+  page: basePage,
+  context,
+}, testInfo) => {
+  await routeAuthDemoApp(context);
+  const video = videoMode({
+    addressBar: false,
+    finalHold: 0,
+    highlight: { mode: "outline", duration: 500 },
+    trimStart: "never",
+  });
+  {
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await page.goto("https://app.middlewright.test/");
+    // Let the screencast capture real frames on each side of the popup span —
+    // an instant flow lands entirely before the recorder's first frame.
+    await page.waitForTimeout(500);
+
+    const popupPromise = basePage.waitForEvent("popup");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    const popup = await popupPromise;
+    await popup.waitForTimeout(500);
+    await popup.getByRole("button", { name: "Approve" }).click();
+    await page.getByText("Signed in as mmkal").waitFor();
+    await page.waitForTimeout(500);
+  }
+
+  await expect(video.metadata()).resolves.toMatchObject({
+    outputs: { rendered: "video-rendered.webm" },
+  });
+  const frames = await videoFrameSamples(video.outputPaths().rendered);
+  // The demo app's background is a light gray throughout, so a darkened
+  // corner marks a frame where the popup backdrop dim is active (~40% black
+  // over ~244 gray lands around 146).
+  const dimmedFrames = frames.filter((frame) => frame.corner < 200);
+  const litFrames = frames.filter((frame) => frame.corner >= 200);
+  expect(dimmedFrames.length).toBeGreaterThan(0);
+  expect(litFrames.length).toBeGreaterThan(0);
+  // While dimmed, the popup's white card sits centered above the backdrop.
+  const overlayFrames = dimmedFrames.filter((frame) => frame.centerPeak > 220);
+  expect(overlayFrames.length).toBeGreaterThan(0);
 });
 
 test("records separate videos for the main page and an auth popup", async ({
@@ -79,3 +126,49 @@ test("records separate videos for the main page and an auth popup", async ({
     expect((await stat(path)).size).toBeGreaterThan(0);
   }
 });
+
+const execFile = promisify(execFileCallback);
+
+/**
+ * Decode the video to small grayscale frames and sample each one: a pixel
+ * near the bottom-left corner (page background), and the brightest pixel of
+ * the central quarter (the popup card when the overlay is up). 0-255.
+ */
+const videoFrameSamples = async (path: string) => {
+  const size = 64;
+  const { stdout } = await execFile(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      path,
+      "-vf",
+      `fps=10,scale=${size}:${size},format=gray`,
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "gray",
+      "pipe:1",
+    ],
+    { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+  );
+  const frameSize = size * size;
+  const frames: { centerPeak: number; corner: number }[] = [];
+
+  for (let offset = 0; offset + frameSize <= stdout.length; offset += frameSize) {
+    let centerPeak = 0;
+    for (let y = Math.floor(size * 0.375); y < Math.floor(size * 0.625); y += 1) {
+      for (let x = Math.floor(size * 0.375); x < Math.floor(size * 0.625); x += 1) {
+        centerPeak = Math.max(centerPeak, stdout[offset + y * size + x]);
+      }
+    }
+    frames.push({
+      centerPeak,
+      corner: stdout[offset + (size - 4) * size + 3],
+    });
+  }
+
+  return frames;
+};

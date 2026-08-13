@@ -713,7 +713,7 @@ const translateVideoTimeline = (options: {
       text: caption.text,
     })),
     deadAir: options.deadAir.map((span) => translateVideoSpan(span, options.offsetMs)),
-    highlights: options.highlights.map((highlight) => {
+    highlights: options.highlights.map((highlight): VideoModeHighlight => {
       const start = Math.max(0, Math.round(highlight.start + options.offsetMs));
       return {
         ...highlight,
@@ -4105,6 +4105,183 @@ const renderVideo = async (options: {
   return true;
 };
 
+const VIDEO_MODE_COMPOSITE_FILE = "video-composite.webm";
+const CHILD_OVERLAY_MAX_FRACTION = 0.9;
+const CHILD_OVERLAY_BACKDROP_OPACITY = 0.4;
+const CHILD_OVERLAY_FADE_MS = 200;
+
+/** A popup screencast placed on the parent timeline as a scaled overlay. */
+type VideoModeChildLayer = {
+  child: VideoModeChild;
+  /** Shift applied to child-raw frames to land them in composite time (ms). */
+  delayMs: number;
+  /** Overlay visibility window in composite time (ms). */
+  enableFromMs: number;
+  enableToMs: number;
+  /** Scaled placement in composite pixels, centered and even-sized. */
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+  path: string;
+  rawInfo: VideoInfo;
+};
+
+const childCompositeLayers = async (options: {
+  children: VideoModeChild[];
+  outputDir: string;
+  timelineOffsetMs: number;
+  video: VideoInfo;
+}): Promise<VideoModeChildLayer[]> => {
+  const layers: VideoModeChildLayer[] = [];
+
+  for (const child of options.children) {
+    if (!child.raw) continue;
+    const path = join(options.outputDir, child.raw);
+    const rawInfo = await videoInfo(path);
+    // A settled recorder maps the raw end to a known parent time. A popup
+    // that closed itself has no settled endpoint; its screencast started at
+    // page creation, which openedAt approximates.
+    const childOffsetMs =
+      child.recordingEndedAt === undefined
+        ? child.openedAt
+        : child.recordingEndedAt - rawInfo.durationMs;
+    const scale = Math.min(
+      1,
+      (CHILD_OVERLAY_MAX_FRACTION * options.video.width) / rawInfo.width,
+      (CHILD_OVERLAY_MAX_FRACTION * options.video.height) / rawInfo.height,
+    );
+    const width = Math.max(2, 2 * Math.round((rawInfo.width * scale) / 2));
+    const height = Math.max(2, 2 * Math.round((rawInfo.height * scale) / 2));
+    const enableFromMs = Math.max(0, child.openedAt + options.timelineOffsetMs);
+    const enableToMs = Math.min(
+      options.video.durationMs,
+      (child.closedAt === undefined ? child.openedAt + rawInfo.durationMs : child.closedAt) +
+        options.timelineOffsetMs,
+    );
+
+    if (enableToMs <= enableFromMs) continue;
+
+    layers.push({
+      child,
+      delayMs: childOffsetMs + options.timelineOffsetMs,
+      enableFromMs,
+      enableToMs,
+      height,
+      path,
+      rawInfo,
+      width,
+      x: Math.round((options.video.width - width) / 2),
+      y: Math.round((options.video.height - height) / 2),
+    });
+  }
+
+  return layers;
+};
+
+/**
+ * Pass A of the popup composite: overlay each popup screencast onto the
+ * parent's raw footage — dimmed backdrop, scaled to fit, alpha-faded in and
+ * out, windowed to the popup's open/close span, newest stacked on top. The
+ * output shares the parent raw timeline exactly, so the annotation render
+ * (pass B) runs on it unchanged; holds there freeze the composite, so it
+ * never matters which source triggered them.
+ */
+const compositeChildOverlays = async (options: {
+  inputPath: string;
+  layers: VideoModeChildLayer[];
+  outputPath: string;
+}) => {
+  const filters: string[] = [];
+  let currentLabel = "0:v";
+
+  options.layers.forEach((layer, index) => {
+    const from = formatSeconds(layer.enableFromMs);
+    const to = formatSeconds(layer.enableToMs);
+    const enable = `enable='between(t\\,${from}\\,${to})'`;
+    const dimLabel = `dim${index}`;
+    const childLabel = `popup${index}`;
+    const outLabel = `composite${index}`;
+    const fadeOutStartMs = Math.max(layer.enableFromMs, layer.enableToMs - CHILD_OVERLAY_FADE_MS);
+
+    filters.push(
+      `[${currentLabel}]drawbox=x=0:y=0:w=iw:h=ih:color=black@${CHILD_OVERLAY_BACKDROP_OPACITY}:t=fill:${enable}[${dimLabel}]`,
+    );
+    filters.push(
+      [
+        `[${index + 1}:v]setpts=PTS+${formatSeconds(layer.delayMs)}/TB`,
+        `scale=w=${layer.width}:h=${layer.height}`,
+        "format=yuva420p",
+        `fade=t=in:st=${from}:d=${formatSeconds(CHILD_OVERLAY_FADE_MS)}:alpha=1`,
+        `fade=t=out:st=${formatSeconds(fadeOutStartMs)}:d=${formatSeconds(CHILD_OVERLAY_FADE_MS)}:alpha=1[${childLabel}]`,
+      ].join(","),
+    );
+    filters.push(
+      `[${dimLabel}][${childLabel}]overlay=x=${layer.x}:y=${layer.y}:eof_action=pass:${enable}[${outLabel}]`,
+    );
+    currentLabel = outLabel;
+  });
+
+  await execFile(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      options.inputPath,
+      ...options.layers.flatMap((layer) => ["-i", layer.path]),
+      "-filter_complex",
+      filters.join(";"),
+      "-map",
+      `[${currentLabel}]`,
+      "-an",
+      options.outputPath,
+    ],
+    { maxBuffer: 10 * 1024 * 1024 },
+  );
+};
+
+/**
+ * Project a popup highlight into composite coordinates. The child frame is
+ * scaled into an overlay box on the parent frame, so rects become
+ * parent-frame pixels; child-frame pixel treatments (pans, fill reveals,
+ * screenshot stills) drop away, leaving the plain box/pointer/freeze path.
+ */
+const projectChildHighlight = (options: {
+  highlight: VideoModeHighlight;
+  layer: VideoModeChildLayer;
+  video: VideoInfo;
+}): VideoModeHighlight => {
+  const { highlight, layer } = options;
+  const viewport = options.layer.child.viewport || {
+    height: layer.rawInfo.height,
+    width: layer.rawInfo.width,
+  };
+  const viewportToChildPixels = Math.min(
+    layer.rawInfo.width / viewport.width,
+    layer.rawInfo.height / viewport.height,
+  );
+  const scale = viewportToChildPixels * (layer.width / layer.rawInfo.width);
+
+  return {
+    ...highlight,
+    dialog: undefined,
+    fillReveal: undefined,
+    image: undefined,
+    pan: undefined,
+    rect: {
+      height: highlight.rect.height * scale,
+      width: highlight.rect.width * scale,
+      x: layer.x + highlight.rect.x * scale,
+      y: layer.y + highlight.rect.y * scale,
+    },
+    sourceFrameAt: undefined,
+    viewport: { height: options.video.height, width: options.video.width },
+  };
+};
+
 /**
  * The action-recording middleware, shared between a videoMode instance (which
  * records onto its own state) and its popup child recorders (which record onto
@@ -4757,6 +4934,44 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             highlights,
             offsetMs: timelineOffset,
           });
+
+          // Popup composite (pass A): overlay each popup's screencast onto the
+          // raw footage, then annotate that composite instead of the raw. The
+          // composite shares the raw timeline, so nothing downstream changes.
+          let renderInputPath = paths.raw;
+          const childLayers = await childCompositeLayers({
+            children: metadataBeforeVideo.children,
+            outputDir: testInfo.outputDir,
+            timelineOffsetMs: timelineOffset,
+            video: rawVideoInfo,
+          });
+          if (childLayers.length > 0) {
+            const compositePath = join(
+              testInfo.outputDir,
+              suffixArtifactFileName(VIDEO_MODE_COMPOSITE_FILE, state.artifactSuffix),
+            );
+            await compositeChildOverlays({
+              inputPath: paths.raw,
+              layers: childLayers,
+              outputPath: compositePath,
+            });
+            renderInputPath = compositePath;
+            const projectedChildHighlights = childLayers.flatMap((layer) =>
+              translateVideoTimeline({
+                addressBars: [],
+                captions: [],
+                deadAir: [],
+                highlights: layer.child.highlights,
+                offsetMs: timelineOffset,
+              }).highlights.map((highlight) =>
+                projectChildHighlight({ highlight, layer, video: rawVideoInfo }),
+              ),
+            );
+            renderTimeline.highlights.push(...projectedChildHighlights);
+            renderTimeline.highlights.sort(
+              (left, right) => left.start - right.start || left.end - right.end,
+            );
+          }
           // A selector-driven trim start resolves over the protocol and can
           // land a few milliseconds after a highlight recorded at effectively
           // the same moment. The race must not drop that highlight, so a start
@@ -4838,7 +5053,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               finalHoldMs: finalHold,
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights: renderTimeline.highlights,
-              inputPath: paths.raw,
+              inputPath: renderInputPath,
               outputDir: testInfo.outputDir,
               outputPath: paths.rendered,
               sourceRange,

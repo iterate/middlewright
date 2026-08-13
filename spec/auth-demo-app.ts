@@ -50,6 +50,7 @@ export const routeAuthDemoApp = async (context: BrowserContext) => {
           <script>
             document.querySelector("#approve").addEventListener("click", () => {
               window.opener.postMessage("approved", "*");
+              window.close();
             });
           </script>
         </main>
