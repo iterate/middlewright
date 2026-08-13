@@ -18,6 +18,7 @@ import { extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Dialog, Locator, Page, TestInfo } from "@playwright/test";
 import type {
+  ActionMiddleware,
   ActionTiming,
   LocatorWithOriginal,
   Plugin,
@@ -160,11 +161,34 @@ export type VideoModeAddressBar = VideoModeSpan & {
   url: string;
 };
 
+/**
+ * Recorded facts for a popup opened by the recorded page. Timestamps share
+ * the parent timeline (ms since the parent instance's timebase); the child's
+ * raw screencast has its own clock, mapped via `recordingEndedAt`.
+ */
+export type VideoModeChild = {
+  /** Parent-timeline ms when the popup closed. Missing: open at render end. */
+  closedAt?: number;
+  highlights: VideoModeHighlight[];
+  /** Parent-timeline ms when the popup opened. */
+  openedAt: number;
+  /** Raw screencast artifact for the popup, when video was recorded. */
+  raw?: string;
+  /**
+   * Parent-timeline ms of the popup recorder's settled endpoint (the raw
+   * video's last frame). Missing when the popup closed itself — the raw
+   * video's own end approximates `closedAt` then.
+   */
+  recordingEndedAt?: number;
+  viewport?: VideoModeViewport;
+};
+
 export type VideoModeMetadata = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   timebase: "ms";
   addressBars: VideoModeAddressBar[];
   captions: VideoModeCaption[];
+  children: VideoModeChild[];
   deadAir: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   outputs: VideoModeOutputs;
@@ -268,6 +292,7 @@ type VideoModeState = {
   /** Distinguishes artifact filenames when a test has several instances. */
   artifactSuffix: string;
   captions: VideoModeCaption[];
+  children: VideoModeChild[];
   deadAirDepth: number;
   deadAirSpans: VideoModeSpan[];
   highlights: VideoModeHighlight[];
@@ -731,10 +756,14 @@ const metadataFor = (state: VideoModeState): VideoModeMetadata => {
       .filter((addressBar) => addressBar.end > addressBar.start)
       .sort((left, right) => left.start - right.start || left.end - right.end),
     captions: normalizeVideoCaptions(state.captions),
+    children: state.children.map((child) => ({
+      ...child,
+      highlights: normalizeVideoHighlights(child.highlights),
+    })),
     deadAir: mergeVideoSpans(state.deadAirSpans),
     highlights: normalizeVideoHighlights(state.highlights),
     outputs: state.outputs,
-    schemaVersion: 1,
+    schemaVersion: 2,
     sourceRange: normalizeSourceRange(state.sourceRange),
     timebase: "ms",
   };
@@ -4076,6 +4105,139 @@ const renderVideo = async (options: {
   return true;
 };
 
+/**
+ * The action-recording middleware, shared between a videoMode instance (which
+ * records onto its own state) and its popup child recorders (which record onto
+ * a child state that shares the parent's clock and dead-air spans).
+ */
+const videoModeActionMiddleware = (options: {
+  /** Gates recording on the owning instance's deadAir() nesting. */
+  deadAirState: VideoModeState;
+  highlight: ResolvedVideoModeHighlight;
+  /** Parent-only hook, used for first-locator trim start. */
+  onBeforeRecording?: (timing: ActionTiming) => void;
+  /** Where highlights, dead air, and images are recorded. */
+  recordingState: VideoModeState;
+  skipMethods: OverrideableMethod[];
+  skipStackFrames: string[];
+}): ActionMiddleware => {
+  const { deadAirState, highlight, recordingState: state, skipMethods, skipStackFrames } = options;
+
+  return async ({ args, locator, method, testInfo, timing }, next) => {
+    if (deadAirState.deadAirDepth > 0) return next();
+
+    // Skip if called from internal helpers (navigation, login flows etc)
+    if (skipStackFrames.length > 0) {
+      const stack = new Error().stack || "";
+      if (skipStackFrames.some((frame) => stack.includes(frame))) return next();
+    }
+
+    options.onBeforeRecording?.(timing);
+
+    if (method === "waitFor") {
+      let result: unknown;
+      try {
+        result = await next();
+      } finally {
+        recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 0 });
+      }
+
+      if (highlight.mode !== "off" && !skipMethods.includes(method)) {
+        await recordHighlight({
+          pan: "return",
+          color: highlight.color,
+          durationMs: highlight.durationMs,
+          locator,
+          method,
+          requireVisible: true,
+          startAfterScreenshot: true,
+          state,
+          testInfo,
+          thickness: highlight.thickness,
+        });
+      }
+
+      return result;
+    }
+
+    recordMiddlewareWaitBeforeVideoMode(state, timing);
+
+    if (skipMethods.includes(method)) {
+      try {
+        return await next();
+      } finally {
+        if (timing.attachedAtStart) {
+          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
+        }
+        recordAttachedWaitFromTiming(state, timing);
+      }
+    }
+
+    const recordedHighlight =
+      highlight.mode === "off"
+        ? undefined
+        : await recordHighlight({
+            pan: method === "fill" ? "off" : "stay",
+            color: highlight.color,
+            durationMs: highlight.durationMs,
+            locator,
+            method,
+            requireVisible: false,
+            startAfterScreenshot: false,
+            state,
+            testInfo,
+            thickness: highlight.thickness,
+          });
+
+    try {
+      const result = await next();
+      if (
+        recordedHighlight &&
+        method === "fill" &&
+        typeof args[0] === "string" &&
+        args[0].length > 0
+      ) {
+        await recordFillReveal({
+          highlight: recordedHighlight,
+          locator,
+          state,
+          testInfo,
+        });
+      }
+      if (recordedHighlight && state.startedAt !== undefined) {
+        recordedHighlight.actionEnd = Math.max(
+          recordedHighlight.start,
+          Math.round(performance.now() - state.startedAt),
+        );
+      }
+      if (recordedHighlight?.pan) {
+        await finalizePanHighlightAfterAction({
+          highlight: recordedHighlight,
+          locator,
+          state,
+        });
+      }
+      return result;
+    } finally {
+      if (recordedHighlight && state.startedAt !== undefined) {
+        recordedHighlight.actionEnd =
+          recordedHighlight.actionEnd ||
+          Math.max(
+            recordedHighlight.start,
+            Math.round(performance.now() - state.startedAt),
+          );
+      }
+      if (
+        !recordedHighlight &&
+        (timing.attachedAtStart || timing.attachedAt === undefined)
+      ) {
+        recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
+      }
+      recordAttachedWaitFromTiming(state, timing);
+    }
+  };
+};
+
 /** Records video-mode facts and renders annotations into the recorded video. */
 export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   if (process.env.PWDEBUG) {
@@ -4091,10 +4253,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       metadata: async () => ({
         addressBars: [],
         captions: [],
+        children: [],
         deadAir: [],
         highlights: [],
         outputs: {},
-        schemaVersion: 1,
+        schemaVersion: 2,
         sourceRange: {},
         timebase: "ms",
       }),
@@ -4137,6 +4300,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     addressBars: [],
     artifactSuffix: "",
     captions: [],
+    children: [],
     deadAirDepth: 0,
     deadAirSpans: [],
     highlightImageIndex: 0,
@@ -4198,14 +4362,104 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
   };
 
+  /**
+   * A popup recorder bound to this instance: it records facts (highlights on
+   * the parent clock, open/close spans, the popup's raw screencast) into
+   * `state.children` and renders nothing itself. Grandchild popups recurse —
+   * every popup lands flat in `state.children`. Popup dialogs are not
+   * annotated yet (tasks/popup-overlay-video.md).
+   */
+  const createPopupRecorder = (popupPage: Page): Plugin<object> | null => {
+    if (state.startedAt === undefined) {
+      return null;
+    }
+
+    const child: VideoModeChild = {
+      highlights: [],
+      openedAt: getVideoTimestamp(),
+      viewport: popupPage.viewportSize() || undefined,
+    };
+    state.children.push(child);
+    const childIndex = state.children.length;
+    // The child records onto the parent clock: highlight times land directly
+    // on the parent timeline, waits merge into the parent's dead air (a span
+    // is dead only if no source is active), and images get a child suffix.
+    const childRecordingState: VideoModeState = {
+      addressBars: [],
+      artifactSuffix: `${state.artifactSuffix}-popup-${childIndex}`,
+      captions: [],
+      children: [],
+      deadAirDepth: 0,
+      deadAirSpans: state.deadAirSpans,
+      highlightImageIndex: 0,
+      highlights: child.highlights,
+      outputs: {},
+      sourceRange: {},
+      startedAt: state.startedAt,
+    };
+
+    return {
+      // Named video-mode so middleware wait-timing lookups match.
+      name: "video-mode",
+      forPopup: ({ page: grandchildPage }) => createPopupRecorder(grandchildPage),
+      middleware: videoModeActionMiddleware({
+        deadAirState: state,
+        highlight,
+        recordingState: childRecordingState,
+        skipMethods,
+        skipStackFrames,
+      }),
+      testLifecycle: (emitter) => {
+        const onClose = () => {
+          if (child.closedAt === undefined) {
+            child.closedAt = getVideoTimestamp();
+          }
+        };
+        popupPage.on("close", onClose);
+        const offAfterTestFinalize = emitter.on(
+          "afterTestFinalize",
+          async ({ page, testInfo }) => {
+            child.viewport = child.viewport || page.viewportSize() || undefined;
+            const video = page.video();
+            if (!page.isClosed()) {
+              if (video) {
+                await settleVideoRecorder(page);
+              }
+              const closeStartedAt = performance.now();
+              await page.close({ runBeforeUnload: false });
+              const closeEndedAt = performance.now();
+              if (video && state.startedAt !== undefined) {
+                child.recordingEndedAt = Math.round(
+                  (closeStartedAt + closeEndedAt) / 2 - state.startedAt,
+                );
+              }
+            }
+            onClose();
+            if (video) {
+              const raw = suffixArtifactFileName(
+                VIDEO_MODE_RAW_FILE,
+                childRecordingState.artifactSuffix,
+              );
+              await mkdir(testInfo.outputDir, { recursive: true });
+              const recordedVideoPath = await video.path();
+              await waitForNonEmptyFile(recordedVideoPath);
+              await copyFile(recordedVideoPath, join(testInfo.outputDir, raw));
+              child.raw = raw;
+            }
+          },
+        );
+        return () => {
+          offAfterTestFinalize();
+          popupPage.off("close", onClose);
+        };
+      },
+    };
+  };
+
   return {
     ...controls,
     name: "video-mode",
-    // Auto-wrapped popups are not recorded yet: a parent-bound child recorder
-    // that composites the popup into the main video is the next step
-    // (tasks/popup-overlay-video.md, phase 2). Wrap popups manually with a
-    // fresh instance (popups: false) for a standalone popup video meanwhile.
-    forPopup: () => null,
+    forPopup: ({ page: popupPage }) => createPopupRecorder(popupPage),
     pageExtension: ({ testInfo }) => {
       if (activePage) {
         throw new Error(
@@ -4220,125 +4474,24 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       return { videoMode: controls };
     },
 
-    middleware: async ({ args, locator, method, testInfo, timing }, next) => {
-      if (state.deadAirDepth > 0) return next();
-
-      // Skip if called from internal helpers (navigation, login flows etc)
-      if (skipStackFrames.length > 0) {
-        const stack = new Error().stack || "";
-        if (skipStackFrames.some((frame) => stack.includes(frame))) return next();
-      }
-
-      if (
-        trimStart.firstLocator &&
-        state.sourceRange.start === undefined &&
-        state.startedAt !== undefined
-      ) {
-        controls.setStartTime(Math.max(0, Math.round(timing.actionStartedAt - state.startedAt)));
-      }
-
-      if (method === "waitFor") {
-        let result: unknown;
-        try {
-          result = await next();
-        } finally {
-          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 0 });
-        }
-
-        if (highlight.mode !== "off" && !skipMethods.includes(method)) {
-          await recordHighlight({
-            pan: "return",
-            color: highlight.color,
-            durationMs: highlight.durationMs,
-            locator,
-            method,
-            requireVisible: true,
-            startAfterScreenshot: true,
-            state,
-            testInfo,
-            thickness: highlight.thickness,
-          });
-        }
-
-        return result;
-      }
-
-      recordMiddlewareWaitBeforeVideoMode(state, timing);
-
-      if (skipMethods.includes(method)) {
-        try {
-          return await next();
-        } finally {
-          if (timing.attachedAtStart) {
-            recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
-          }
-          recordAttachedWaitFromTiming(state, timing);
-        }
-      }
-
-      const recordedHighlight =
-        highlight.mode === "off"
-          ? undefined
-          : await recordHighlight({
-              pan: method === "fill" ? "off" : "stay",
-              color: highlight.color,
-              durationMs: highlight.durationMs,
-              locator,
-              method,
-              requireVisible: false,
-              startAfterScreenshot: false,
-              state,
-              testInfo,
-              thickness: highlight.thickness,
-            });
-
-      try {
-        const result = await next();
+    middleware: videoModeActionMiddleware({
+      deadAirState: state,
+      highlight,
+      onBeforeRecording: (timing) => {
         if (
-          recordedHighlight &&
-          method === "fill" &&
-          typeof args[0] === "string" &&
-          args[0].length > 0
+          trimStart.firstLocator &&
+          state.sourceRange.start === undefined &&
+          state.startedAt !== undefined
         ) {
-          await recordFillReveal({
-            highlight: recordedHighlight,
-            locator,
-            state,
-            testInfo,
-          });
-        }
-        if (recordedHighlight && state.startedAt !== undefined) {
-          recordedHighlight.actionEnd = Math.max(
-            recordedHighlight.start,
-            Math.round(performance.now() - state.startedAt),
+          controls.setStartTime(
+            Math.max(0, Math.round(timing.actionStartedAt - state.startedAt)),
           );
         }
-        if (recordedHighlight?.pan) {
-          await finalizePanHighlightAfterAction({
-            highlight: recordedHighlight,
-            locator,
-            state,
-          });
-        }
-        return result;
-      } finally {
-        if (recordedHighlight && state.startedAt !== undefined) {
-          recordedHighlight.actionEnd =
-            recordedHighlight.actionEnd ||
-            Math.max(
-              recordedHighlight.start,
-              Math.round(performance.now() - state.startedAt),
-            );
-        }
-        if (
-          !recordedHighlight &&
-          (timing.attachedAtStart || timing.attachedAt === undefined)
-        ) {
-          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
-        }
-        recordAttachedWaitFromTiming(state, timing);
-      }
-    },
+      },
+      recordingState: state,
+      skipMethods,
+      skipStackFrames,
+    }),
 
     testLifecycle: (emitter) => {
       let addressBarOriginalGoto: Page["goto"] | undefined;
@@ -4352,6 +4505,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         dialogHighlightQueue = Promise.resolve();
         state.addressBars = [];
         state.captions = [];
+        state.children = [];
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;

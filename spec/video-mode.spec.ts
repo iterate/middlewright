@@ -927,7 +927,7 @@ test("deadAir runs actions without video highlighting and records metadata", asy
     await basePage.waitForSelector('#result:has-text("(no style)")');
     await expect(page.videoMode.metadata()).resolves.toMatchObject({
       outputs: {},
-      schemaVersion: 1,
+      schemaVersion: 2,
       timebase: "ms",
     });
     expect((await page.videoMode.metadata()).deadAir).toContainEqual(
@@ -947,7 +947,7 @@ test("deadAir runs actions without video highlighting and records metadata", asy
   expect(metadata).toMatchObject({
     highlights: [],
     outputs: {},
-    schemaVersion: 1,
+    schemaVersion: 2,
     timebase: "ms",
   });
   expect(metadata.deadAir).toContainEqual(

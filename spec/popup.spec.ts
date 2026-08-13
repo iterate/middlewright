@@ -116,6 +116,37 @@ test("popups: false leaves popups unwrapped", async ({ page: basePage, context }
   ]);
 });
 
+test("videoMode records popup actions as a child timeline", async ({
+  page: basePage,
+  context,
+}, testInfo) => {
+  await routeAuthDemoApp(context);
+  const video = videoMode({ finalHold: 0, highlight: { mode: "outline", duration: 300 }, trimStart: "never" });
+  await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+  await page.goto("https://app.middlewright.test/");
+
+  const popupPromise = basePage.waitForEvent("popup");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await (await popupPromise).getByRole("button", { name: "Approve" }).click();
+  await page.getByText("Signed in as mmkal").waitFor();
+
+  const metadata = await video.metadata();
+  expect(metadata).toMatchObject({
+    // The main timeline has only the main page's actions...
+    highlights: [{ method: "click" }, { method: "waitFor" }],
+    // ...and the popup's actions land on a child timeline of the same clock.
+    children: [
+      {
+        openedAt: expect.any(Number),
+        highlights: [{ method: "click" }],
+      },
+    ],
+  });
+  const [child] = metadata.children;
+  expect(child.openedAt).toBeGreaterThanOrEqual(metadata.highlights[0].start);
+  expect(child.openedAt).toBeLessThanOrEqual(child.highlights[0].start);
+});
+
 test("a manually wrapped popup runs actions through its own plugins", async ({
   page: basePage,
   context,
