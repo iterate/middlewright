@@ -265,6 +265,8 @@ export type VideoModeTrimStart = "auto" | "detect-blank" | "never" | ["selector"
 
 type VideoModeState = {
   addressBars: VideoModeAddressBar[];
+  /** Distinguishes artifact filenames when a test has several instances. */
+  artifactSuffix: string;
   captions: VideoModeCaption[];
   deadAirDepth: number;
   deadAirSpans: VideoModeSpan[];
@@ -862,13 +864,35 @@ const recordCaption = async <T>(
   }
 };
 
-const videoModeOutputPaths = (testInfo: TestInfo): VideoModeOutputPaths => {
+/**
+ * Insert a per-instance suffix before the extension: `video-mode.json` →
+ * `video-mode-2.json`. The first instance in a test keeps the unsuffixed
+ * names, so single-page tests are unaffected.
+ */
+const suffixArtifactFileName = (fileName: string, artifactSuffix: string) => {
+  if (!artifactSuffix) return fileName;
+  const extension = extname(fileName);
+  return `${fileName.slice(0, fileName.length - extension.length)}${artifactSuffix}${extension}`;
+};
+
+/**
+ * Registrations per testInfo.outputDir. Each videoMode instance added within
+ * one test (e.g. a fresh instance for a popup) gets its own artifact
+ * namespace so it can't clobber the main page's files.
+ */
+const videoModeRegistrationCounts = new Map<string, number>();
+
+const videoModeOutputPaths = (
+  testInfo: TestInfo,
+  artifactSuffix: string,
+): VideoModeOutputPaths => {
+  const name = (fileName: string) => suffixArtifactFileName(fileName, artifactSuffix);
   return {
-    metadata: join(testInfo.outputDir, VIDEO_MODE_METADATA_FILE),
-    player: join(testInfo.outputDir, VIDEO_MODE_PLAYER_FILE),
-    raw: join(testInfo.outputDir, VIDEO_MODE_RAW_FILE),
-    rendered: join(testInfo.outputDir, VIDEO_MODE_RENDERED_FILE),
-    reportPlayer: join(testInfo.outputDir, VIDEO_MODE_REPORT_PLAYER_FILE),
+    metadata: join(testInfo.outputDir, name(VIDEO_MODE_METADATA_FILE)),
+    player: join(testInfo.outputDir, name(VIDEO_MODE_PLAYER_FILE)),
+    raw: join(testInfo.outputDir, name(VIDEO_MODE_RAW_FILE)),
+    rendered: join(testInfo.outputDir, name(VIDEO_MODE_RENDERED_FILE)),
+    reportPlayer: join(testInfo.outputDir, name(VIDEO_MODE_REPORT_PLAYER_FILE)),
   };
 };
 
@@ -1258,8 +1282,8 @@ const recordHighlight = async (options: {
         : undefined;
 
     const image = pan
-      ? `video-mode-pan-${options.state.highlightImageIndex}.png`
-      : `video-mode-highlight-${options.state.highlightImageIndex}.png`;
+      ? `video-mode-pan${options.state.artifactSuffix}-${options.state.highlightImageIndex}.png`
+      : `video-mode-highlight${options.state.artifactSuffix}-${options.state.highlightImageIndex}.png`;
     options.state.highlightImageIndex += 1;
     const imagePath = join(options.testInfo.outputDir, image);
     await mkdir(options.testInfo.outputDir, { recursive: true });
@@ -1546,7 +1570,7 @@ const recordFillReveal = async (options: {
       return;
     }
 
-    const image = `video-mode-fill-${options.state.highlightImageIndex}.png`;
+    const image = `video-mode-fill${options.state.artifactSuffix}-${options.state.highlightImageIndex}.png`;
     options.state.highlightImageIndex += 1;
     await mkdir(options.testInfo.outputDir, { recursive: true });
     await options.locator.page().screenshot({
@@ -3580,7 +3604,7 @@ const playwrightReportAttachmentName = async (path: string) => {
   return `${createHash("sha1").update(data).digest("hex")}${extname(path)}`;
 };
 
-const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
+const videoModePlayerHtml = (options: { metadata: string; raw: string; rendered?: string }) => {
   const primary = options.rendered || options.raw;
   const primaryLabel = options.rendered ? "Rendered video" : "Raw video";
   const primaryActiveKey = options.rendered ? "rendered" : "raw";
@@ -3724,7 +3748,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
       <div>frame: <span id="frame">0</span></div>
       <div>duration: <span id="duration">?</span>s</div>
       <div class="hint">Left/right steps one frame. Shift+left/right steps ten. Space toggles play.</div>
-      <div class="hint"><a href="${VIDEO_MODE_METADATA_FILE}">${VIDEO_MODE_METADATA_FILE}</a></div>
+      <div class="hint"><a href="${options.metadata}">${options.metadata}</a></div>
     </aside>
   </main>
   <script>
@@ -3840,6 +3864,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
 
 const renderVideo = async (options: {
   addressBars: VideoModeAddressBar[];
+  artifactSuffix: string;
   captions: VideoModeCaption[];
   dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
   dialogPostHoldMs: number;
@@ -3968,7 +3993,7 @@ const renderVideo = async (options: {
   );
   const captionFile =
     renderedAddressBars.length > 0 || renderedCaptions.length > 0
-      ? join(options.outputDir, VIDEO_MODE_CAPTIONS_FILE)
+      ? join(options.outputDir, suffixArtifactFileName(VIDEO_MODE_CAPTIONS_FILE, options.artifactSuffix))
       : undefined;
 
   if (captionFile) {
@@ -3982,7 +4007,9 @@ const renderVideo = async (options: {
     );
   }
   const dialogFile =
-    renderedDialogs.length > 0 ? join(options.outputDir, VIDEO_MODE_DIALOGS_FILE) : undefined;
+    renderedDialogs.length > 0
+      ? join(options.outputDir, suffixArtifactFileName(VIDEO_MODE_DIALOGS_FILE, options.artifactSuffix))
+      : undefined;
 
   if (dialogFile) {
     await writeFile(
@@ -4076,7 +4103,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           throw new Error("videoMode.outputPaths() is only available after addPlugins registers videoMode");
         }
 
-        return videoModeOutputPaths(testInfoForOutputPaths);
+        // Debug mode writes no artifacts, so instances don't need namespacing.
+        return videoModeOutputPaths(testInfoForOutputPaths, "");
       },
       setEndTime: () => {},
       setStartTime: () => {},
@@ -4106,6 +4134,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const trimStart = resolveTrimStart(options.trimStart);
   const state: VideoModeState = {
     addressBars: [],
+    artifactSuffix: "",
     captions: [],
     deadAirDepth: 0,
     deadAirSpans: [],
@@ -4128,6 +4157,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     return recording;
   };
   let testInfoForOutputPaths: TestInfo | undefined;
+  // Guards against wiring one instance to two pages at once (e.g. a popup):
+  // beforeTest resets state, so that would wipe the first page's timeline.
+  let activePage: Page | undefined;
   const getVideoTimestamp = () => {
     const now = performance.now();
     return Math.round(now - (state.startedAt || now));
@@ -4146,7 +4178,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         return metadataFor(state);
       }
 
-      return await readVideoModeMetadata(videoModeOutputPaths(testInfoForOutputPaths).metadata, () =>
+      return await readVideoModeMetadata(videoModeOutputPaths(testInfoForOutputPaths, state.artifactSuffix).metadata, () =>
         metadataFor(state),
       );
     },
@@ -4155,7 +4187,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         throw new Error("videoMode.outputPaths() is only available after addPlugins registers videoMode");
       }
 
-      return videoModeOutputPaths(testInfoForOutputPaths);
+      return videoModeOutputPaths(testInfoForOutputPaths, state.artifactSuffix);
     },
     setEndTime: (ms = getVideoTimestamp()) => {
       state.sourceRange.end = resolveVideoTimestamp("setEndTime", ms);
@@ -4169,7 +4201,16 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     ...controls,
     name: "video-mode",
     pageExtension: ({ testInfo }) => {
+      if (activePage) {
+        throw new Error(
+          "this videoMode() instance is already recording another page - " +
+            "create a fresh videoMode() instance for each page (e.g. for a popup)",
+        );
+      }
       testInfoForOutputPaths = testInfo;
+      const registrations = (videoModeRegistrationCounts.get(testInfo.outputDir) || 0) + 1;
+      videoModeRegistrationCounts.set(testInfo.outputDir, registrations);
+      state.artifactSuffix = registrations === 1 ? "" : `-${registrations}`;
       return { videoMode: controls };
     },
 
@@ -4301,6 +4342,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       let onDialog: ((dialog: Dialog) => void) | undefined;
       let stopObservingPlaywrightSteps = () => {};
       const offBeforeTest = emitter.on("beforeTest", async ({ page, testInfo }) => {
+        activePage = page;
         dialogHighlightQueue = Promise.resolve();
         state.addressBars = [];
         state.captions = [];
@@ -4476,7 +4518,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         const video = page.video();
 
         if (video) {
-          const paths = videoModeOutputPaths(testInfo);
+          const paths = videoModeOutputPaths(testInfo, state.artifactSuffix);
           await mkdir(testInfo.outputDir, { recursive: true });
           let dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
           let finalFrame: { path: string; viewport: VideoModeViewport } | undefined;
@@ -4486,7 +4528,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             if (!viewport) {
               throw new Error("videoMode cannot capture a post-dialog frame without a viewport");
             }
-            const path = join(testInfo.outputDir, VIDEO_MODE_DIALOG_POST_FRAME_FILE);
+            const path = join(
+              testInfo.outputDir,
+              suffixArtifactFileName(VIDEO_MODE_DIALOG_POST_FRAME_FILE, state.artifactSuffix),
+            );
             await page.screenshot({ path, scale: "css" });
             dialogPostFrame = { path, viewport };
           }
@@ -4496,7 +4541,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             if (!viewport) {
               throw new Error("videoMode cannot capture a final frame without a viewport");
             }
-            const path = join(testInfo.outputDir, VIDEO_MODE_FINAL_FRAME_FILE);
+            const path = join(
+              testInfo.outputDir,
+              suffixArtifactFileName(VIDEO_MODE_FINAL_FRAME_FILE, state.artifactSuffix),
+            );
             await page.screenshot({ path, scale: "css" });
             finalFrame = { path, viewport };
           }
@@ -4527,8 +4575,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const recordedVideoPath = await video.path();
           await waitForNonEmptyFile(recordedVideoPath);
           await copyFile(recordedVideoPath, paths.raw);
-          state.outputs.raw = VIDEO_MODE_RAW_FILE;
-          await testInfo.attach("video-raw", {
+          state.outputs.raw = suffixArtifactFileName(VIDEO_MODE_RAW_FILE, state.artifactSuffix);
+          await testInfo.attach(`video-raw${state.artifactSuffix}`, {
             contentType: "video/webm",
             path: paths.raw,
           });
@@ -4621,6 +4669,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           ) {
             const wroteRenderedVideo = await renderVideo({
               addressBars: renderTimeline.addressBars,
+              artifactSuffix: state.artifactSuffix,
               captions: renderTimeline.captions,
               deadAir: renderTimeline.deadAir,
               dialogPostFrame,
@@ -4638,31 +4687,40 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             });
 
             if (wroteRenderedVideo) {
-              state.outputs.rendered = VIDEO_MODE_RENDERED_FILE;
-              await testInfo.attach("video-rendered", {
+              state.outputs.rendered = suffixArtifactFileName(
+                VIDEO_MODE_RENDERED_FILE,
+                state.artifactSuffix,
+              );
+              await testInfo.attach(`video-rendered${state.artifactSuffix}`, {
                 contentType: "video/webm",
                 path: paths.rendered,
               });
             }
           }
 
-          state.outputs.player = VIDEO_MODE_PLAYER_FILE;
+          state.outputs.player = suffixArtifactFileName(VIDEO_MODE_PLAYER_FILE, state.artifactSuffix);
+          const metadataFileName = suffixArtifactFileName(
+            VIDEO_MODE_METADATA_FILE,
+            state.artifactSuffix,
+          );
           await writeFile(
             paths.player,
             videoModePlayerHtml({
+              metadata: metadataFileName,
               raw: state.outputs.raw,
               rendered: state.outputs.rendered,
             }),
           );
 
           const reportPlayerHtml = videoModePlayerHtml({
+            metadata: metadataFileName,
             raw: await playwrightReportAttachmentName(paths.raw),
             rendered: state.outputs.rendered
               ? await playwrightReportAttachmentName(paths.rendered)
               : undefined,
           });
           await writeFile(paths.reportPlayer, reportPlayerHtml);
-          await testInfo.attach("video-mode-player", {
+          await testInfo.attach(`video-mode-player${state.artifactSuffix}`, {
             contentType: "text/html",
             path: paths.reportPlayer,
           });
@@ -4679,20 +4737,23 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           metadata.outputs.rendered ||
           sourceRangeIsSet(metadata.sourceRange)
         ) {
-          const path = videoModeOutputPaths(testInfo).metadata;
+          const path = videoModeOutputPaths(testInfo, state.artifactSuffix).metadata;
           await mkdir(testInfo.outputDir, { recursive: true });
           await writeFile(path, `${JSON.stringify(metadata, null, 2)}\n`);
-          await testInfo.attach("video-mode", {
+          await testInfo.attach(`video-mode${state.artifactSuffix}`, {
             contentType: "application/json",
             path,
           });
         }
 
         state.startedAt = undefined;
-        console.log(`video-mode metadata written to ${videoModeOutputPaths(testInfo).metadata}`);
+        console.log(
+          `video-mode metadata written to ${videoModeOutputPaths(testInfo, state.artifactSuffix).metadata}`,
+        );
       });
 
       return () => {
+        activePage = undefined;
         stopObservingPlaywrightSteps();
         offBeforeTest();
         offAfterTestFinalize();

@@ -351,6 +351,23 @@ export default defineConfig({
 });
 ```
 
+### Popups
+
+Pages you never wrap (popups, `context.newPage()`) fall through to plain Playwright. To get plugin behavior in a popup — an OAuth window, say — wrap it with a second `addPlugins` call, using **fresh plugin instances**:
+
+```ts
+const popupPromise = page.waitForEvent("popup");
+await page.getByRole("button", { name: "Sign in" }).click();
+await using popup = await addPlugins({
+  page: await popupPromise,
+  testInfo,
+  plugins: [spinnerWaiter(), videoMode()],
+});
+await popup.getByRole("button", { name: "Approve" }).click();
+```
+
+Playwright screencasts each page separately, so the popup's `videoMode` produces its own video; its artifacts get a `-2` suffix (`video-rendered-2.webm`, `video-mode-2.json`, …) so they sit next to the main page's in the same output dir. Reusing the main page's `videoMode` instance on the popup would wipe the main timeline, so it throws instead — one instance per page. See [spec/popup.spec.ts](spec/popup.spec.ts).
+
 ## Writing your own plugin
 
 **Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (video annotations/artifacts + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.

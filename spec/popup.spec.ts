@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import type { BrowserContext } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
+import { routeAuthDemoApp } from "./auth-demo-app.ts";
 
 test("a popup wrapped with addPlugins runs actions through its own plugins", async ({
   page: basePage,
@@ -68,48 +68,21 @@ test("each videoMode instance still owns its artifacts after the test", async ({
   });
 });
 
-/**
- * app.middlewright.test shows a Sign in button that opens an auth popup on
- * auth.middlewright.test; approving there posts a message back to the opener,
- * which then shows who signed in. Routed on the context so the popup page is
- * covered too.
- */
-const routeAuthDemoApp = async (context: BrowserContext) => {
-  await context.route("https://app.middlewright.test/**", async (route) => {
-    await route.fulfill({
-      body: `
-        <main>
-          <button id="signin">Sign in</button>
-          <output></output>
-          <script>
-            document.querySelector("#signin").addEventListener("click", () => {
-              window.open("https://auth.middlewright.test/authorize");
-            });
-            window.addEventListener("message", (event) => {
-              if (event.data === "approved") {
-                document.querySelector("output").textContent = "Signed in as mmkal";
-              }
-            });
-          </script>
-        </main>
-      `,
-      contentType: "text/html",
-    });
-  });
-  await context.route("https://auth.middlewright.test/**", async (route) => {
-    await route.fulfill({
-      body: `
-        <main>
-          <h1>Authorize middlewright?</h1>
-          <button id="approve">Approve</button>
-          <script>
-            document.querySelector("#approve").addEventListener("click", () => {
-              window.opener.postMessage("approved", "*");
-            });
-          </script>
-        </main>
-      `,
-      contentType: "text/html",
-    });
-  });
-};
+test("reusing one videoMode instance on a popup fails with a clear error", async ({
+  page: basePage,
+  context,
+}, testInfo) => {
+  await routeAuthDemoApp(context);
+  const video = videoMode({ finalHold: 0, highlight: { mode: "outline", duration: 300 }, trimStart: "never" });
+  await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+  await page.goto("https://app.middlewright.test/");
+
+  const popupPromise = basePage.waitForEvent("popup");
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  // Wiring the same instance to a second page would wipe the main page's
+  // timeline, so it must fail loudly instead.
+  await expect(
+    addPlugins({ page: await popupPromise, testInfo, plugins: [video] }),
+  ).rejects.toThrow("create a fresh videoMode() instance for each page");
+});
