@@ -6,7 +6,7 @@ branch: popup-plugins
 
 # Popup support (auth popout windows)
 
-**Status summary**: investigation done. Wrapping a popup with `addPlugins` already works for middleware plugins — no code change needed there. Video mode has a real gap: two `videoMode()` instances in one test clobber each other's artifacts. Next step is a spec capturing the intended behavior; the fix (artifact namespacing) comes after.
+**Status summary**: investigation done, spec written. Wrapping a popup with `addPlugins` already works for middleware plugins — no code change needed there, and a passing spec proves it. Video mode has a real gap: two `videoMode()` instances in one test clobber each other's artifacts; a failing intended-behavior spec captures it. The fix (artifact namespacing) is not implemented yet.
 
 The pattern this should support:
 
@@ -30,8 +30,8 @@ await using popup = await addPlugins({
 
 ## Checklist
 
-- [ ] spec: popup wrapped with `addPlugins` runs actions through its own plugins, timelines isolated in-memory during the test (should pass today)
-- [ ] spec: after the test, each `videoMode` instance still owns its artifacts (intended-behavior spec, expected to fail today on the artifact collision)
+- [x] spec: popup wrapped with `addPlugins` runs actions through its own plugins, timelines isolated in-memory during the test _(`spec/popup.spec.ts`, passes — no code change needed for this half)_
+- [x] spec: after the test, each `videoMode` instance still owns its artifacts _(`spec/popup.spec.ts`, intended-behavior spec — fails today: both instances resolve `video-mode.json` in the same outputDir, and the two report attachments even share one content hash)_
 - [ ] decide artifact namespacing for multiple `videoMode` instances per test (auto-index like `video-mode-2.json`, vs explicit `videoMode({ name: "popup" })`)
 - [ ] implement the namespacing (metadata, raw/rendered video, highlight/pan images, player HTML, attachment names)
 - [ ] guard against registering an already-active `videoMode` instance on a second page (clear error pointing at fresh-instance-per-page)
@@ -40,4 +40,4 @@ await using popup = await addPlugins({
 
 ## Implementation log
 
-- 2026-08-13: investigated plugin-system + video-mode internals. Plan: `spec/popup.spec.ts` with an auth-popup demo app (`app.middlewright.test` opens `auth.middlewright.test`, Approve posts a message back to the opener). Assumption: intended behavior is *separate* artifacts per instance, not a composited single video.
+- 2026-08-13: investigated plugin-system + video-mode internals. Wrote `spec/popup.spec.ts` with an auth-popup demo app (`app.middlewright.test` opens `auth.middlewright.test`, Approve posts a message back to the opener). Assumption: intended behavior is *separate* artifacts per instance, not a composited single video. Test run confirms: middleware test green, artifact test red at `outputPaths()` equality.
