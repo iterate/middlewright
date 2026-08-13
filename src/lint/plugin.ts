@@ -21,8 +21,8 @@ const preferLocatorWaits = {
     fixable: "code",
     schema: [],
     messages: {
-      visible: "Use locator.waitFor() instead of expect(locator).toBeVisible().",
-      text: "Use locator.filter({ hasText }).waitFor() instead of expect(locator).toContainText().",
+      visible: "Use locator.waitFor() instead of expect(locator).toBeVisible(). That way you'll benefit from spinnerWaiter's automatic loading UI detection.",
+      text: "Use locator.filter({ hasText }).waitFor() instead of expect(locator).toContainText(). That way you'll benefit from spinnerWaiter's automatic loading UI detection.",
     },
   },
   create(context: any) {
@@ -72,8 +72,17 @@ const requireTimeoutComment = {
     },
     schema: requiredPatternsSchema,
     messages: {
-      unexplained:
-        "Usually remove the timeout and add loading UI for spinnerWaiter. If a product or Middlewright limit prevents that, add a nearby // comment matching every required pattern: {{patterns}}. See https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts",
+      unexplained: dedent`
+        Avoid locator timeouts by using spinnerWaiter. Best ways to resolve:
+        - If there's already loading UI, just remove the timeout and rely on spinnerWaiter to wait for the loading UI.
+        - If there's no loading UI, add loading UI and remove the timeout.
+        - If there's a loading UI but it takes even longer than the spinnerWaiter spinner timeout, use \`await spinnerWaiter.settings.run({ spinnerTimeout: 123_456 }, async () => ...)\` or similar to wait even longer for the spinner to complete.
+        - If there's loading UI from a part of the code that we don't control (e.g. a library) and it isn't matched by the default spinner selectors, use \`await spinnerWaiter.settings.run({ spinnerSelectors: ["myCustomSpinnerClass"] }, async () => ...)\`
+        - If it is truly impossible for there to be loading UI, add a nearby // comment matching every required pattern: {{patterns}}.
+        - If you're in a block which has done \`await spinnerWaiter.settings.run({ disabled: true }, async () => ...)\`, you should probably *un-disable* for that block and apply the above suggestions to the inner code.
+
+        See https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts for more details.
+      `
     },
   },
   create(context: any) {
@@ -120,8 +129,13 @@ const preferPositiveWaits = {
     },
     schema: requiredPatternsSchema,
     messages: {
-      detached:
-        "Wait for positive UI instead of element detachment, or explain an exceptional detached wait in a nearby // comment matching every required pattern: {{patterns}}. See https://github.com/iterate/middlewright#prefer-positive-waits-over-absence",
+      detached: dedent`
+        Wait for positive UI instead of element detachment.
+        If there's no postitive UI to wait for your first port of call should be to *add* the positive UI to the product.
+        If it is truly impossible for there to be a positive UI, then that is quite surprising and you should question that.
+        If you have questioned it and it is still impossible, then you should make sure you've first validated that the UI that's becoming detached previously was visible.
+        Then explain why it's impossible, and why it's safe to wait for detachment in a nearby // comment matching every required pattern: {{patterns}}.
+      `
     },
   },
   create(context: any) {
@@ -254,3 +268,9 @@ export default {
     "require-timeout-comment": requireTimeoutComment,
   },
 };
+
+function dedent(strings: TemplateStringsArray, ...values: any[]) {
+  const indented = strings.map((string, i) => string + (values[i] || "")).join("");
+  const startWhitespace = indented.match(/^(\s*)/)?.[0] || "";
+  return indented.replaceAll(startWhitespace, '\n').replace(/\n$/, '');
+}
