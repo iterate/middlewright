@@ -73,11 +73,13 @@ test("renders the popup as a dimmed overlay in one composed video", async ({
     outputs: { rendered: "video-rendered.webm" },
   });
   const frames = await videoFrameSamples(video.outputPaths().rendered);
-  // The demo app's background is a light gray throughout, so a darkened
-  // corner marks a frame where the popup backdrop dim is active (~40% black
-  // over ~244 gray lands around 146).
-  const dimmedFrames = frames.filter((frame) => frame.corner < 200);
-  const litFrames = frames.filter((frame) => frame.corner >= 200);
+  // The demo app's background is a light gray (~245) throughout, so a
+  // darkened corner marks a frame where the popup backdrop dim is active.
+  // The downscale blends the thin dim border with its bright neighbors, so
+  // dimmed corners read ~211 (overlay up) down to ~147 (exit fade), against
+  // ~245 when lit.
+  const dimmedFrames = frames.filter((frame) => frame.corner < 235);
+  const litFrames = frames.filter((frame) => frame.corner >= 235);
   expect(dimmedFrames.length).toBeGreaterThan(0);
   expect(litFrames.length).toBeGreaterThan(0);
   // While dimmed, the popup's white card sits centered above the backdrop.

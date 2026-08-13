@@ -4113,9 +4113,11 @@ const CHILD_OVERLAY_FADE_MS = 200;
 /** A popup screencast placed on the parent timeline as a scaled overlay. */
 type VideoModeChildLayer = {
   child: VideoModeChild;
+  /** Composite-time close (ms) — where the exit fade starts. */
+  closeMs: number;
   /** Shift applied to child-raw frames to land them in composite time (ms). */
   delayMs: number;
-  /** Overlay visibility window in composite time (ms). */
+  /** Overlay visibility window in composite time (ms), including exit fade. */
   enableFromMs: number;
   enableToMs: number;
   /** Scaled placement in composite pixels, centered and even-sized. */
@@ -4154,16 +4156,21 @@ const childCompositeLayers = async (options: {
     const width = Math.max(2, 2 * Math.round((rawInfo.width * scale) / 2));
     const height = Math.max(2, 2 * Math.round((rawInfo.height * scale) / 2));
     const enableFromMs = Math.max(0, child.openedAt + options.timelineOffsetMs);
-    const enableToMs = Math.min(
+    const closeMs = Math.min(
       options.video.durationMs,
       (child.closedAt === undefined ? child.openedAt + rawInfo.durationMs : child.closedAt) +
         options.timelineOffsetMs,
     );
+    // The exit fade runs AFTER close (the screencast's padded final frame
+    // supplies footage): a popup that closes itself right after a click would
+    // otherwise put that click — and its hold's freeze frame — mid-fade.
+    const enableToMs = Math.min(options.video.durationMs, closeMs + CHILD_OVERLAY_FADE_MS);
 
-    if (enableToMs <= enableFromMs) continue;
+    if (closeMs <= enableFromMs) continue;
 
     layers.push({
       child,
+      closeMs,
       delayMs: childOffsetMs + options.timelineOffsetMs,
       enableFromMs,
       enableToMs,
@@ -4188,12 +4195,19 @@ const childCompositeLayers = async (options: {
  * never matters which source triggered them.
  */
 const compositeChildOverlays = async (options: {
+  /** Continuous frame rate for the overlay chains (see fps note below). */
+  fps: number;
   inputPath: string;
   layers: VideoModeChildLayer[];
   outputPath: string;
 }) => {
   const filters: string[] = [];
-  let currentLabel = "0:v";
+  // The parent screencast is as sparse as the child ones (a static page emits
+  // no frames), and overlay only emits output at primary-input frame times —
+  // without resampling, the whole popup window can contain zero composite
+  // frames. A continuous base gives every enable window frames to land on.
+  filters.push(`[0:v]fps=${formatFilterNumber(options.fps)}[base]`);
+  let currentLabel = "base";
 
   options.layers.forEach((layer, index) => {
     const from = formatSeconds(layer.enableFromMs);
@@ -4202,7 +4216,7 @@ const compositeChildOverlays = async (options: {
     const dimLabel = `dim${index}`;
     const childLabel = `popup${index}`;
     const outLabel = `composite${index}`;
-    const fadeOutStartMs = Math.max(layer.enableFromMs, layer.enableToMs - CHILD_OVERLAY_FADE_MS);
+    const fadeOutStartMs = layer.closeMs;
 
     filters.push(
       `[${currentLabel}]drawbox=x=0:y=0:w=iw:h=ih:color=black@${CHILD_OVERLAY_BACKDROP_OPACITY}:t=fill:${enable}[${dimLabel}]`,
@@ -4210,6 +4224,11 @@ const compositeChildOverlays = async (options: {
     filters.push(
       [
         `[${index + 1}:v]setpts=PTS+${formatSeconds(layer.delayMs)}/TB`,
+        // A mostly-static popup screencast has sparse frames; without
+        // resampling, the frame that happens to pass `fade` mid-ramp keeps
+        // its partial alpha while framesync repeats it for the whole window,
+        // ghosting the overlay. Continuous frames give fade real timestamps.
+        `fps=${formatFilterNumber(options.fps)}`,
         `scale=w=${layer.width}:h=${layer.height}`,
         "format=yuva420p",
         `fade=t=in:st=${from}:d=${formatSeconds(CHILD_OVERLAY_FADE_MS)}:alpha=1`,
@@ -4264,9 +4283,28 @@ const projectChildHighlight = (options: {
     layer.rawInfo.height / viewport.height,
   );
   const scale = viewportToChildPixels * (layer.width / layer.rawInfo.width);
+  // Holds clone the composite frame at actionEnd. An action that closes the
+  // popup (Approve on an OAuth popup) puts that frame past close — move the
+  // highlight's source slice back into stable popup-visible footage, and
+  // widen it to a couple of frames so the trim can't come up empty (an
+  // instant click's slice is a few ms — often between frame ticks).
+  const holdSafeEndMs = Math.floor(layer.closeMs - 2 * options.video.frameDurationMs);
+  let { actionEnd, end, start } = highlight;
+  if (actionEnd !== undefined && actionEnd > holdSafeEndMs) {
+    const holdMs = end - start;
+    const sliceMs = Math.max(2 * options.video.frameDurationMs, actionEnd - start);
+    const earliestStartMs = layer.enableFromMs + CHILD_OVERLAY_FADE_MS;
+    actionEnd = holdSafeEndMs;
+    start = Math.max(earliestStartMs, actionEnd - sliceMs);
+    actionEnd = Math.max(actionEnd, start + 1);
+    end = start + holdMs;
+  }
 
   return {
     ...highlight,
+    actionEnd,
+    end,
+    start,
     dialog: undefined,
     fillReveal: undefined,
     image: undefined,
@@ -4951,6 +4989,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               suffixArtifactFileName(VIDEO_MODE_COMPOSITE_FILE, state.artifactSuffix),
             );
             await compositeChildOverlays({
+              fps: 1000 / rawVideoInfo.frameDurationMs,
               inputPath: paths.raw,
               layers: childLayers,
               outputPath: compositePath,
