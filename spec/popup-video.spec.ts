@@ -13,7 +13,7 @@ test("records separate videos for the main page and an auth popup", async ({
   const video = videoMode({ finalHold: 0, highlight: { mode: "outline", duration: 300 }, trimStart: "never" });
   let popupVideo!: ReturnType<typeof videoMode>;
   {
-    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
+    await using page = await addPlugins({ page: basePage, testInfo, plugins: [video], popups: false });
     await page.goto("https://app.middlewright.test/");
 
     const popupPromise = basePage.waitForEvent("popup");

@@ -4113,6 +4113,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     return {
       ...controls,
       name: "video-mode",
+      forPopup: () => null,
       pageExtension: ({ testInfo }) => {
         testInfoForOutputPaths = testInfo;
         return { videoMode: controls };
@@ -4200,6 +4201,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   return {
     ...controls,
     name: "video-mode",
+    // Auto-wrapped popups are not recorded yet: a parent-bound child recorder
+    // that composites the popup into the main video is the next step
+    // (tasks/popup-overlay-video.md, phase 2). Wrap popups manually with a
+    // fresh instance (popups: false) for a standalone popup video meanwhile.
+    forPopup: () => null,
     pageExtension: ({ testInfo }) => {
       if (activePage) {
         throw new Error(
