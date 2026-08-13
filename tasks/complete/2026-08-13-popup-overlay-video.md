@@ -1,20 +1,28 @@
 # Popup overlay videos + auto-wrapped popup plugins
 
 ---
-status: in-progress
+status: done
 size: large
 branch: popup-overlay
 base: popup-plugins (PR #32)
+pr: https://github.com/iterate/middlewright/pull/33
 ---
 
-**Status summary**: design settled via grill session (decisions below). Implementation in 4 phases; starting phase 1.
+**Status summary**: done. Popups auto-wrap by default (plugin-system `forPopup` hook, `popups: false` opt-out, double-wrap error). Video mode records popups as child timelines and renders them as a dimmed 90%-fit overlay in ONE composed video via a two-pass render (composite pass, then the untouched annotation pass). Permanent demo spec + README updated. Deferred: popup dialog annotations; unified-piece holds inside the overlay use plain freezes (child pans/fill-reveals degrade to box highlights).
 
 ## Checklist
 
-- [ ] Phase 1: plugin-system guard + auto-wrap (`popups: false` opt-out, `forPopup` hook, double-wrap error, spec migration)
-- [ ] Phase 2: videoMode child recorder — facts + metadata `children` schema
-- [ ] Phase 3: render integration — composited timeline, overlay transform, cursor projection
-- [ ] Phase 4: docs + permanent demo spec + refreshed PR video
+- [x] Phase 1: plugin-system guard + auto-wrap _(`popups: false`, `forPopup`, double-wrap error; specs migrated)_
+- [x] Phase 2: videoMode child recorder — facts + metadata `children` schema _(v2; parent-clock child highlights, raw screencast copy, close calibration)_
+- [x] Phase 3: render integration _(two-pass: composite with dim+fade+fps-resample, then existing piece machinery; projected child highlights; hold slices anchored clear of close)_
+- [x] Phase 4: docs + permanent demo spec (`spec/popup-overlay-demo.spec.ts`) + refreshed PR video
+
+## Implementation notes (what differed from the plan)
+
+- Decision 6's "unified piece timeline" landed as a **two-pass render**: pass A composites popup screencasts onto the parent raw footage (same timeline), pass B is the existing single-source piece/hold/cursor machinery over the composite. Holds freeze the composite as decided; child highlights project into composite coordinates as plain box/pointer highlights (child pans/fill-reveals/stills degrade — upgrade path stays open).
+- Both ffmpeg chains need `fps` resampling: static pages emit sparse screencast frames, which ghosted fades and left the popup window without composite frames.
+- Exit fade runs AFTER close (screencast's padded final frame supplies footage) — a self-closing popup otherwise puts its own click mid-fade.
+- Deferred: popup dialog annotations, scale-zoom enter animation (alpha fade only).
 
 ## Context
 

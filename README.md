@@ -353,20 +353,25 @@ export default defineConfig({
 
 ### Popups
 
-Pages you never wrap (popups, `context.newPage()`) fall through to plain Playwright. To get plugin behavior in a popup — an OAuth window, say — wrap it with a second `addPlugins` call, using **fresh plugin instances**:
+Popups are wrapped automatically. When a wrapped page opens one — an OAuth window, say — the popup gets the same plugin treatment, no wiring:
 
 ```ts
 const popupPromise = page.waitForEvent("popup");
 await page.getByRole("button", { name: "Sign in" }).click();
-await using popup = await addPlugins({
-  page: await popupPromise,
-  testInfo,
-  plugins: [spinnerWaiter(), videoMode()],
-});
+const popup = await popupPromise; // already wrapped
 await popup.getByRole("button", { name: "Approve" }).click();
 ```
 
-Playwright screencasts each page separately, so the popup's `videoMode` produces its own video; its artifacts get a `-2` suffix (`video-rendered-2.webm`, `video-mode-2.json`, …) so they sit next to the main page's in the same output dir. Reusing the main page's `videoMode` instance on the popup would wipe the main timeline, so it throws instead — one instance per page. See [spec/popup.spec.ts](spec/popup.spec.ts).
+In video mode, the popup renders as an overlay **in the main page's video**: scaled to fit 90% of the frame over the dimmed page, faded in and out on open/close, with popup clicks pointer-annotated inside the overlay. One composed video per test, popups included. The popup's facts land in `video-mode.json` under `children`.
+
+Details and escape hatches:
+
+- Plugins can control what a popup gets via the `forPopup(ctx)` hook — return a plugin for the popup, or `null` to skip. Hookless plugins are re-registered as-is (fine for stateless ones).
+- `addPlugins({ ..., popups: false })` turns auto-wrap off. You can then wrap the popup manually with **fresh plugin instances** — a fresh `videoMode()` gives the popup its own standalone video, with `-2`-suffixed artifacts (`video-rendered-2.webm`, `video-mode-2.json`, …).
+- Wrapping an already-wrapped page throws, as does reusing an active `videoMode` instance on a second page — one instance per page.
+- Popup dialogs (`alert`/`confirm`/`prompt` opened by the popup) aren't annotated in video mode yet.
+
+See [spec/popup.spec.ts](spec/popup.spec.ts) and [spec/popup-overlay-demo.spec.ts](spec/popup-overlay-demo.spec.ts).
 
 ## Writing your own plugin
 
