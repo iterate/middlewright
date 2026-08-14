@@ -75,14 +75,14 @@ const requireTimeoutComment = {
       unexplained: dedent`
         Avoid locator timeouts by using spinnerWaiter. Best ways to resolve:
         - If there's already loading UI, just remove the timeout and rely on spinnerWaiter to wait for the loading UI.
-        - If there's no loading UI, add loading UI and remove the timeout.
+        - If there's no loading UI, remove the timeout and add loading UI for spinnerWaiter.
         - If there's a loading UI but it takes even longer than the spinnerWaiter spinner timeout, use \`await spinnerWaiter.settings.run({ spinnerTimeout: 123_456 }, async () => ...)\` or similar to wait even longer for the spinner to complete.
-        - If there's loading UI from a part of the code that we don't control (e.g. a library) and it isn't matched by the default spinner selectors, use \`await spinnerWaiter.settings.run({ spinnerSelectors: ["myCustomSpinnerClass"] }, async () => ...)\`
+        - If there's loading UI from a part of the code that we don't control (e.g. a library) and it isn't matched by the default spinner selectors, use \`await spinnerWaiter.settings.run({ spinnerSelectors: ["myCustomSpinnerClass"] }, async () => ...)\`.
         - If it is truly impossible for there to be loading UI, add a nearby // comment matching every required pattern: {{patterns}}.
         - If you're in a block which has done \`await spinnerWaiter.settings.run({ disabled: true }, async () => ...)\`, you should probably *un-disable* for that block and apply the above suggestions to the inner code.
 
         See https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts for more details.
-      `
+      `,
     },
   },
   create(context: any) {
@@ -131,11 +131,13 @@ const preferPositiveWaits = {
     messages: {
       detached: dedent`
         Wait for positive UI instead of element detachment.
-        If there's no postitive UI to wait for your first port of call should be to *add* the positive UI to the product.
+        If there's no positive UI to wait for your first port of call should be to *add* the positive UI to the product.
         If it is truly impossible for there to be a positive UI, then that is quite surprising and you should question that.
         If you have questioned it and it is still impossible, then you should make sure you've first validated that the UI that's becoming detached previously was visible.
         Then explain why it's impossible, and why it's safe to wait for detachment in a nearby // comment matching every required pattern: {{patterns}}.
-      `
+
+        See https://github.com/iterate/middlewright#prefer-positive-waits-over-absence for more details.
+      `,
     },
   },
   create(context: any) {
@@ -270,7 +272,18 @@ export default {
 };
 
 function dedent(strings: TemplateStringsArray, ...values: any[]) {
-  const indented = strings.map((string, i) => string + (values[i] || "")).join("");
-  const startWhitespace = indented.match(/^(\s*)/)?.[0] || "";
-  return indented.replaceAll(startWhitespace, '\n').replace(/\n$/, '');
+  const indented = strings
+    .map((string, index) => string + (index < values.length ? String(values[index]) : ""))
+    .join("");
+  const lines = indented.split(/\r?\n/);
+
+  while (lines[0]?.trim() === "") lines.shift();
+  while (lines.at(-1)?.trim() === "") lines.pop();
+
+  const indentation = Math.min(
+    ...lines
+      .filter((line) => line.trim())
+      .map((line) => line.match(/^[ \t]*/)?.[0].length || 0),
+  );
+  return lines.map((line) => line.slice(indentation)).join("\n");
 }
