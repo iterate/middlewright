@@ -18,6 +18,7 @@ import { extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Dialog, Locator, Page, TestInfo } from "@playwright/test";
 import type {
+  ActionMiddleware,
   ActionTiming,
   LocatorWithOriginal,
   Plugin,
@@ -141,6 +142,17 @@ export type VideoModeHighlight = VideoModeSpan & {
   fillReveal?: VideoModeFillReveal;
   image?: string;
   method?: OverrideableMethod;
+  /**
+   * Set at render time on projected popup highlights: maps child-frame
+   * coordinates (which `fillReveal` and its screenshots use) into the
+   * composite frame — scale plus the overlay's top-left corner.
+   */
+  overlayTransform?: {
+    scale: number;
+    viewport: VideoModeViewport;
+    x: number;
+    y: number;
+  };
   pan?: VideoModePan;
   rect: VideoModeRect;
   sourceFrameAt?: number;
@@ -160,11 +172,34 @@ export type VideoModeAddressBar = VideoModeSpan & {
   url: string;
 };
 
+/**
+ * Recorded facts for a popup opened by the recorded page. Timestamps share
+ * the parent timeline (ms since the parent instance's timebase); the child's
+ * raw screencast has its own clock, mapped via `recordingEndedAt`.
+ */
+export type VideoModeChild = {
+  /** Parent-timeline ms when the popup closed. Missing: open at render end. */
+  closedAt?: number;
+  highlights: VideoModeHighlight[];
+  /** Parent-timeline ms when the popup opened. */
+  openedAt: number;
+  /** Raw screencast artifact for the popup, when video was recorded. */
+  raw?: string;
+  /**
+   * Parent-timeline ms of the popup recorder's settled endpoint (the raw
+   * video's last frame). Missing when the popup closed itself — the raw
+   * video's own end approximates `closedAt` then.
+   */
+  recordingEndedAt?: number;
+  viewport?: VideoModeViewport;
+};
+
 export type VideoModeMetadata = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   timebase: "ms";
   addressBars: VideoModeAddressBar[];
   captions: VideoModeCaption[];
+  children: VideoModeChild[];
   deadAir: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   outputs: VideoModeOutputs;
@@ -265,7 +300,10 @@ export type VideoModeTrimStart = "auto" | "detect-blank" | "never" | ["selector"
 
 type VideoModeState = {
   addressBars: VideoModeAddressBar[];
+  /** Distinguishes artifact filenames when a test has several instances. */
+  artifactSuffix: string;
   captions: VideoModeCaption[];
+  children: VideoModeChild[];
   deadAirDepth: number;
   deadAirSpans: VideoModeSpan[];
   highlights: VideoModeHighlight[];
@@ -686,7 +724,7 @@ const translateVideoTimeline = (options: {
       text: caption.text,
     })),
     deadAir: options.deadAir.map((span) => translateVideoSpan(span, options.offsetMs)),
-    highlights: options.highlights.map((highlight) => {
+    highlights: options.highlights.map((highlight): VideoModeHighlight => {
       const start = Math.max(0, Math.round(highlight.start + options.offsetMs));
       return {
         ...highlight,
@@ -729,10 +767,14 @@ const metadataFor = (state: VideoModeState): VideoModeMetadata => {
       .filter((addressBar) => addressBar.end > addressBar.start)
       .sort((left, right) => left.start - right.start || left.end - right.end),
     captions: normalizeVideoCaptions(state.captions),
+    children: state.children.map((child) => ({
+      ...child,
+      highlights: normalizeVideoHighlights(child.highlights),
+    })),
     deadAir: mergeVideoSpans(state.deadAirSpans),
     highlights: normalizeVideoHighlights(state.highlights),
     outputs: state.outputs,
-    schemaVersion: 1,
+    schemaVersion: 2,
     sourceRange: normalizeSourceRange(state.sourceRange),
     timebase: "ms",
   };
@@ -862,13 +904,35 @@ const recordCaption = async <T>(
   }
 };
 
-const videoModeOutputPaths = (testInfo: TestInfo): VideoModeOutputPaths => {
+/**
+ * Insert a per-instance suffix before the extension: `video-mode.json` →
+ * `video-mode-2.json`. The first instance in a test keeps the unsuffixed
+ * names, so single-page tests are unaffected.
+ */
+const suffixArtifactFileName = (fileName: string, artifactSuffix: string) => {
+  if (!artifactSuffix) return fileName;
+  const extension = extname(fileName);
+  return `${fileName.slice(0, fileName.length - extension.length)}${artifactSuffix}${extension}`;
+};
+
+/**
+ * Registrations per testInfo.outputDir. Each videoMode instance added within
+ * one test (e.g. a fresh instance for a popup) gets its own artifact
+ * namespace so it can't clobber the main page's files.
+ */
+const videoModeRegistrationCounts = new Map<string, number>();
+
+const videoModeOutputPaths = (
+  testInfo: TestInfo,
+  artifactSuffix: string,
+): VideoModeOutputPaths => {
+  const name = (fileName: string) => suffixArtifactFileName(fileName, artifactSuffix);
   return {
-    metadata: join(testInfo.outputDir, VIDEO_MODE_METADATA_FILE),
-    player: join(testInfo.outputDir, VIDEO_MODE_PLAYER_FILE),
-    raw: join(testInfo.outputDir, VIDEO_MODE_RAW_FILE),
-    rendered: join(testInfo.outputDir, VIDEO_MODE_RENDERED_FILE),
-    reportPlayer: join(testInfo.outputDir, VIDEO_MODE_REPORT_PLAYER_FILE),
+    metadata: join(testInfo.outputDir, name(VIDEO_MODE_METADATA_FILE)),
+    player: join(testInfo.outputDir, name(VIDEO_MODE_PLAYER_FILE)),
+    raw: join(testInfo.outputDir, name(VIDEO_MODE_RAW_FILE)),
+    rendered: join(testInfo.outputDir, name(VIDEO_MODE_RENDERED_FILE)),
+    reportPlayer: join(testInfo.outputDir, name(VIDEO_MODE_REPORT_PLAYER_FILE)),
   };
 };
 
@@ -1258,8 +1322,8 @@ const recordHighlight = async (options: {
         : undefined;
 
     const image = pan
-      ? `video-mode-pan-${options.state.highlightImageIndex}.png`
-      : `video-mode-highlight-${options.state.highlightImageIndex}.png`;
+      ? `video-mode-pan${options.state.artifactSuffix}-${options.state.highlightImageIndex}.png`
+      : `video-mode-highlight${options.state.artifactSuffix}-${options.state.highlightImageIndex}.png`;
     options.state.highlightImageIndex += 1;
     const imagePath = join(options.testInfo.outputDir, image);
     await mkdir(options.testInfo.outputDir, { recursive: true });
@@ -1402,8 +1466,7 @@ const recordFillReveal = async (options: {
         value.length === 0 ||
         value.length > captureOptions.maxCharacters ||
         style.direction === "rtl" ||
-        !["left", "start"].includes(style.textAlign) ||
-        (element instanceof HTMLInputElement && element.type === "password")
+        !["left", "start"].includes(style.textAlign)
       ) {
         return { ...geometry, kind: "fallback" as const };
       }
@@ -1510,10 +1573,16 @@ const recordFillReveal = async (options: {
         return { ...geometry, kind: "fallback" as const };
       }
       context.font = style.font;
-      const graphemes = Array.from(
-        new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value),
-        ({ segment }) => segment,
-      );
+      // A password input renders one bullet per character, so measure those
+      // glyphs — the reveal only ever shows the screenshot's dots, never the
+      // value.
+      const masked = element instanceof HTMLInputElement && element.type === "password";
+      const graphemes = masked
+        ? Array.from(value, () => "•")
+        : Array.from(
+            new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value),
+            ({ segment }) => segment,
+          );
       const letterSpacing = pixels(style.letterSpacing);
       const textIndent = pixels(style.textIndent);
       const revealStops = graphemes.map((_, index) => {
@@ -1546,7 +1615,7 @@ const recordFillReveal = async (options: {
       return;
     }
 
-    const image = `video-mode-fill-${options.state.highlightImageIndex}.png`;
+    const image = `video-mode-fill${options.state.artifactSuffix}-${options.state.highlightImageIndex}.png`;
     options.state.highlightImageIndex += 1;
     await mkdir(options.testInfo.outputDir, { recursive: true });
     await options.locator.page().screenshot({
@@ -2262,6 +2331,12 @@ const videoPieces = (options: {
   addressBars: VideoModeAddressBar[];
   frameDurationMs: number;
   highlights: VideoModeHighlight[];
+  /**
+   * Source spans that must reach the output (popup enter/exit animations).
+   * Overlapping-hold skips normally jump the footage between two highlights;
+   * a skip is cancelled when it would leap across one of these.
+   */
+  keepSpans: VideoModeSpan[];
   preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
 }): VideoPiece[] => {
@@ -2309,8 +2384,10 @@ const videoPieces = (options: {
       const nextHighlight = highlights[highlightIndex + 1];
 
       if (highlight.start > cursor) {
-        const postAction = previousHighlight?.fillReveal ? previousHighlight : undefined;
-        const preAction = highlight.fillReveal ? highlight : undefined;
+        const stabilizable = (candidate: VideoModeHighlight | undefined) =>
+          candidate?.fillReveal && !candidate.overlayTransform ? candidate : undefined;
+        const postAction = stabilizable(previousHighlight);
+        const preAction = stabilizable(highlight);
         // `trim` chooses whole source frames. Round down so the boundary frame
         // belongs to the stabilized piece instead of leaking from the raw gap.
         const preActionStart = preAction
@@ -2364,7 +2441,13 @@ const videoPieces = (options: {
       let nextCursor = actionEnd;
 
       if (nextHighlight && highlight.end > nextHighlight.start) {
-        nextCursor = Math.max(nextCursor, nextHighlight.start);
+        const skipTo = Math.max(nextCursor, nextHighlight.start);
+        const skipCrossesKeptSpan = options.keepSpans.some(
+          (span) => span.start < skipTo && span.end > nextCursor,
+        );
+        if (!skipCrossesKeptSpan) {
+          nextCursor = skipTo;
+        }
       }
 
       cursor = Math.min(segment.end, nextCursor);
@@ -2374,7 +2457,10 @@ const videoPieces = (options: {
     if (segment.end > cursor) {
       pieces.push({
         end: segment.end,
-        postAction: previousHighlight?.fillReveal ? previousHighlight : undefined,
+        postAction:
+          previousHighlight?.fillReveal && !previousHighlight.overlayTransform
+            ? previousHighlight
+            : undefined,
         speed: segment.speed,
         start: cursor,
       });
@@ -2603,8 +2689,20 @@ const highlightCursorPoint = (
   highlight: VideoModeHighlight,
   video: { width: number; height: number },
 ) => {
-  const rect = highlight.fillReveal
-    ? scaleVideoModeRect(highlight.fillReveal.initialRect, highlight.viewport, video)
+  // fillReveal rects live in child-frame coordinates on projected popup
+  // highlights — map them through the overlay transform first.
+  const transform = highlight.overlayTransform;
+  const projectedInitialRect =
+    highlight.fillReveal && transform
+      ? {
+          height: highlight.fillReveal.initialRect.height * transform.scale,
+          width: highlight.fillReveal.initialRect.width * transform.scale,
+          x: transform.x + highlight.fillReveal.initialRect.x * transform.scale,
+          y: transform.y + highlight.fillReveal.initialRect.y * transform.scale,
+        }
+      : highlight.fillReveal?.initialRect;
+  const rect = projectedInitialRect
+    ? scaleVideoModeRect(projectedInitialRect, highlight.viewport, video)
     : scaleHighlight(highlight, video);
 
   return {
@@ -2906,6 +3004,7 @@ const renderedVideoFilter = (options: {
   highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
+  keepSpans: VideoModeSpan[];
   preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
   textPointerInput?: PointerInput;
@@ -2918,10 +3017,23 @@ const renderedVideoFilter = (options: {
     addressBars: options.addressBars,
     frameDurationMs: options.video.frameDurationMs,
     highlights: options.highlights,
+    keepSpans: options.keepSpans,
     preActionStabilizationMs: options.preActionStabilizationMs,
     segments: options.segments,
   });
   const renderedPieces = renderedVideoPieces(pieces);
+  if (process.env.MIDDLEWRIGHT_DEBUG_PIECES) {
+    for (const piece of renderedPieces) {
+      console.log(
+        `piece src[${piece.start}-${piece.end}] out[${Math.round(piece.outputStart)}-${Math.round(piece.outputEnd)}] speed=${piece.speed}` +
+          (piece.highlight ? ` highlight=${piece.highlight.method} hstart=${piece.highlight.start}` : "") +
+          (piece.addressBar ? " addressBar" : "") +
+          (piece.highlight?.overlayTransform ? " overlay" : "") +
+          (piece.highlight?.fillReveal ? " fillReveal" : "") +
+          (piece.highlight?.image ? ` image=${piece.highlight.image}` : ""),
+      );
+    }
+  }
   const targets = cursorTargets({
     highlights: options.highlights,
     pieces: renderedPieces,
@@ -3070,6 +3182,188 @@ const renderedVideoFilter = (options: {
         );
         composedLabel = nextLabel;
       }
+      continue;
+    }
+
+    // Fill reveal inside a popup overlay: the base is a frozen composite
+    // frame from just before the fill (popup risen, field empty, dim and
+    // parent intact), and the typed reveal is the child screenshot's content
+    // rect scaled and positioned through the overlay transform.
+    if (piece.highlight && fillReveal && postFillInput && piece.highlight.overlayTransform) {
+      const transform = piece.highlight.overlayTransform;
+      const projectLength = (value: number) => Math.round(value * transform.scale);
+      const scaledImage = {
+        height: Math.max(2, projectLength(transform.viewport.height)),
+        width: Math.max(2, projectLength(transform.viewport.width)),
+      };
+      const contentLocal = {
+        height: Math.max(1, Math.min(scaledImage.height, projectLength(fillReveal.contentRect.height))),
+        width: Math.max(1, Math.min(scaledImage.width, projectLength(fillReveal.contentRect.width))),
+        x: Math.max(0, projectLength(fillReveal.contentRect.x)),
+        y: Math.max(0, projectLength(fillReveal.contentRect.y)),
+      };
+      const contentAbsolute = {
+        x: Math.round(transform.x + fillReveal.contentRect.x * transform.scale),
+        y: Math.round(transform.y + fillReveal.contentRect.y * transform.scale),
+      };
+      const duration = renderedPieceDuration(piece);
+      const durationSeconds = formatSeconds(duration);
+      const revealStops = fillReveal.revealStops
+        .map((stop) => Math.max(1, Math.min(contentLocal.width, projectLength(stop))))
+        .filter((stop, stopIndex, stops) => stopIndex === 0 || stop !== stops[stopIndex - 1]);
+      const revealSteps = fillReveal.revealBands.flatMap((band) => {
+        const y = Math.max(0, Math.min(contentLocal.height - 1, projectLength(band.y)));
+        const height = Math.max(1, Math.min(contentLocal.height - y, projectLength(band.height)));
+        return revealStops.map((width) => ({ height, width, y }));
+      });
+      const target = plan.targets.find(
+        (candidate) => candidate.highlight === piece.highlight,
+      );
+      const revealEnd =
+        options.highlightMode === "pointer"
+          ? Math.max(0, duration - TEXT_CURSOR_POINTER_TAIL_MS)
+          : duration;
+      const pointerArrival = target
+        ? Math.max(0, target.arriveAt - renderedPiece.outputStart)
+        : 0;
+      const availableAfterArrival = Math.max(0, revealEnd - pointerArrival);
+      const preRevealHold = Math.min(
+        TEXT_CURSOR_HOLD_IDEAL_MS,
+        availableAfterArrival / 2,
+      );
+      const revealStart = Math.max(
+        0,
+        Math.min(revealEnd, pointerArrival + preRevealHold),
+      );
+      // The base predates the fill, so it shows the field unfocused. The
+      // post-fill screenshot has the focus ring: overlay the field's ring
+      // region from it at reveal start, immediately cover its text with the
+      // pre-fill screenshot's empty content box, and let the reveal bands
+      // type over that — the ring appears when the cursor lands and the
+      // letters arrive inside it, continuous with the live footage after.
+      const ringPaddingPx = 4;
+      const ringSource = {
+        height: fillReveal.initialRect.height + 2 * ringPaddingPx,
+        width: fillReveal.initialRect.width + 2 * ringPaddingPx,
+        x: fillReveal.initialRect.x - ringPaddingPx,
+        y: fillReveal.initialRect.y - ringPaddingPx,
+      };
+      const ringLocal = {
+        height: Math.max(1, Math.min(scaledImage.height, projectLength(ringSource.height))),
+        width: Math.max(1, Math.min(scaledImage.width, projectLength(ringSource.width))),
+        x: Math.max(0, projectLength(ringSource.x)),
+        y: Math.max(0, projectLength(ringSource.y)),
+      };
+      const ringAbsolute = {
+        x: Math.round(transform.x + ringSource.x * transform.scale),
+        y: Math.round(transform.y + ringSource.y * transform.scale),
+      };
+      const baseLabel = `fillbase${index}`;
+      // One frame back only: rewinding further can cross the previous fill's
+      // completion (wiping its value from the frozen base). The content box
+      // is covered with the pre-fill empty state from t=0 below, so anchor
+      // imprecision inside this field can't leak early-typed text either.
+      const freezeStart = Math.max(0, piece.start - options.video.frameDurationMs);
+      filters.push(
+        [
+          `[0:v]trim=start=${formatSeconds(freezeStart)}:end=${formatSeconds(
+            freezeStart + options.video.frameDurationMs,
+          )}`,
+          "setpts=PTS-STARTPTS",
+          `tpad=stop_mode=clone:stop_duration=${formatSeconds(
+            Math.max(0, duration - options.video.frameDurationMs),
+          )}`,
+          `trim=start=0:end=${durationSeconds}`,
+          `setpts=PTS-STARTPTS[${baseLabel}]`,
+        ].join(","),
+      );
+
+      if (revealSteps.length === 0) {
+        filters.push(`[${baseLabel}]null[${label}]`);
+        continue;
+      }
+
+      const splitLabels = revealSteps.map((_, stepIndex) => `fillpost${index}x${stepIndex}`);
+      filters.push(
+        [
+          `[${postFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+          `crop=w=${contentLocal.width}:h=${contentLocal.height}:x=${contentLocal.x}:y=${contentLocal.y}`,
+          `trim=start=0:end=${durationSeconds}`,
+          "setpts=PTS-STARTPTS",
+          `split=${revealSteps.length}${splitLabels.map((splitLabel) => `[${splitLabel}]`).join("")}`,
+        ].join(","),
+      );
+
+      let composedLabel = baseLabel;
+      if (preFillInput) {
+        const ringLabel = `fillring${index}`;
+        const emptyLabel = `fillempty${index}`;
+        const revealStartEnable = `enable='gte(t\\,${formatSeconds(revealStart)})'`;
+        filters.push(
+          [
+            `[${postFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+            `crop=w=${ringLocal.width}:h=${ringLocal.height}:x=${ringLocal.x}:y=${ringLocal.y}`,
+            `trim=start=0:end=${durationSeconds}`,
+            `setpts=PTS-STARTPTS[${ringLabel}]`,
+          ].join(","),
+        );
+        filters.push(
+          [
+            `[${preFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+            `crop=w=${contentLocal.width}:h=${contentLocal.height}:x=${contentLocal.x}:y=${contentLocal.y}`,
+            `trim=start=0:end=${durationSeconds}`,
+            `setpts=PTS-STARTPTS[${emptyLabel}]`,
+          ].join(","),
+        );
+        filters.push(
+          [
+            `[${composedLabel}][${ringLabel}]overlay=x=${ringAbsolute.x}`,
+            `y=${ringAbsolute.y}`,
+            revealStartEnable,
+            `shortest=1[fillringcomposed${index}]`,
+          ].join(":"),
+        );
+        filters.push(
+          [
+            `[fillringcomposed${index}][${emptyLabel}]overlay=x=${contentAbsolute.x}`,
+            `y=${contentAbsolute.y}`,
+            `shortest=1[fillemptycomposed${index}]`,
+          ].join(":"),
+        );
+        composedLabel = `fillemptycomposed${index}`;
+      }
+      for (let stepIndex = 0; stepIndex < revealSteps.length; stepIndex += 1) {
+        const step = revealSteps[stepIndex];
+        const cropLabel = `fillcrop${index}x${stepIndex}`;
+        const nextLabel = `fillcomposed${index}x${stepIndex}`;
+        const showAt =
+          revealStart +
+          ((revealEnd - revealStart) * (stepIndex + 1)) /
+            (revealSteps.length + 1);
+        filters.push(
+          `${[
+            `[${splitLabels[stepIndex]}]crop=w=${step.width}`,
+            `h=${step.height}`,
+            "x=0",
+            `y=${step.y}`,
+          ].join(":")}[${cropLabel}]`,
+        );
+        filters.push(
+          [
+            `[${composedLabel}][${cropLabel}]overlay=x=${contentAbsolute.x}`,
+            `y=${contentAbsolute.y + step.y}`,
+            `enable='gte(t\\,${formatSeconds(showAt)})'`,
+            `shortest=1[${nextLabel}]`,
+          ].join(":"),
+        );
+        composedLabel = nextLabel;
+      }
+
+      filters.push(
+        options.highlightMode === "outline"
+          ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`
+          : `[${composedLabel}]null[${label}]`,
+      );
       continue;
     }
 
@@ -3580,7 +3874,7 @@ const playwrightReportAttachmentName = async (path: string) => {
   return `${createHash("sha1").update(data).digest("hex")}${extname(path)}`;
 };
 
-const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
+const videoModePlayerHtml = (options: { metadata: string; raw: string; rendered?: string }) => {
   const primary = options.rendered || options.raw;
   const primaryLabel = options.rendered ? "Rendered video" : "Raw video";
   const primaryActiveKey = options.rendered ? "rendered" : "raw";
@@ -3724,7 +4018,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
       <div>frame: <span id="frame">0</span></div>
       <div>duration: <span id="duration">?</span>s</div>
       <div class="hint">Left/right steps one frame. Shift+left/right steps ten. Space toggles play.</div>
-      <div class="hint"><a href="${VIDEO_MODE_METADATA_FILE}">${VIDEO_MODE_METADATA_FILE}</a></div>
+      <div class="hint"><a href="${options.metadata}">${options.metadata}</a></div>
     </aside>
   </main>
   <script>
@@ -3840,6 +4134,7 @@ const videoModePlayerHtml = (options: { raw: string; rendered?: string }) => {
 
 const renderVideo = async (options: {
   addressBars: VideoModeAddressBar[];
+  artifactSuffix: string;
   captions: VideoModeCaption[];
   dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
   dialogPostHoldMs: number;
@@ -3848,6 +4143,8 @@ const renderVideo = async (options: {
   highlightMode: "outline" | "pointer";
   highlights: VideoModeHighlight[];
   inputPath: string;
+  /** Source spans that must not be skipped (popup enter/exit animations). */
+  keepSpans: VideoModeSpan[];
   outputDir: string;
   outputPath: string;
   deadAir: VideoModeSpan[];
@@ -3956,6 +4253,7 @@ const renderVideo = async (options: {
       addressBars: options.addressBars,
       frameDurationMs: info.frameDurationMs,
       highlights: options.highlights,
+      keepSpans: options.keepSpans,
       preActionStabilizationMs,
       segments,
     }),
@@ -3968,7 +4266,7 @@ const renderVideo = async (options: {
   );
   const captionFile =
     renderedAddressBars.length > 0 || renderedCaptions.length > 0
-      ? join(options.outputDir, VIDEO_MODE_CAPTIONS_FILE)
+      ? join(options.outputDir, suffixArtifactFileName(VIDEO_MODE_CAPTIONS_FILE, options.artifactSuffix))
       : undefined;
 
   if (captionFile) {
@@ -3982,7 +4280,9 @@ const renderVideo = async (options: {
     );
   }
   const dialogFile =
-    renderedDialogs.length > 0 ? join(options.outputDir, VIDEO_MODE_DIALOGS_FILE) : undefined;
+    renderedDialogs.length > 0
+      ? join(options.outputDir, suffixArtifactFileName(VIDEO_MODE_DIALOGS_FILE, options.artifactSuffix))
+      : undefined;
 
   if (dialogFile) {
     await writeFile(
@@ -4007,6 +4307,7 @@ const renderVideo = async (options: {
     highlightMode: options.highlightMode,
     highlightInputs,
     highlights: options.highlights,
+    keepSpans: options.keepSpans,
     preActionStabilizationMs,
     segments,
     textPointerInput,
@@ -4049,6 +4350,392 @@ const renderVideo = async (options: {
   return true;
 };
 
+const VIDEO_MODE_COMPOSITE_FILE = "video-composite.webm";
+// Playwright extends a closed page's final screencast frame by the time since
+// that frame arrived, with this minimum (see VIDEO_MODE_RECORDER_SETTLE_MS).
+const RECORDER_FINAL_FRAME_MIN_PADDING_MS = 1000;
+const CHILD_OVERLAY_MAX_FRACTION = 0.9;
+const CHILD_OVERLAY_BACKDROP_OPACITY = 0.4;
+const CHILD_OVERLAY_FADE_MS = 300;
+
+/** A popup screencast placed on the parent timeline as a scaled overlay. */
+type VideoModeChildLayer = {
+  child: VideoModeChild;
+  /** Composite-time close (ms) — where the exit fade starts. */
+  closeMs: number;
+  /** Shift applied to child-raw frames to land them in composite time (ms). */
+  delayMs: number;
+  /** Overlay visibility window in composite time (ms), including exit fade. */
+  enableFromMs: number;
+  enableToMs: number;
+  /** Scaled placement in composite pixels, centered and even-sized. */
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+  path: string;
+  rawInfo: VideoInfo;
+};
+
+const childCompositeLayers = async (options: {
+  children: VideoModeChild[];
+  outputDir: string;
+  timelineOffsetMs: number;
+  video: VideoInfo;
+}): Promise<VideoModeChildLayer[]> => {
+  const layers: VideoModeChildLayer[] = [];
+
+  for (const child of options.children) {
+    if (!child.raw) continue;
+    const path = join(options.outputDir, child.raw);
+    const rawInfo = await videoInfo(path);
+    // A settled recorder maps the raw end to a known parent time. A popup
+    // that closed itself has no settled endpoint — and its screencast t=0 is
+    // the first *captured* frame, which lags the popup event by the initial
+    // paint. Playwright pads the final frame by >=1s on close, so the first
+    // frame lands near closedAt + padding - duration; openedAt is the floor.
+    const childOffsetMs =
+      child.recordingEndedAt === undefined
+        ? Math.max(
+            child.openedAt,
+            (child.closedAt === undefined ? child.openedAt : child.closedAt) +
+              RECORDER_FINAL_FRAME_MIN_PADDING_MS -
+              rawInfo.durationMs,
+          )
+        : child.recordingEndedAt - rawInfo.durationMs;
+    const scale = Math.min(
+      1,
+      (CHILD_OVERLAY_MAX_FRACTION * options.video.width) / rawInfo.width,
+      (CHILD_OVERLAY_MAX_FRACTION * options.video.height) / rawInfo.height,
+    );
+    const width = Math.max(2, 2 * Math.round((rawInfo.width * scale) / 2));
+    const height = Math.max(2, 2 * Math.round((rawInfo.height * scale) / 2));
+    const enableFromMs = Math.max(0, child.openedAt + options.timelineOffsetMs);
+    const closeMs = Math.min(
+      options.video.durationMs,
+      (child.closedAt === undefined ? child.openedAt + rawInfo.durationMs : child.closedAt) +
+        options.timelineOffsetMs,
+    );
+    // The exit fade runs AFTER close (the screencast's padded final frame
+    // supplies footage): a popup that closes itself right after a click would
+    // otherwise put that click — and its hold's freeze frame — mid-fade.
+    const enableToMs = Math.min(options.video.durationMs, closeMs + CHILD_OVERLAY_FADE_MS);
+
+    if (closeMs <= enableFromMs) continue;
+
+    layers.push({
+      child,
+      closeMs,
+      delayMs: childOffsetMs + options.timelineOffsetMs,
+      enableFromMs,
+      enableToMs,
+      height,
+      path,
+      rawInfo,
+      width,
+      x: Math.round((options.video.width - width) / 2),
+      y: Math.round((options.video.height - height) / 2),
+    });
+  }
+
+  return layers;
+};
+
+/**
+ * Pass A of the popup composite: overlay each popup screencast onto the
+ * parent's raw footage — dimmed backdrop, scaled to fit, alpha-faded in and
+ * out, windowed to the popup's open/close span, newest stacked on top. The
+ * output shares the parent raw timeline exactly, so the annotation render
+ * (pass B) runs on it unchanged; holds there freeze the composite, so it
+ * never matters which source triggered them.
+ */
+const compositeChildOverlays = async (options: {
+  /** Continuous frame rate for the overlay chains (see fps note below). */
+  fps: number;
+  inputPath: string;
+  layers: VideoModeChildLayer[];
+  outputPath: string;
+}) => {
+  const filters: string[] = [];
+  // The parent screencast is as sparse as the child ones (a static page emits
+  // no frames), and overlay only emits output at primary-input frame times —
+  // without resampling, the whole popup window can contain zero composite
+  // frames. A continuous base gives every enable window frames to land on.
+  filters.push(`[0:v]fps=${formatFilterNumber(options.fps)}[base]`);
+  let currentLabel = "base";
+
+  options.layers.forEach((layer, index) => {
+    const from = formatSeconds(layer.enableFromMs);
+    const to = formatSeconds(layer.enableToMs);
+    const enable = `enable='between(t\\,${from}\\,${to})'`;
+    const dimLabel = `dim${index}`;
+    const childLabel = `popup${index}`;
+    const outLabel = `composite${index}`;
+    const fadeOutStartMs = layer.closeMs;
+
+    filters.push(
+      `[${currentLabel}]drawbox=x=0:y=0:w=iw:h=ih:color=black@${CHILD_OVERLAY_BACKDROP_OPACITY}:t=fill:${enable}[${dimLabel}]`,
+    );
+    filters.push(
+      [
+        `[${index + 1}:v]setpts=PTS+${formatSeconds(layer.delayMs)}/TB`,
+        // A mostly-static popup screencast has sparse frames; without
+        // resampling, the frame that happens to pass `fade` mid-ramp keeps
+        // its partial alpha while framesync repeats it for the whole window,
+        // ghosting the overlay. Continuous frames give fade real timestamps.
+        `fps=${formatFilterNumber(options.fps)}`,
+        `scale=w=${layer.width}:h=${layer.height}`,
+        "format=yuva420p",
+        `fade=t=in:st=${from}:d=${formatSeconds(CHILD_OVERLAY_FADE_MS)}:alpha=1`,
+        `fade=t=out:st=${formatSeconds(fadeOutStartMs)}:d=${formatSeconds(CHILD_OVERLAY_FADE_MS)}:alpha=1[${childLabel}]`,
+      ].join(","),
+    );
+    // Slide up from the bottom edge on enter (cubic ease-out), slide back
+    // down after close (cubic ease-in), resting at the centered position
+    // between. Times are seconds; commas escaped for the filter graph.
+    const fadeSeconds = formatSeconds(CHILD_OVERLAY_FADE_MS);
+    const offscreenY = "H";
+    const enterProgress = `min(max((t-${from})/${fadeSeconds}\\,0)\\,1)`;
+    const exitProgress = `min(max((t-${formatSeconds(layer.closeMs)})/${fadeSeconds}\\,0)\\,1)`;
+    const slideY = [
+      `if(lt(t\\,${formatSeconds(layer.enableFromMs + CHILD_OVERLAY_FADE_MS)})`,
+      `\\,${layer.y}+(${offscreenY}-${layer.y})*pow(1-${enterProgress}\\,2)`,
+      `\\,if(gt(t\\,${formatSeconds(layer.closeMs)})`,
+      `\\,${layer.y}+(${offscreenY}-${layer.y})*pow(${exitProgress}\\,2)`,
+      `\\,${layer.y}))`,
+    ].join("");
+    filters.push(
+      `[${dimLabel}][${childLabel}]overlay=x=${layer.x}:y='${slideY}':eval=frame:eof_action=pass:${enable}[${outLabel}]`,
+    );
+    currentLabel = outLabel;
+  });
+
+  await execFile(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      options.inputPath,
+      ...options.layers.flatMap((layer) => ["-i", layer.path]),
+      "-filter_complex",
+      filters.join(";"),
+      "-map",
+      `[${currentLabel}]`,
+      "-an",
+      options.outputPath,
+    ],
+    { maxBuffer: 10 * 1024 * 1024 },
+  );
+};
+
+/**
+ * Project a popup highlight into composite coordinates. The child frame is
+ * scaled into an overlay box on the parent frame, so rects become
+ * parent-frame pixels; child-frame pixel treatments (pans, fill reveals,
+ * screenshot stills) drop away, leaving the plain box/pointer/freeze path.
+ */
+const projectChildHighlight = (options: {
+  highlight: VideoModeHighlight;
+  layer: VideoModeChildLayer;
+  video: VideoInfo;
+}): VideoModeHighlight => {
+  const { highlight, layer } = options;
+  const viewport = options.layer.child.viewport || {
+    height: layer.rawInfo.height,
+    width: layer.rawInfo.width,
+  };
+  const viewportToChildPixels = Math.min(
+    layer.rawInfo.width / viewport.width,
+    layer.rawInfo.height / viewport.height,
+  );
+  const scale = viewportToChildPixels * (layer.width / layer.rawInfo.width);
+  // Holds clone the composite frame at actionEnd. The overlay stays fully
+  // visible until close (the exit animation runs after), so the freeze only
+  // needs two small guards: never sample past close, and keep the source
+  // slice wider than a frame tick so the trim can't come up empty (an
+  // instant click's slice is a few ms — often between ticks). Widening may
+  // nudge the highlight a few ms earlier; order-preserving in practice.
+  const closeFloorMs = Math.floor(layer.closeMs);
+  const minSliceMs = options.video.frameDurationMs + 10;
+  let { actionEnd, end, start } = highlight;
+  if (actionEnd !== undefined) {
+    actionEnd = Math.min(actionEnd, closeFloorMs);
+    if (actionEnd - start < minSliceMs) {
+      actionEnd = Math.min(closeFloorMs, start + minSliceMs);
+    }
+    if (actionEnd - start < minSliceMs) {
+      const shift = minSliceMs - (actionEnd - start);
+      start -= shift;
+      end -= shift;
+    }
+  }
+
+  return {
+    ...highlight,
+    actionEnd,
+    end,
+    start,
+    dialog: undefined,
+    // Fill reveals keep their child-frame geometry and screenshots; the
+    // render projects them through overlayTransform. Screenshot stills
+    // without a reveal (e.g. password fallbacks) would render full-frame, so
+    // they drop away and the hold freezes the composite instead.
+    fillReveal: highlight.fillReveal,
+    image: highlight.fillReveal ? highlight.image : undefined,
+    overlayTransform: {
+      scale,
+      viewport,
+      x: layer.x,
+      y: layer.y,
+    },
+    pan: undefined,
+    rect: {
+      height: highlight.rect.height * scale,
+      width: highlight.rect.width * scale,
+      x: layer.x + highlight.rect.x * scale,
+      y: layer.y + highlight.rect.y * scale,
+    },
+    sourceFrameAt: undefined,
+    viewport: { height: options.video.height, width: options.video.width },
+  };
+};
+
+/**
+ * The action-recording middleware, shared between a videoMode instance (which
+ * records onto its own state) and its popup child recorders (which record onto
+ * a child state that shares the parent's clock and dead-air spans).
+ */
+const videoModeActionMiddleware = (options: {
+  /** Gates recording on the owning instance's deadAir() nesting. */
+  deadAirState: VideoModeState;
+  highlight: ResolvedVideoModeHighlight;
+  /** Parent-only hook, used for first-locator trim start. */
+  onBeforeRecording?: (timing: ActionTiming) => void;
+  /** Where highlights, dead air, and images are recorded. */
+  recordingState: VideoModeState;
+  skipMethods: OverrideableMethod[];
+  skipStackFrames: string[];
+}): ActionMiddleware => {
+  const { deadAirState, highlight, recordingState: state, skipMethods, skipStackFrames } = options;
+
+  return async ({ args, locator, method, testInfo, timing }, next) => {
+    if (deadAirState.deadAirDepth > 0) return next();
+
+    // Skip if called from internal helpers (navigation, login flows etc)
+    if (skipStackFrames.length > 0) {
+      const stack = new Error().stack || "";
+      if (skipStackFrames.some((frame) => stack.includes(frame))) return next();
+    }
+
+    options.onBeforeRecording?.(timing);
+
+    if (method === "waitFor") {
+      let result: unknown;
+      try {
+        result = await next();
+      } finally {
+        recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 0 });
+      }
+
+      if (highlight.mode !== "off" && !skipMethods.includes(method)) {
+        await recordHighlight({
+          pan: "return",
+          color: highlight.color,
+          durationMs: highlight.durationMs,
+          locator,
+          method,
+          requireVisible: true,
+          startAfterScreenshot: true,
+          state,
+          testInfo,
+          thickness: highlight.thickness,
+        });
+      }
+
+      return result;
+    }
+
+    recordMiddlewareWaitBeforeVideoMode(state, timing);
+
+    if (skipMethods.includes(method)) {
+      try {
+        return await next();
+      } finally {
+        if (timing.attachedAtStart) {
+          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
+        }
+        recordAttachedWaitFromTiming(state, timing);
+      }
+    }
+
+    const recordedHighlight =
+      highlight.mode === "off"
+        ? undefined
+        : await recordHighlight({
+            pan: method === "fill" ? "off" : "stay",
+            color: highlight.color,
+            durationMs: highlight.durationMs,
+            locator,
+            method,
+            requireVisible: false,
+            startAfterScreenshot: false,
+            state,
+            testInfo,
+            thickness: highlight.thickness,
+          });
+
+    try {
+      const result = await next();
+      if (
+        recordedHighlight &&
+        method === "fill" &&
+        typeof args[0] === "string" &&
+        args[0].length > 0
+      ) {
+        await recordFillReveal({
+          highlight: recordedHighlight,
+          locator,
+          state,
+          testInfo,
+        });
+      }
+      if (recordedHighlight && state.startedAt !== undefined) {
+        recordedHighlight.actionEnd = Math.max(
+          recordedHighlight.start,
+          Math.round(performance.now() - state.startedAt),
+        );
+      }
+      if (recordedHighlight?.pan) {
+        await finalizePanHighlightAfterAction({
+          highlight: recordedHighlight,
+          locator,
+          state,
+        });
+      }
+      return result;
+    } finally {
+      if (recordedHighlight && state.startedAt !== undefined) {
+        recordedHighlight.actionEnd =
+          recordedHighlight.actionEnd ||
+          Math.max(
+            recordedHighlight.start,
+            Math.round(performance.now() - state.startedAt),
+          );
+      }
+      if (
+        !recordedHighlight &&
+        (timing.attachedAtStart || timing.attachedAt === undefined)
+      ) {
+        recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
+      }
+      recordAttachedWaitFromTiming(state, timing);
+    }
+  };
+};
+
 /** Records video-mode facts and renders annotations into the recorded video. */
 export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   if (process.env.PWDEBUG) {
@@ -4064,10 +4751,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       metadata: async () => ({
         addressBars: [],
         captions: [],
+        children: [],
         deadAir: [],
         highlights: [],
         outputs: {},
-        schemaVersion: 1,
+        schemaVersion: 2,
         sourceRange: {},
         timebase: "ms",
       }),
@@ -4076,7 +4764,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           throw new Error("videoMode.outputPaths() is only available after addPlugins registers videoMode");
         }
 
-        return videoModeOutputPaths(testInfoForOutputPaths);
+        // Debug mode writes no artifacts, so instances don't need namespacing.
+        return videoModeOutputPaths(testInfoForOutputPaths, "");
       },
       setEndTime: () => {},
       setStartTime: () => {},
@@ -4085,6 +4774,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     return {
       ...controls,
       name: "video-mode",
+      forPopup: () => null,
       pageExtension: ({ testInfo }) => {
         testInfoForOutputPaths = testInfo;
         return { videoMode: controls };
@@ -4106,7 +4796,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
   const trimStart = resolveTrimStart(options.trimStart);
   const state: VideoModeState = {
     addressBars: [],
+    artifactSuffix: "",
     captions: [],
+    children: [],
     deadAirDepth: 0,
     deadAirSpans: [],
     highlightImageIndex: 0,
@@ -4128,6 +4820,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     return recording;
   };
   let testInfoForOutputPaths: TestInfo | undefined;
+  // Guards against wiring one instance to two pages at once (e.g. a popup):
+  // beforeTest resets state, so that would wipe the first page's timeline.
+  let activePage: Page | undefined;
   const getVideoTimestamp = () => {
     const now = performance.now();
     return Math.round(now - (state.startedAt || now));
@@ -4146,7 +4841,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         return metadataFor(state);
       }
 
-      return await readVideoModeMetadata(videoModeOutputPaths(testInfoForOutputPaths).metadata, () =>
+      return await readVideoModeMetadata(videoModeOutputPaths(testInfoForOutputPaths, state.artifactSuffix).metadata, () =>
         metadataFor(state),
       );
     },
@@ -4155,7 +4850,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         throw new Error("videoMode.outputPaths() is only available after addPlugins registers videoMode");
       }
 
-      return videoModeOutputPaths(testInfoForOutputPaths);
+      return videoModeOutputPaths(testInfoForOutputPaths, state.artifactSuffix);
     },
     setEndTime: (ms = getVideoTimestamp()) => {
       state.sourceRange.end = resolveVideoTimestamp("setEndTime", ms);
@@ -4165,133 +4860,136 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     },
   };
 
+  /**
+   * A popup recorder bound to this instance: it records facts (highlights on
+   * the parent clock, open/close spans, the popup's raw screencast) into
+   * `state.children` and renders nothing itself. Grandchild popups recurse —
+   * every popup lands flat in `state.children`. Popup dialogs are not
+   * annotated yet (tasks/popup-overlay-video.md).
+   */
+  const createPopupRecorder = (popupPage: Page): Plugin<object> | null => {
+    if (state.startedAt === undefined) {
+      return null;
+    }
+
+    const child: VideoModeChild = {
+      highlights: [],
+      openedAt: getVideoTimestamp(),
+      viewport: popupPage.viewportSize() || undefined,
+    };
+    state.children.push(child);
+    const childIndex = state.children.length;
+    // The child records onto the parent clock: highlight times land directly
+    // on the parent timeline, waits merge into the parent's dead air (a span
+    // is dead only if no source is active), and images get a child suffix.
+    const childRecordingState: VideoModeState = {
+      addressBars: [],
+      artifactSuffix: `${state.artifactSuffix}-popup-${childIndex}`,
+      captions: [],
+      children: [],
+      deadAirDepth: 0,
+      deadAirSpans: state.deadAirSpans,
+      highlightImageIndex: 0,
+      highlights: child.highlights,
+      outputs: {},
+      sourceRange: {},
+      startedAt: state.startedAt,
+    };
+
+    return {
+      // Named video-mode so middleware wait-timing lookups match.
+      name: "video-mode",
+      forPopup: ({ page: grandchildPage }) => createPopupRecorder(grandchildPage),
+      middleware: videoModeActionMiddleware({
+        deadAirState: state,
+        highlight,
+        recordingState: childRecordingState,
+        skipMethods,
+        skipStackFrames,
+      }),
+      testLifecycle: (emitter) => {
+        const onClose = () => {
+          if (child.closedAt === undefined) {
+            child.closedAt = getVideoTimestamp();
+          }
+        };
+        popupPage.on("close", onClose);
+        const offAfterTestFinalize = emitter.on(
+          "afterTestFinalize",
+          async ({ page, testInfo }) => {
+            child.viewport = child.viewport || page.viewportSize() || undefined;
+            const video = page.video();
+            if (!page.isClosed()) {
+              if (video) {
+                await settleVideoRecorder(page);
+              }
+              const closeStartedAt = performance.now();
+              await page.close({ runBeforeUnload: false });
+              const closeEndedAt = performance.now();
+              if (video && state.startedAt !== undefined) {
+                child.recordingEndedAt = Math.round(
+                  (closeStartedAt + closeEndedAt) / 2 - state.startedAt,
+                );
+              }
+            }
+            onClose();
+            if (video) {
+              const raw = suffixArtifactFileName(
+                VIDEO_MODE_RAW_FILE,
+                childRecordingState.artifactSuffix,
+              );
+              await mkdir(testInfo.outputDir, { recursive: true });
+              const recordedVideoPath = await video.path();
+              await waitForNonEmptyFile(recordedVideoPath);
+              await copyFile(recordedVideoPath, join(testInfo.outputDir, raw));
+              child.raw = raw;
+            }
+          },
+        );
+        return () => {
+          offAfterTestFinalize();
+          popupPage.off("close", onClose);
+        };
+      },
+    };
+  };
+
   return {
     ...controls,
     name: "video-mode",
+    forPopup: ({ page: popupPage }) => createPopupRecorder(popupPage),
     pageExtension: ({ testInfo }) => {
+      if (activePage) {
+        throw new Error(
+          "this videoMode() instance is already recording another page - " +
+            "create a fresh videoMode() instance for each page (e.g. for a popup)",
+        );
+      }
       testInfoForOutputPaths = testInfo;
+      const registrations = (videoModeRegistrationCounts.get(testInfo.outputDir) || 0) + 1;
+      videoModeRegistrationCounts.set(testInfo.outputDir, registrations);
+      state.artifactSuffix = registrations === 1 ? "" : `-${registrations}`;
       return { videoMode: controls };
     },
 
-    middleware: async ({ args, locator, method, testInfo, timing }, next) => {
-      if (state.deadAirDepth > 0) return next();
-
-      // Skip if called from internal helpers (navigation, login flows etc)
-      if (skipStackFrames.length > 0) {
-        const stack = new Error().stack || "";
-        if (skipStackFrames.some((frame) => stack.includes(frame))) return next();
-      }
-
-      if (
-        trimStart.firstLocator &&
-        state.sourceRange.start === undefined &&
-        state.startedAt !== undefined
-      ) {
-        controls.setStartTime(Math.max(0, Math.round(timing.actionStartedAt - state.startedAt)));
-      }
-
-      if (method === "waitFor") {
-        let result: unknown;
-        try {
-          result = await next();
-        } finally {
-          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 0 });
-        }
-
-        if (highlight.mode !== "off" && !skipMethods.includes(method)) {
-          await recordHighlight({
-            pan: "return",
-            color: highlight.color,
-            durationMs: highlight.durationMs,
-            locator,
-            method,
-            requireVisible: true,
-            startAfterScreenshot: true,
-            state,
-            testInfo,
-            thickness: highlight.thickness,
-          });
-        }
-
-        return result;
-      }
-
-      recordMiddlewareWaitBeforeVideoMode(state, timing);
-
-      if (skipMethods.includes(method)) {
-        try {
-          return await next();
-        } finally {
-          if (timing.attachedAtStart) {
-            recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
-          }
-          recordAttachedWaitFromTiming(state, timing);
-        }
-      }
-
-      const recordedHighlight =
-        highlight.mode === "off"
-          ? undefined
-          : await recordHighlight({
-              pan: method === "fill" ? "off" : "stay",
-              color: highlight.color,
-              durationMs: highlight.durationMs,
-              locator,
-              method,
-              requireVisible: false,
-              startAfterScreenshot: false,
-              state,
-              testInfo,
-              thickness: highlight.thickness,
-            });
-
-      try {
-        const result = await next();
+    middleware: videoModeActionMiddleware({
+      deadAirState: state,
+      highlight,
+      onBeforeRecording: (timing) => {
         if (
-          recordedHighlight &&
-          method === "fill" &&
-          typeof args[0] === "string" &&
-          args[0].length > 0
+          trimStart.firstLocator &&
+          state.sourceRange.start === undefined &&
+          state.startedAt !== undefined
         ) {
-          await recordFillReveal({
-            highlight: recordedHighlight,
-            locator,
-            state,
-            testInfo,
-          });
-        }
-        if (recordedHighlight && state.startedAt !== undefined) {
-          recordedHighlight.actionEnd = Math.max(
-            recordedHighlight.start,
-            Math.round(performance.now() - state.startedAt),
+          controls.setStartTime(
+            Math.max(0, Math.round(timing.actionStartedAt - state.startedAt)),
           );
         }
-        if (recordedHighlight?.pan) {
-          await finalizePanHighlightAfterAction({
-            highlight: recordedHighlight,
-            locator,
-            state,
-          });
-        }
-        return result;
-      } finally {
-        if (recordedHighlight && state.startedAt !== undefined) {
-          recordedHighlight.actionEnd =
-            recordedHighlight.actionEnd ||
-            Math.max(
-              recordedHighlight.start,
-              Math.round(performance.now() - state.startedAt),
-            );
-        }
-        if (
-          !recordedHighlight &&
-          (timing.attachedAtStart || timing.attachedAt === undefined)
-        ) {
-          recordActionElapsedDeadAirFromTiming(state, timing, { minimumMs: 50 });
-        }
-        recordAttachedWaitFromTiming(state, timing);
-      }
-    },
+      },
+      recordingState: state,
+      skipMethods,
+      skipStackFrames,
+    }),
 
     testLifecycle: (emitter) => {
       let addressBarOriginalGoto: Page["goto"] | undefined;
@@ -4301,9 +4999,11 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       let onDialog: ((dialog: Dialog) => void) | undefined;
       let stopObservingPlaywrightSteps = () => {};
       const offBeforeTest = emitter.on("beforeTest", async ({ page, testInfo }) => {
+        activePage = page;
         dialogHighlightQueue = Promise.resolve();
         state.addressBars = [];
         state.captions = [];
+        state.children = [];
         state.deadAirDepth = 0;
         state.deadAirSpans = [];
         state.highlightImageIndex = 0;
@@ -4476,7 +5176,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         const video = page.video();
 
         if (video) {
-          const paths = videoModeOutputPaths(testInfo);
+          const paths = videoModeOutputPaths(testInfo, state.artifactSuffix);
           await mkdir(testInfo.outputDir, { recursive: true });
           let dialogPostFrame: { path: string; viewport: VideoModeViewport } | undefined;
           let finalFrame: { path: string; viewport: VideoModeViewport } | undefined;
@@ -4486,7 +5186,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             if (!viewport) {
               throw new Error("videoMode cannot capture a post-dialog frame without a viewport");
             }
-            const path = join(testInfo.outputDir, VIDEO_MODE_DIALOG_POST_FRAME_FILE);
+            const path = join(
+              testInfo.outputDir,
+              suffixArtifactFileName(VIDEO_MODE_DIALOG_POST_FRAME_FILE, state.artifactSuffix),
+            );
             await page.screenshot({ path, scale: "css" });
             dialogPostFrame = { path, viewport };
           }
@@ -4496,7 +5199,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             if (!viewport) {
               throw new Error("videoMode cannot capture a final frame without a viewport");
             }
-            const path = join(testInfo.outputDir, VIDEO_MODE_FINAL_FRAME_FILE);
+            const path = join(
+              testInfo.outputDir,
+              suffixArtifactFileName(VIDEO_MODE_FINAL_FRAME_FILE, state.artifactSuffix),
+            );
             await page.screenshot({ path, scale: "css" });
             finalFrame = { path, viewport };
           }
@@ -4527,8 +5233,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const recordedVideoPath = await video.path();
           await waitForNonEmptyFile(recordedVideoPath);
           await copyFile(recordedVideoPath, paths.raw);
-          state.outputs.raw = VIDEO_MODE_RAW_FILE;
-          await testInfo.attach("video-raw", {
+          state.outputs.raw = suffixArtifactFileName(VIDEO_MODE_RAW_FILE, state.artifactSuffix);
+          await testInfo.attach(`video-raw${state.artifactSuffix}`, {
             contentType: "video/webm",
             path: paths.raw,
           });
@@ -4549,6 +5255,77 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             highlights,
             offsetMs: timelineOffset,
           });
+
+          // Popup composite (pass A): overlay each popup's screencast onto the
+          // raw footage, then annotate that composite instead of the raw. The
+          // composite shares the raw timeline, so nothing downstream changes.
+          let renderInputPath = paths.raw;
+          // Popup enter/exit animations must reach the output even when a
+          // hold's overlap-skip would jump across them.
+          const renderKeepSpans: VideoModeSpan[] = [];
+          const childLayers = await childCompositeLayers({
+            children: metadataBeforeVideo.children,
+            outputDir: testInfo.outputDir,
+            timelineOffsetMs: timelineOffset,
+            video: rawVideoInfo,
+          });
+          if (childLayers.length > 0) {
+            const compositePath = join(
+              testInfo.outputDir,
+              suffixArtifactFileName(VIDEO_MODE_COMPOSITE_FILE, state.artifactSuffix),
+            );
+            await compositeChildOverlays({
+              fps: 1000 / rawVideoInfo.frameDurationMs,
+              inputPath: paths.raw,
+              layers: childLayers,
+              outputPath: compositePath,
+            });
+            renderInputPath = compositePath;
+            for (const layer of childLayers) {
+              renderKeepSpans.push(
+                { end: layer.enableFromMs + CHILD_OVERLAY_FADE_MS, start: layer.enableFromMs },
+                { end: layer.enableToMs, start: layer.closeMs },
+              );
+            }
+            // A parent action right after a popup closes (waiting for the
+            // signed-in state, say) would hold a freeze frame from inside the
+            // overlay's exit animation — a ghost popup flashing back after it
+            // disappeared. Shift such highlights past the fade window.
+            for (const parentHighlight of renderTimeline.highlights) {
+              for (const layer of childLayers) {
+                const fadeEndMs = layer.enableToMs + rawVideoInfo.frameDurationMs;
+                if (
+                  parentHighlight.start >= layer.closeMs - rawVideoInfo.frameDurationMs &&
+                  parentHighlight.start < fadeEndMs
+                ) {
+                  const shift = fadeEndMs - parentHighlight.start;
+                  parentHighlight.start += shift;
+                  parentHighlight.end += shift;
+                  if (parentHighlight.actionEnd !== undefined) {
+                    parentHighlight.actionEnd += shift;
+                  }
+                  if (parentHighlight.sourceFrameAt !== undefined) {
+                    parentHighlight.sourceFrameAt += shift;
+                  }
+                }
+              }
+            }
+            const projectedChildHighlights = childLayers.flatMap((layer) =>
+              translateVideoTimeline({
+                addressBars: [],
+                captions: [],
+                deadAir: [],
+                highlights: layer.child.highlights,
+                offsetMs: timelineOffset,
+              }).highlights.map((highlight) =>
+                projectChildHighlight({ highlight, layer, video: rawVideoInfo }),
+              ),
+            );
+            renderTimeline.highlights.push(...projectedChildHighlights);
+            renderTimeline.highlights.sort(
+              (left, right) => left.start - right.start || left.end - right.end,
+            );
+          }
           // A selector-driven trim start resolves over the protocol and can
           // land a few milliseconds after a highlight recorded at effectively
           // the same moment. The race must not drop that highlight, so a start
@@ -4621,6 +5398,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           ) {
             const wroteRenderedVideo = await renderVideo({
               addressBars: renderTimeline.addressBars,
+              artifactSuffix: state.artifactSuffix,
               captions: renderTimeline.captions,
               deadAir: renderTimeline.deadAir,
               dialogPostFrame,
@@ -4629,7 +5407,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               finalHoldMs: finalHold,
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights: renderTimeline.highlights,
-              inputPath: paths.raw,
+              inputPath: renderInputPath,
+              keepSpans: renderKeepSpans,
               outputDir: testInfo.outputDir,
               outputPath: paths.rendered,
               sourceRange,
@@ -4638,31 +5417,40 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             });
 
             if (wroteRenderedVideo) {
-              state.outputs.rendered = VIDEO_MODE_RENDERED_FILE;
-              await testInfo.attach("video-rendered", {
+              state.outputs.rendered = suffixArtifactFileName(
+                VIDEO_MODE_RENDERED_FILE,
+                state.artifactSuffix,
+              );
+              await testInfo.attach(`video-rendered${state.artifactSuffix}`, {
                 contentType: "video/webm",
                 path: paths.rendered,
               });
             }
           }
 
-          state.outputs.player = VIDEO_MODE_PLAYER_FILE;
+          state.outputs.player = suffixArtifactFileName(VIDEO_MODE_PLAYER_FILE, state.artifactSuffix);
+          const metadataFileName = suffixArtifactFileName(
+            VIDEO_MODE_METADATA_FILE,
+            state.artifactSuffix,
+          );
           await writeFile(
             paths.player,
             videoModePlayerHtml({
+              metadata: metadataFileName,
               raw: state.outputs.raw,
               rendered: state.outputs.rendered,
             }),
           );
 
           const reportPlayerHtml = videoModePlayerHtml({
+            metadata: metadataFileName,
             raw: await playwrightReportAttachmentName(paths.raw),
             rendered: state.outputs.rendered
               ? await playwrightReportAttachmentName(paths.rendered)
               : undefined,
           });
           await writeFile(paths.reportPlayer, reportPlayerHtml);
-          await testInfo.attach("video-mode-player", {
+          await testInfo.attach(`video-mode-player${state.artifactSuffix}`, {
             contentType: "text/html",
             path: paths.reportPlayer,
           });
@@ -4679,20 +5467,23 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           metadata.outputs.rendered ||
           sourceRangeIsSet(metadata.sourceRange)
         ) {
-          const path = videoModeOutputPaths(testInfo).metadata;
+          const path = videoModeOutputPaths(testInfo, state.artifactSuffix).metadata;
           await mkdir(testInfo.outputDir, { recursive: true });
           await writeFile(path, `${JSON.stringify(metadata, null, 2)}\n`);
-          await testInfo.attach("video-mode", {
+          await testInfo.attach(`video-mode${state.artifactSuffix}`, {
             contentType: "application/json",
             path,
           });
         }
 
         state.startedAt = undefined;
-        console.log(`video-mode metadata written to ${videoModeOutputPaths(testInfo).metadata}`);
+        console.log(
+          `video-mode metadata written to ${videoModeOutputPaths(testInfo, state.artifactSuffix).metadata}`,
+        );
       });
 
       return () => {
+        activePage = undefined;
         stopObservingPlaywrightSteps();
         offBeforeTest();
         offAfterTestFinalize();
