@@ -133,15 +133,6 @@ export const spinnerWaiter = Object.assign(
         const spinnerVisible = await anySpinnerVisible(spinnerLocator);
 
         if (!spinnerVisible) {
-          // Target readiness and spinner visibility are separate browser
-          // reads. The UI can atomically replace the spinner with the target
-          // between them, so bridge that handoff with one polling interval
-          // before taking the intentional 1ms fast-fail path.
-          if (await waitForReady(locator, method, { timeout: 100 })) {
-            settings.log(`${locator} became ready during spinner handoff, proceeding`);
-            return next();
-          }
-
           // No spinner - call action, suggest adding one if it fails
           settings.log(`${locator} not ready, no spinner, failing fast`);
           try {
