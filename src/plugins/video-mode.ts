@@ -142,6 +142,17 @@ export type VideoModeHighlight = VideoModeSpan & {
   fillReveal?: VideoModeFillReveal;
   image?: string;
   method?: OverrideableMethod;
+  /**
+   * Set at render time on projected popup highlights: maps child-frame
+   * coordinates (which `fillReveal` and its screenshots use) into the
+   * composite frame — scale plus the overlay's top-left corner.
+   */
+  overlayTransform?: {
+    scale: number;
+    viewport: VideoModeViewport;
+    x: number;
+    y: number;
+  };
   pan?: VideoModePan;
   rect: VideoModeRect;
   sourceFrameAt?: number;
@@ -2315,6 +2326,12 @@ const videoPieces = (options: {
   addressBars: VideoModeAddressBar[];
   frameDurationMs: number;
   highlights: VideoModeHighlight[];
+  /**
+   * Source spans that must reach the output (popup enter/exit animations).
+   * Overlapping-hold skips normally jump the footage between two highlights;
+   * a skip is cancelled when it would leap across one of these.
+   */
+  keepSpans: VideoModeSpan[];
   preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
 }): VideoPiece[] => {
@@ -2362,8 +2379,10 @@ const videoPieces = (options: {
       const nextHighlight = highlights[highlightIndex + 1];
 
       if (highlight.start > cursor) {
-        const postAction = previousHighlight?.fillReveal ? previousHighlight : undefined;
-        const preAction = highlight.fillReveal ? highlight : undefined;
+        const stabilizable = (candidate: VideoModeHighlight | undefined) =>
+          candidate?.fillReveal && !candidate.overlayTransform ? candidate : undefined;
+        const postAction = stabilizable(previousHighlight);
+        const preAction = stabilizable(highlight);
         // `trim` chooses whole source frames. Round down so the boundary frame
         // belongs to the stabilized piece instead of leaking from the raw gap.
         const preActionStart = preAction
@@ -2417,7 +2436,13 @@ const videoPieces = (options: {
       let nextCursor = actionEnd;
 
       if (nextHighlight && highlight.end > nextHighlight.start) {
-        nextCursor = Math.max(nextCursor, nextHighlight.start);
+        const skipTo = Math.max(nextCursor, nextHighlight.start);
+        const skipCrossesKeptSpan = options.keepSpans.some(
+          (span) => span.start < skipTo && span.end > nextCursor,
+        );
+        if (!skipCrossesKeptSpan) {
+          nextCursor = skipTo;
+        }
       }
 
       cursor = Math.min(segment.end, nextCursor);
@@ -2427,7 +2452,10 @@ const videoPieces = (options: {
     if (segment.end > cursor) {
       pieces.push({
         end: segment.end,
-        postAction: previousHighlight?.fillReveal ? previousHighlight : undefined,
+        postAction:
+          previousHighlight?.fillReveal && !previousHighlight.overlayTransform
+            ? previousHighlight
+            : undefined,
         speed: segment.speed,
         start: cursor,
       });
@@ -2656,8 +2684,20 @@ const highlightCursorPoint = (
   highlight: VideoModeHighlight,
   video: { width: number; height: number },
 ) => {
-  const rect = highlight.fillReveal
-    ? scaleVideoModeRect(highlight.fillReveal.initialRect, highlight.viewport, video)
+  // fillReveal rects live in child-frame coordinates on projected popup
+  // highlights — map them through the overlay transform first.
+  const transform = highlight.overlayTransform;
+  const projectedInitialRect =
+    highlight.fillReveal && transform
+      ? {
+          height: highlight.fillReveal.initialRect.height * transform.scale,
+          width: highlight.fillReveal.initialRect.width * transform.scale,
+          x: transform.x + highlight.fillReveal.initialRect.x * transform.scale,
+          y: transform.y + highlight.fillReveal.initialRect.y * transform.scale,
+        }
+      : highlight.fillReveal?.initialRect;
+  const rect = projectedInitialRect
+    ? scaleVideoModeRect(projectedInitialRect, highlight.viewport, video)
     : scaleHighlight(highlight, video);
 
   return {
@@ -2959,6 +2999,7 @@ const renderedVideoFilter = (options: {
   highlightMode: "outline" | "pointer";
   highlightInputs: HighlightInput[];
   highlights: VideoModeHighlight[];
+  keepSpans: VideoModeSpan[];
   preActionStabilizationMs: number;
   segments: RenderVideoSegment[];
   textPointerInput?: PointerInput;
@@ -2971,10 +3012,23 @@ const renderedVideoFilter = (options: {
     addressBars: options.addressBars,
     frameDurationMs: options.video.frameDurationMs,
     highlights: options.highlights,
+    keepSpans: options.keepSpans,
     preActionStabilizationMs: options.preActionStabilizationMs,
     segments: options.segments,
   });
   const renderedPieces = renderedVideoPieces(pieces);
+  if (process.env.MIDDLEWRIGHT_DEBUG_PIECES) {
+    for (const piece of renderedPieces) {
+      console.log(
+        `piece src[${piece.start}-${piece.end}] out[${Math.round(piece.outputStart)}-${Math.round(piece.outputEnd)}] speed=${piece.speed}` +
+          (piece.highlight ? ` highlight=${piece.highlight.method} hstart=${piece.highlight.start}` : "") +
+          (piece.addressBar ? " addressBar" : "") +
+          (piece.highlight?.overlayTransform ? " overlay" : "") +
+          (piece.highlight?.fillReveal ? " fillReveal" : "") +
+          (piece.highlight?.image ? ` image=${piece.highlight.image}` : ""),
+      );
+    }
+  }
   const targets = cursorTargets({
     highlights: options.highlights,
     pieces: renderedPieces,
@@ -3123,6 +3177,126 @@ const renderedVideoFilter = (options: {
         );
         composedLabel = nextLabel;
       }
+      continue;
+    }
+
+    // Fill reveal inside a popup overlay: the base is a frozen composite
+    // frame from just before the fill (popup risen, field empty, dim and
+    // parent intact), and the typed reveal is the child screenshot's content
+    // rect scaled and positioned through the overlay transform.
+    if (piece.highlight && fillReveal && postFillInput && piece.highlight.overlayTransform) {
+      const transform = piece.highlight.overlayTransform;
+      const projectLength = (value: number) => Math.round(value * transform.scale);
+      const scaledImage = {
+        height: Math.max(2, projectLength(transform.viewport.height)),
+        width: Math.max(2, projectLength(transform.viewport.width)),
+      };
+      const contentLocal = {
+        height: Math.max(1, Math.min(scaledImage.height, projectLength(fillReveal.contentRect.height))),
+        width: Math.max(1, Math.min(scaledImage.width, projectLength(fillReveal.contentRect.width))),
+        x: Math.max(0, projectLength(fillReveal.contentRect.x)),
+        y: Math.max(0, projectLength(fillReveal.contentRect.y)),
+      };
+      const contentAbsolute = {
+        x: Math.round(transform.x + fillReveal.contentRect.x * transform.scale),
+        y: Math.round(transform.y + fillReveal.contentRect.y * transform.scale),
+      };
+      const duration = renderedPieceDuration(piece);
+      const durationSeconds = formatSeconds(duration);
+      const revealStops = fillReveal.revealStops
+        .map((stop) => Math.max(1, Math.min(contentLocal.width, projectLength(stop))))
+        .filter((stop, stopIndex, stops) => stopIndex === 0 || stop !== stops[stopIndex - 1]);
+      const revealSteps = fillReveal.revealBands.flatMap((band) => {
+        const y = Math.max(0, Math.min(contentLocal.height - 1, projectLength(band.y)));
+        const height = Math.max(1, Math.min(contentLocal.height - y, projectLength(band.height)));
+        return revealStops.map((width) => ({ height, width, y }));
+      });
+      const target = plan.targets.find(
+        (candidate) => candidate.highlight === piece.highlight,
+      );
+      const revealEnd =
+        options.highlightMode === "pointer"
+          ? Math.max(0, duration - TEXT_CURSOR_POINTER_TAIL_MS)
+          : duration;
+      const pointerArrival = target
+        ? Math.max(0, target.arriveAt - renderedPiece.outputStart)
+        : 0;
+      const availableAfterArrival = Math.max(0, revealEnd - pointerArrival);
+      const preRevealHold = Math.min(
+        TEXT_CURSOR_HOLD_IDEAL_MS,
+        availableAfterArrival / 2,
+      );
+      const revealStart = Math.max(
+        0,
+        Math.min(revealEnd, pointerArrival + preRevealHold),
+      );
+      const baseLabel = `fillbase${index}`;
+      // A few frames of margin: the child anchor is approximate, and the
+      // safe failure mode is showing slightly earlier (still-empty) footage.
+      const freezeStart = Math.max(0, piece.start - 3 * options.video.frameDurationMs);
+      filters.push(
+        [
+          `[0:v]trim=start=${formatSeconds(freezeStart)}:end=${formatSeconds(
+            freezeStart + options.video.frameDurationMs,
+          )}`,
+          "setpts=PTS-STARTPTS",
+          `tpad=stop_mode=clone:stop_duration=${formatSeconds(
+            Math.max(0, duration - options.video.frameDurationMs),
+          )}`,
+          `trim=start=0:end=${durationSeconds}`,
+          `setpts=PTS-STARTPTS[${baseLabel}]`,
+        ].join(","),
+      );
+
+      if (revealSteps.length === 0) {
+        filters.push(`[${baseLabel}]null[${label}]`);
+        continue;
+      }
+
+      const splitLabels = revealSteps.map((_, stepIndex) => `fillpost${index}x${stepIndex}`);
+      filters.push(
+        [
+          `[${postFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+          `crop=w=${contentLocal.width}:h=${contentLocal.height}:x=${contentLocal.x}:y=${contentLocal.y}`,
+          `trim=start=0:end=${durationSeconds}`,
+          "setpts=PTS-STARTPTS",
+          `split=${revealSteps.length}${splitLabels.map((splitLabel) => `[${splitLabel}]`).join("")}`,
+        ].join(","),
+      );
+
+      let composedLabel = baseLabel;
+      for (let stepIndex = 0; stepIndex < revealSteps.length; stepIndex += 1) {
+        const step = revealSteps[stepIndex];
+        const cropLabel = `fillcrop${index}x${stepIndex}`;
+        const nextLabel = `fillcomposed${index}x${stepIndex}`;
+        const showAt =
+          revealStart +
+          ((revealEnd - revealStart) * (stepIndex + 1)) /
+            (revealSteps.length + 1);
+        filters.push(
+          `${[
+            `[${splitLabels[stepIndex]}]crop=w=${step.width}`,
+            `h=${step.height}`,
+            "x=0",
+            `y=${step.y}`,
+          ].join(":")}[${cropLabel}]`,
+        );
+        filters.push(
+          [
+            `[${composedLabel}][${cropLabel}]overlay=x=${contentAbsolute.x}`,
+            `y=${contentAbsolute.y + step.y}`,
+            `enable='gte(t\\,${formatSeconds(showAt)})'`,
+            `shortest=1[${nextLabel}]`,
+          ].join(":"),
+        );
+        composedLabel = nextLabel;
+      }
+
+      filters.push(
+        options.highlightMode === "outline"
+          ? `[${composedLabel}]${drawboxFilter(piece.highlight, options.video)}[${label}]`
+          : `[${composedLabel}]null[${label}]`,
+      );
       continue;
     }
 
@@ -3902,6 +4076,8 @@ const renderVideo = async (options: {
   highlightMode: "outline" | "pointer";
   highlights: VideoModeHighlight[];
   inputPath: string;
+  /** Source spans that must not be skipped (popup enter/exit animations). */
+  keepSpans: VideoModeSpan[];
   outputDir: string;
   outputPath: string;
   deadAir: VideoModeSpan[];
@@ -4010,6 +4186,7 @@ const renderVideo = async (options: {
       addressBars: options.addressBars,
       frameDurationMs: info.frameDurationMs,
       highlights: options.highlights,
+      keepSpans: options.keepSpans,
       preActionStabilizationMs,
       segments,
     }),
@@ -4063,6 +4240,7 @@ const renderVideo = async (options: {
     highlightMode: options.highlightMode,
     highlightInputs,
     highlights: options.highlights,
+    keepSpans: options.keepSpans,
     preActionStabilizationMs,
     segments,
     textPointerInput,
@@ -4106,9 +4284,12 @@ const renderVideo = async (options: {
 };
 
 const VIDEO_MODE_COMPOSITE_FILE = "video-composite.webm";
+// Playwright extends a closed page's final screencast frame by the time since
+// that frame arrived, with this minimum (see VIDEO_MODE_RECORDER_SETTLE_MS).
+const RECORDER_FINAL_FRAME_MIN_PADDING_MS = 1000;
 const CHILD_OVERLAY_MAX_FRACTION = 0.9;
 const CHILD_OVERLAY_BACKDROP_OPACITY = 0.4;
-const CHILD_OVERLAY_FADE_MS = 200;
+const CHILD_OVERLAY_FADE_MS = 300;
 
 /** A popup screencast placed on the parent timeline as a scaled overlay. */
 type VideoModeChildLayer = {
@@ -4142,11 +4323,18 @@ const childCompositeLayers = async (options: {
     const path = join(options.outputDir, child.raw);
     const rawInfo = await videoInfo(path);
     // A settled recorder maps the raw end to a known parent time. A popup
-    // that closed itself has no settled endpoint; its screencast started at
-    // page creation, which openedAt approximates.
+    // that closed itself has no settled endpoint — and its screencast t=0 is
+    // the first *captured* frame, which lags the popup event by the initial
+    // paint. Playwright pads the final frame by >=1s on close, so the first
+    // frame lands near closedAt + padding - duration; openedAt is the floor.
     const childOffsetMs =
       child.recordingEndedAt === undefined
-        ? child.openedAt
+        ? Math.max(
+            child.openedAt,
+            (child.closedAt === undefined ? child.openedAt : child.closedAt) +
+              RECORDER_FINAL_FRAME_MIN_PADDING_MS -
+              rawInfo.durationMs,
+          )
         : child.recordingEndedAt - rawInfo.durationMs;
     const scale = Math.min(
       1,
@@ -4235,8 +4423,22 @@ const compositeChildOverlays = async (options: {
         `fade=t=out:st=${formatSeconds(fadeOutStartMs)}:d=${formatSeconds(CHILD_OVERLAY_FADE_MS)}:alpha=1[${childLabel}]`,
       ].join(","),
     );
+    // Slide up from the bottom edge on enter (cubic ease-out), slide back
+    // down after close (cubic ease-in), resting at the centered position
+    // between. Times are seconds; commas escaped for the filter graph.
+    const fadeSeconds = formatSeconds(CHILD_OVERLAY_FADE_MS);
+    const offscreenY = "H";
+    const enterProgress = `min(max((t-${from})/${fadeSeconds}\\,0)\\,1)`;
+    const exitProgress = `min(max((t-${formatSeconds(layer.closeMs)})/${fadeSeconds}\\,0)\\,1)`;
+    const slideY = [
+      `if(lt(t\\,${formatSeconds(layer.enableFromMs + CHILD_OVERLAY_FADE_MS)})`,
+      `\\,${layer.y}+(${offscreenY}-${layer.y})*pow(1-${enterProgress}\\,2)`,
+      `\\,if(gt(t\\,${formatSeconds(layer.closeMs)})`,
+      `\\,${layer.y}+(${offscreenY}-${layer.y})*pow(${exitProgress}\\,2)`,
+      `\\,${layer.y}))`,
+    ].join("");
     filters.push(
-      `[${dimLabel}][${childLabel}]overlay=x=${layer.x}:y=${layer.y}:eof_action=pass:${enable}[${outLabel}]`,
+      `[${dimLabel}][${childLabel}]overlay=x=${layer.x}:y='${slideY}':eval=frame:eof_action=pass:${enable}[${outLabel}]`,
     );
     currentLabel = outLabel;
   });
@@ -4283,21 +4485,25 @@ const projectChildHighlight = (options: {
     layer.rawInfo.height / viewport.height,
   );
   const scale = viewportToChildPixels * (layer.width / layer.rawInfo.width);
-  // Holds clone the composite frame at actionEnd. An action that closes the
-  // popup (Approve on an OAuth popup) puts that frame past close — move the
-  // highlight's source slice back into stable popup-visible footage, and
-  // widen it to a couple of frames so the trim can't come up empty (an
-  // instant click's slice is a few ms — often between frame ticks).
-  const holdSafeEndMs = Math.floor(layer.closeMs - 2 * options.video.frameDurationMs);
+  // Holds clone the composite frame at actionEnd. The overlay stays fully
+  // visible until close (the exit animation runs after), so the freeze only
+  // needs two small guards: never sample past close, and keep the source
+  // slice wider than a frame tick so the trim can't come up empty (an
+  // instant click's slice is a few ms — often between ticks). Widening may
+  // nudge the highlight a few ms earlier; order-preserving in practice.
+  const closeFloorMs = Math.floor(layer.closeMs);
+  const minSliceMs = options.video.frameDurationMs + 10;
   let { actionEnd, end, start } = highlight;
-  if (actionEnd !== undefined && actionEnd > holdSafeEndMs) {
-    const holdMs = end - start;
-    const sliceMs = Math.max(2 * options.video.frameDurationMs, actionEnd - start);
-    const earliestStartMs = layer.enableFromMs + CHILD_OVERLAY_FADE_MS;
-    actionEnd = holdSafeEndMs;
-    start = Math.max(earliestStartMs, actionEnd - sliceMs);
-    actionEnd = Math.max(actionEnd, start + 1);
-    end = start + holdMs;
+  if (actionEnd !== undefined) {
+    actionEnd = Math.min(actionEnd, closeFloorMs);
+    if (actionEnd - start < minSliceMs) {
+      actionEnd = Math.min(closeFloorMs, start + minSliceMs);
+    }
+    if (actionEnd - start < minSliceMs) {
+      const shift = minSliceMs - (actionEnd - start);
+      start -= shift;
+      end -= shift;
+    }
   }
 
   return {
@@ -4306,8 +4512,18 @@ const projectChildHighlight = (options: {
     end,
     start,
     dialog: undefined,
-    fillReveal: undefined,
-    image: undefined,
+    // Fill reveals keep their child-frame geometry and screenshots; the
+    // render projects them through overlayTransform. Screenshot stills
+    // without a reveal (e.g. password fallbacks) would render full-frame, so
+    // they drop away and the hold freezes the composite instead.
+    fillReveal: highlight.fillReveal,
+    image: highlight.fillReveal ? highlight.image : undefined,
+    overlayTransform: {
+      scale,
+      viewport,
+      x: layer.x,
+      y: layer.y,
+    },
     pan: undefined,
     rect: {
       height: highlight.rect.height * scale,
@@ -4977,6 +5193,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           // raw footage, then annotate that composite instead of the raw. The
           // composite shares the raw timeline, so nothing downstream changes.
           let renderInputPath = paths.raw;
+          // Popup enter/exit animations must reach the output even when a
+          // hold's overlap-skip would jump across them.
+          const renderKeepSpans: VideoModeSpan[] = [];
           const childLayers = await childCompositeLayers({
             children: metadataBeforeVideo.children,
             outputDir: testInfo.outputDir,
@@ -4995,6 +5214,35 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               outputPath: compositePath,
             });
             renderInputPath = compositePath;
+            for (const layer of childLayers) {
+              renderKeepSpans.push(
+                { end: layer.enableFromMs + CHILD_OVERLAY_FADE_MS, start: layer.enableFromMs },
+                { end: layer.enableToMs, start: layer.closeMs },
+              );
+            }
+            // A parent action right after a popup closes (waiting for the
+            // signed-in state, say) would hold a freeze frame from inside the
+            // overlay's exit animation — a ghost popup flashing back after it
+            // disappeared. Shift such highlights past the fade window.
+            for (const parentHighlight of renderTimeline.highlights) {
+              for (const layer of childLayers) {
+                const fadeEndMs = layer.enableToMs + rawVideoInfo.frameDurationMs;
+                if (
+                  parentHighlight.start >= layer.closeMs - rawVideoInfo.frameDurationMs &&
+                  parentHighlight.start < fadeEndMs
+                ) {
+                  const shift = fadeEndMs - parentHighlight.start;
+                  parentHighlight.start += shift;
+                  parentHighlight.end += shift;
+                  if (parentHighlight.actionEnd !== undefined) {
+                    parentHighlight.actionEnd += shift;
+                  }
+                  if (parentHighlight.sourceFrameAt !== undefined) {
+                    parentHighlight.sourceFrameAt += shift;
+                  }
+                }
+              }
+            }
             const projectedChildHighlights = childLayers.flatMap((layer) =>
               translateVideoTimeline({
                 addressBars: [],
@@ -5093,6 +5341,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               highlightMode: highlight.mode === "pointer" ? "pointer" : "outline",
               highlights: renderTimeline.highlights,
               inputPath: renderInputPath,
+              keepSpans: renderKeepSpans,
               outputDir: testInfo.outputDir,
               outputPath: paths.rendered,
               sourceRange,

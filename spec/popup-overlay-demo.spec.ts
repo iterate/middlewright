@@ -4,12 +4,12 @@
 import { stat } from "node:fs/promises";
 import { test, expect } from "@playwright/test";
 import { addPlugins, videoMode } from "../src/index.ts";
-import { routeAuthDemoApp } from "./auth-demo-app.ts";
+import { routeSignInDemoApp } from "./auth-demo-app.ts";
 
 test.use({ video: "on", viewport: { width: 960, height: 540 } });
 
 test("auth popup demo", async ({ page: basePage, context }, testInfo) => {
-  await routeAuthDemoApp(context);
+  await routeSignInDemoApp(context);
   const video = videoMode();
   {
     await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
@@ -25,9 +25,11 @@ test("auth popup demo", async ({ page: basePage, context }, testInfo) => {
     });
 
     const popup = await popupPromise;
-    await test.step("Approve access in the popup", async () => {
+    await test.step("Sign in as mmkal", async () => {
       await popup.waitForTimeout(500);
-      await popup.getByRole("button", { name: "Approve" }).click();
+      await popup.getByLabel("Username").fill("mmkal");
+      await popup.getByLabel("Password").fill("hunter2");
+      await popup.getByRole("button", { name: "Sign in" }).click();
     });
 
     await test.step("Back on the app, signed in", async () => {
