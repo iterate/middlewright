@@ -1,3 +1,5 @@
+import dedent from "dedent";
+
 const requiredPatternsSchema = [
   {
     type: "object",
@@ -270,20 +272,3 @@ export default {
     "require-timeout-comment": requireTimeoutComment,
   },
 };
-
-function dedent(strings: TemplateStringsArray, ...values: any[]) {
-  const indented = strings
-    .map((string, index) => string + (index < values.length ? String(values[index]) : ""))
-    .join("");
-  const lines = indented.split(/\r?\n/);
-
-  while (lines[0]?.trim() === "") lines.shift();
-  while (lines.at(-1)?.trim() === "") lines.pop();
-
-  const indentation = Math.min(
-    ...lines
-      .filter((line) => line.trim())
-      .map((line) => line.match(/^[ \t]*/)?.[0].length || 0),
-  );
-  return lines.map((line) => line.slice(indentation)).join("\n");
-}
