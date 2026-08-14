@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import { addPlugins, spinnerWaiter, type Plugin } from "../src/index.ts";
+import { addPlugins, defaultSelectors, spinnerWaiter, type Plugin } from "../src/index.ts";
 
 const test = base.extend<{ slowMutationTimeout: number }>({
   page: async ({ page: basePage }, use, testInfo) => {
@@ -147,6 +147,30 @@ test("settings.run scopes an override to a single call", async ({ page }) => {
 
   // Outside the run() scope the spinner waiter is back, so this succeeds
   await page.getByText("work done").waitFor();
+});
+
+test("waits out a loading state showing two spinners at once", async ({ page }) => {
+  // Mirrors a chat feed's live "Thinking…" state: a spinner icon and a
+  // thinking bubble both match the spinner selectors at the same time. A bare
+  // spinnerLocator.isVisible() throws a strict-mode violation here.
+  await page.setContent(`
+    <button id="ask" onclick="think()">ask question</button>
+    <div id="feed"></div>
+    <script>
+      function think() {
+        const feed = document.querySelector('#feed');
+        feed.innerHTML = '<span aria-label="Loading">⏳</span><p>Thinking…</p>';
+        setTimeout(() => { feed.textContent = 'here is your answer'; }, 2000);
+      }
+    </script>
+  `);
+
+  await page.locator("#ask").click();
+
+  const spinners = page.locator(defaultSelectors.join(","));
+  expect(await spinners.count()).toBeGreaterThanOrEqual(2); // multiple matches, or the test is vacuous
+
+  await page.getByText("here is your answer").waitFor();
 });
 
 test("bails early when spinner disappears without expected element", async ({ page }) => {

@@ -104,6 +104,14 @@ export type PageExtensionContext = {
   testInfo: TestInfo;
 };
 
+export type PopupPluginContext = {
+  /** The newly opened popup page, not yet wrapped. */
+  page: Page;
+  /** The wrapped page that opened the popup. */
+  parentPage: Page;
+  testInfo: TestInfo;
+};
+
 export type Plugin<PageExtension extends object = {}> = {
   name: string;
   /** Middleware to wrap locator actions. Called in registration order. */
@@ -112,6 +120,13 @@ export type Plugin<PageExtension extends object = {}> = {
   testLifecycle?: (emitter: Emittery<TestLifecycleEvents>) => void | (() => void);
   /** Add explicit test controls to the page returned from addPlugins. */
   pageExtension?: (ctx: PageExtensionContext) => PageExtension;
+  /**
+   * Called when a page wrapped with this plugin opens a popup, to produce the
+   * plugin registered on the popup — often a fresh instance tied to this one.
+   * Return null to skip this plugin on popups. Plugins without this hook are
+   * re-registered as-is (fine for stateless plugins).
+   */
+  forPopup?: (ctx: PopupPluginContext) => Plugin<object> | false | null | undefined;
 };
 
 const PLUGIN_STATE = Symbol("playwrightPluginState");
@@ -184,9 +199,24 @@ export const addPlugins = async <const Plugins extends readonly MaybePlugin[]>(p
   page: Page;
   testInfo: TestInfo;
   plugins: Plugins;
+  /**
+   * Automatically add plugins to popups this page opens (and to their popups,
+   * recursively). Plugins may define `forPopup` to control or skip what gets
+   * registered on the popup. Default: true. Pass false to leave popups
+   * unwrapped — they fall through to original Playwright behavior and can be
+   * wrapped manually with fresh plugin instances.
+   */
+  popups?: boolean;
   boxedStackPrefixes?: (defaults: string[]) => string[];
 }): Promise<PageWithPlugins<PageExtensions<Plugins>>> => {
   const { page, testInfo, plugins, boxedStackPrefixes } = params;
+  if (getPluginState(page)) {
+    throw new Error(
+      "this page already has plugins added. Popups are auto-wrapped by default - " +
+        "pass popups: false to the parent addPlugins call for manual control, " +
+        "and use fresh plugin instances for each page",
+    );
+  }
   // Patch Locator prototype once globally
   patchLocatorPrototype(page, boxedStackPrefixes);
 
@@ -228,11 +258,51 @@ export const addPlugins = async <const Plugins extends readonly MaybePlugin[]>(p
   // Emit beforeTest
   await state.lifecycleEmitter.emitSerial("beforeTest", { page, testInfo });
 
+  // Auto-wrap popups (default on). The child addPlugins call attaches plugin
+  // state synchronously in the tick the popup event fires — before test code
+  // awaiting waitForEvent("popup") gets to act on the popup — because this
+  // listener is registered ahead of the test's own.
+  const childWraps: Promise<PageWithPlugins>[] = [];
+  let onPopup: ((popup: Page) => void) | undefined;
+  if (params.popups !== false) {
+    onPopup = (popupPage) => {
+      const childPlugins = plugins
+        .filter((plugin): plugin is Plugin<object> => !!plugin)
+        .map((plugin) =>
+          plugin.forPopup
+            ? plugin.forPopup({ page: popupPage, parentPage: page, testInfo })
+            : plugin,
+        );
+      const wrap = addPlugins({ page: popupPage, testInfo, plugins: childPlugins });
+      childWraps.push(wrap);
+      // Failures surface at dispose; avoid unhandled-rejection noise meanwhile.
+      wrap.catch(() => {});
+    };
+    page.on("popup", onPopup);
+  }
+
   // Add async dispose
   pageWithPlugins[Symbol.asyncDispose] = async () => {
+    if (onPopup) {
+      page.off("popup", onPopup);
+    }
+    // Children dispose first (newest first) so their plugins can finalize --
+    // and, later, feed facts to parent plugins -- before the parent's own
+    // lifecycle events run. A failed child wrap must not stop the parent
+    // finalizing; it rethrows below once cleanup is done.
+    const settledChildren = await Promise.allSettled(childWraps);
+    for (const result of [...settledChildren].reverse()) {
+      if (result.status === "fulfilled") {
+        await result.value[Symbol.asyncDispose]();
+      }
+    }
     await state.lifecycleEmitter.emitSerial("afterTest", { page, testInfo });
     await state.lifecycleEmitter.emitSerial("afterTestFinalize", { page, testInfo });
     state.lifecycleCleanups.forEach((cleanup) => cleanup());
+    const failedChildWrap = settledChildren.find((result) => result.status === "rejected");
+    if (failedChildWrap) {
+      throw failedChildWrap.reason;
+    }
   };
 
   return pageWithPlugins;

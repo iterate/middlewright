@@ -351,6 +351,28 @@ export default defineConfig({
 });
 ```
 
+### Popups
+
+Popups are wrapped automatically. When a wrapped page opens one — an OAuth window, say — the popup gets the same plugin treatment, no wiring:
+
+```ts
+const popupPromise = page.waitForEvent("popup");
+await page.getByRole("button", { name: "Sign in" }).click();
+const popup = await popupPromise; // already wrapped
+await popup.getByRole("button", { name: "Approve" }).click();
+```
+
+In video mode, the popup renders as an overlay **in the main page's video**: scaled to fit 90% of the frame over the dimmed page, faded in and out on open/close, with popup clicks pointer-annotated inside the overlay. One composed video per test, popups included. The popup's facts land in `video-mode.json` under `children`.
+
+Details and escape hatches:
+
+- Plugins can control what a popup gets via the `forPopup(ctx)` hook — return a plugin for the popup, or `null` to skip. Hookless plugins are re-registered as-is (fine for stateless ones).
+- `addPlugins({ ..., popups: false })` turns auto-wrap off. You can then wrap the popup manually with **fresh plugin instances** — a fresh `videoMode()` gives the popup its own standalone video, with `-2`-suffixed artifacts (`video-rendered-2.webm`, `video-mode-2.json`, …).
+- Wrapping an already-wrapped page throws, as does reusing an active `videoMode` instance on a second page — one instance per page.
+- Popup dialogs (`alert`/`confirm`/`prompt` opened by the popup) aren't annotated in video mode yet.
+
+See [spec/popup.spec.ts](spec/popup.spec.ts) and [spec/popup-overlay-demo.spec.ts](spec/popup-overlay-demo.spec.ts).
+
 ## Writing your own plugin
 
 **Writing your own plugins is the intended way to use this package.** The bundled five exist because they were useful for one particular app; your app has its own loading conventions, error surfaces, and flake patterns. Each bundled plugin is one small self-contained file — use them as inspiration: [spinner-waiter](./src/plugins/spinner-waiter.ts) (conditional waiting + error enrichment + runtime settings via `AsyncLocalStorage`), [hydration-waiter](./src/plugins/hydration-waiter.ts) (the simplest one — start here), [ui-error-reporter](./src/plugins/ui-error-reporter.ts) (catch/enrich/rethrow), [video-mode](./src/plugins/video-mode.ts) (video annotations/artifacts + lifecycle hooks), [llm-recover](./src/plugins/llm-recover.ts) (recovery loops, artifacts, soft assertions). The source also ships inside the npm package, so it's right there in `node_modules/middlewright/src`.
