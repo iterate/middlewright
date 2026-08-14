@@ -1466,8 +1466,7 @@ const recordFillReveal = async (options: {
         value.length === 0 ||
         value.length > captureOptions.maxCharacters ||
         style.direction === "rtl" ||
-        !["left", "start"].includes(style.textAlign) ||
-        (element instanceof HTMLInputElement && element.type === "password")
+        !["left", "start"].includes(style.textAlign)
       ) {
         return { ...geometry, kind: "fallback" as const };
       }
@@ -1574,10 +1573,16 @@ const recordFillReveal = async (options: {
         return { ...geometry, kind: "fallback" as const };
       }
       context.font = style.font;
-      const graphemes = Array.from(
-        new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value),
-        ({ segment }) => segment,
-      );
+      // A password input renders one bullet per character, so measure those
+      // glyphs — the reveal only ever shows the screenshot's dots, never the
+      // value.
+      const masked = element instanceof HTMLInputElement && element.type === "password";
+      const graphemes = masked
+        ? Array.from(value, () => "•")
+        : Array.from(
+            new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value),
+            ({ segment }) => segment,
+          );
       const letterSpacing = pixels(style.letterSpacing);
       const textIndent = pixels(style.textIndent);
       const revealStops = graphemes.map((_, index) => {
@@ -3254,9 +3259,11 @@ const renderedVideoFilter = (options: {
         y: Math.round(transform.y + ringSource.y * transform.scale),
       };
       const baseLabel = `fillbase${index}`;
-      // A few frames of margin: the child anchor is approximate, and the
-      // safe failure mode is showing slightly earlier (still-empty) footage.
-      const freezeStart = Math.max(0, piece.start - 3 * options.video.frameDurationMs);
+      // One frame back only: rewinding further can cross the previous fill's
+      // completion (wiping its value from the frozen base). The content box
+      // is covered with the pre-fill empty state from t=0 below, so anchor
+      // imprecision inside this field can't leak early-typed text either.
+      const freezeStart = Math.max(0, piece.start - options.video.frameDurationMs);
       filters.push(
         [
           `[0:v]trim=start=${formatSeconds(freezeStart)}:end=${formatSeconds(
@@ -3320,7 +3327,6 @@ const renderedVideoFilter = (options: {
           [
             `[fillringcomposed${index}][${emptyLabel}]overlay=x=${contentAbsolute.x}`,
             `y=${contentAbsolute.y}`,
-            revealStartEnable,
             `shortest=1[fillemptycomposed${index}]`,
           ].join(":"),
         );
