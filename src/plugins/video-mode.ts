@@ -3230,6 +3230,29 @@ const renderedVideoFilter = (options: {
         0,
         Math.min(revealEnd, pointerArrival + preRevealHold),
       );
+      // The base predates the fill, so it shows the field unfocused. The
+      // post-fill screenshot has the focus ring: overlay the field's ring
+      // region from it at reveal start, immediately cover its text with the
+      // pre-fill screenshot's empty content box, and let the reveal bands
+      // type over that — the ring appears when the cursor lands and the
+      // letters arrive inside it, continuous with the live footage after.
+      const ringPaddingPx = 4;
+      const ringSource = {
+        height: fillReveal.initialRect.height + 2 * ringPaddingPx,
+        width: fillReveal.initialRect.width + 2 * ringPaddingPx,
+        x: fillReveal.initialRect.x - ringPaddingPx,
+        y: fillReveal.initialRect.y - ringPaddingPx,
+      };
+      const ringLocal = {
+        height: Math.max(1, Math.min(scaledImage.height, projectLength(ringSource.height))),
+        width: Math.max(1, Math.min(scaledImage.width, projectLength(ringSource.width))),
+        x: Math.max(0, projectLength(ringSource.x)),
+        y: Math.max(0, projectLength(ringSource.y)),
+      };
+      const ringAbsolute = {
+        x: Math.round(transform.x + ringSource.x * transform.scale),
+        y: Math.round(transform.y + ringSource.y * transform.scale),
+      };
       const baseLabel = `fillbase${index}`;
       // A few frames of margin: the child anchor is approximate, and the
       // safe failure mode is showing slightly earlier (still-empty) footage.
@@ -3265,6 +3288,44 @@ const renderedVideoFilter = (options: {
       );
 
       let composedLabel = baseLabel;
+      if (preFillInput) {
+        const ringLabel = `fillring${index}`;
+        const emptyLabel = `fillempty${index}`;
+        const revealStartEnable = `enable='gte(t\\,${formatSeconds(revealStart)})'`;
+        filters.push(
+          [
+            `[${postFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+            `crop=w=${ringLocal.width}:h=${ringLocal.height}:x=${ringLocal.x}:y=${ringLocal.y}`,
+            `trim=start=0:end=${durationSeconds}`,
+            `setpts=PTS-STARTPTS[${ringLabel}]`,
+          ].join(","),
+        );
+        filters.push(
+          [
+            `[${preFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+            `crop=w=${contentLocal.width}:h=${contentLocal.height}:x=${contentLocal.x}:y=${contentLocal.y}`,
+            `trim=start=0:end=${durationSeconds}`,
+            `setpts=PTS-STARTPTS[${emptyLabel}]`,
+          ].join(","),
+        );
+        filters.push(
+          [
+            `[${composedLabel}][${ringLabel}]overlay=x=${ringAbsolute.x}`,
+            `y=${ringAbsolute.y}`,
+            revealStartEnable,
+            `shortest=1[fillringcomposed${index}]`,
+          ].join(":"),
+        );
+        filters.push(
+          [
+            `[fillringcomposed${index}][${emptyLabel}]overlay=x=${contentAbsolute.x}`,
+            `y=${contentAbsolute.y}`,
+            revealStartEnable,
+            `shortest=1[fillemptycomposed${index}]`,
+          ].join(":"),
+        );
+        composedLabel = `fillemptycomposed${index}`;
+      }
       for (let stepIndex = 0; stepIndex < revealSteps.length; stepIndex += 1) {
         const step = revealSteps[stepIndex];
         const cropLabel = `fillcrop${index}x${stepIndex}`;
