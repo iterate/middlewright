@@ -88,11 +88,35 @@ export const spinnerWaiter = Object.assign(
         const settings = getSettings(options);
         if (settings.disabled) return next();
 
+        // An explicitly passed { timeout } is the test author saying "I know
+        // there is no spinner here; use this budget" — the same escape hatch
+        // as settings.run({ disabled: true }) but scoped to one action. Pass
+        // straight through: overriding it with the 1ms fast-fail would turn a
+        // deliberate long wait into a guaranteed failure (bitten in practice
+        // when popup auto-wrap put previously-raw popup actions, timeouts and
+        // all, behind this middleware).
+        const authorTimeout = explicitTimeout(method, args);
+        if (authorTimeout !== undefined) {
+          settings.log(
+            `${locator}.${method}(...) carries an explicit ${authorTimeout}ms timeout — passing through`,
+          );
+          return next();
+        }
+
         const start = Date.now();
         settings.log(`${locator}.${method}(...) starting`);
 
+        // waitFor({ state: "detached" | "hidden" }) drives toward the target
+        // LEAVING the page — readiness is inverted for those: a no-longer-
+        // visible target is the success-adjacent state, not a missing one.
+        // Without this, a satisfied disappearance wait takes the 1ms
+        // fast-fail path (timeout: 1 aborts before the first evaluation can
+        // even report "already detached") and a passing wait becomes a hard
+        // fail.
+        const goal = readinessGoal(method, args);
+
         // Quick check if element is already ready for the attempted action.
-        const elementReady = await waitForReady(locator, method, { timeout: 1000 });
+        const elementReady = await waitForReady(locator, method, goal, { timeout: 1000 });
         if (elementReady) {
           settings.log(`${locator} already ready, proceeding`);
           return next();
@@ -104,6 +128,15 @@ export const spinnerWaiter = Object.assign(
         const spinnerVisible = await anySpinnerVisible(spinnerLocator);
 
         if (!spinnerVisible) {
+          // Target readiness and spinner visibility are separate browser
+          // reads. The UI can atomically replace the spinner with the target
+          // between them, so bridge that handoff with one polling interval
+          // before taking the intentional 1ms fast-fail path.
+          if (await waitForReady(locator, method, goal, { timeout: 100 })) {
+            settings.log(`${locator} became ready during spinner handoff, proceeding`);
+            return next();
+          }
+
           // No spinner - call action, suggest adding one if it fails
           settings.log(`${locator} not ready, no spinner, failing fast`);
           try {
@@ -120,7 +153,7 @@ export const spinnerWaiter = Object.assign(
 
         // Spinner is visible — wait for the element, but bail early if the spinner
         // disappears (the loading operation finished without producing the expected element).
-        const waitResult = await waitForReadyWhileSpinning(locator, method, spinnerLocator, {
+        const waitResult = await waitForReadyWhileSpinning(locator, method, goal, spinnerLocator, {
           timeout: settings.spinnerTimeout - 2000,
         });
 
@@ -159,8 +192,31 @@ export const spinnerWaiter = Object.assign(
   },
 );
 
-async function locatorIsReady(locator: Locator, method: ActionContext["method"]) {
-  if (!(await locator.isVisible())) return false;
+/** Which terminal state the action drives the target toward. Everything
+ * wants the target present and interactable, except disappearance waits —
+ * waitFor({ state: "detached" | "hidden" }) — which want it GONE. */
+type ReadinessGoal = "appear" | "disappear";
+
+function readinessGoal(method: ActionContext["method"], args: unknown[]): ReadinessGoal {
+  const options = args[0];
+  return method === "waitFor" &&
+    isOptionsObject(options) &&
+    (options.state === "detached" || options.state === "hidden")
+    ? "disappear"
+    : "appear";
+}
+
+async function locatorIsReady(
+  locator: Locator,
+  method: ActionContext["method"],
+  goal: ReadinessGoal,
+) {
+  const visible = await locator.isVisible();
+  // A no-longer-visible target satisfies a disappearance wait's heuristic
+  // (the action itself still runs with its original timeout and makes the
+  // precise detached-vs-hidden call).
+  if (goal === "disappear") return !visible;
+  if (!visible) return false;
   if (!enabledActionMethods.has(method)) return true;
   return await locator.isEnabled();
 }
@@ -168,14 +224,22 @@ async function locatorIsReady(locator: Locator, method: ActionContext["method"])
 async function waitForReady(
   locator: Locator,
   method: ActionContext["method"],
+  goal: ReadinessGoal,
   { timeout = 1000 } = {},
 ) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    if (await locatorIsReady(locator, method)) return true;
+    if (await locatorIsReady(locator, method, goal)) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  return await locatorIsReady(locator, method);
+  return await locatorIsReady(locator, method, goal);
+}
+
+/** The author-passed timeout option for this action, if any. */
+function explicitTimeout(method: ActionContext["method"], args: unknown[]): number | undefined {
+  const options = args[oneArgMethodNames.has(method) ? 1 : 0];
+  if (!isOptionsObject(options)) return undefined;
+  return typeof options.timeout === "number" ? options.timeout : undefined;
 }
 
 function withTimeoutOption(method: ActionContext["method"], args: unknown[], timeout: number) {
@@ -202,6 +266,7 @@ function isOptionsObject(value: unknown): value is Record<string, unknown> {
 async function waitForReadyWhileSpinning(
   target: Locator,
   method: ActionContext["method"],
+  goal: ReadinessGoal,
   spinner: Locator,
   { timeout = 1000 } = {},
 ): Promise<"appeared" | "spinner-gone" | "timeout"> {
@@ -209,7 +274,7 @@ async function waitForReadyWhileSpinning(
   // Give the spinner a grace period before checking — it may flicker during transitions
   const spinnerGracePeriodMs = 3000;
   while (Date.now() - start < timeout) {
-    if (await locatorIsReady(target, method)) return "appeared";
+    if (await locatorIsReady(target, method, goal)) return "appeared";
     const elapsed = Date.now() - start;
     if (elapsed > spinnerGracePeriodMs && !(await anySpinnerVisible(spinner))) return "spinner-gone";
     await new Promise((resolve) => setTimeout(resolve, 250));
