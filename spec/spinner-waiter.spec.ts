@@ -207,16 +207,28 @@ test("an exceeded explicit timeout still fails with its own budget, not 1ms", as
   expect(Date.now() - start).toBeGreaterThan(1500);
 });
 
-test("a satisfied disappearance wait is not fast-failed", async ({ page }) => {
-  // waitFor({ state: "hidden" }) drives toward the target LEAVING the page.
-  // The target disappears quickly with no spinner; the inverted readiness
-  // goal must recognize "already gone" instead of taking the 1ms fast-fail
-  // (which aborts before the first evaluation can report "already hidden").
+test("disappearance waits pass through untouched", async ({ page }) => {
+  // waitFor({ state: "detached" | "hidden" }) waits for the target to LEAVE —
+  // spinner-waiter's appear-oriented model doesn't apply, so those waits get
+  // vanilla Playwright behavior: a satisfied wait resolves (no 1ms fast-fail
+  // aborting it), an unsatisfied one fails on the normal action timeout.
   await page.setContent(`
     <div id="banner">temporary banner</div>
+    <div id="fixture">permanent fixture</div>
     <script>
       setTimeout(() => document.querySelector('#banner').remove(), 500);
     </script>
   `);
+
   await page.getByText("temporary banner").waitFor({ state: "hidden" });
+
+  const start = Date.now();
+  const error = await page
+    .getByText("permanent fixture")
+    .waitFor({ state: "hidden" })
+    .catch((e: Error) => e);
+  expect(error).toBeInstanceOf(Error);
+  // The configured 1s actionTimeout, not spinner-waiter's 1ms fast-fail.
+  expect(String(error)).toContain("Timeout 1000ms exceeded");
+  expect(Date.now() - start).toBeGreaterThan(500);
 });
