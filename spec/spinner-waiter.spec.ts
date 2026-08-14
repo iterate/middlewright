@@ -199,3 +199,60 @@ test("bails early when spinner disappears without expected element", async ({ pa
   // Should bail within ~10s (2s spinner + 3s grace + buffer), not wait full 30s
   expect(elapsed).toBeLessThan(15_000);
 });
+
+test("an explicit timeout is honored instead of the 1ms fast-fail", async ({ page }) => {
+  // The element appears after 2.5s with NO spinner — normally the fast-fail
+  // path (the "add a spinner" nudge). An explicit timeout is the author's
+  // owned budget for exactly this shape (auth pages without loading UI), so
+  // the action passes through and playwright waits it out.
+  await page.setContent(`
+    <div id="slot"></div>
+    <script>
+      setTimeout(() => {
+        document.querySelector('#slot').innerHTML = '<button onclick="this.textContent = \\'consented\\'">Allow access</button>';
+      }, 2500);
+    </script>
+  `);
+  // timeout: deliberate spinner-waiter escape hatch — the pass-through under test
+  await page.getByRole("button", { name: "Allow access" }).click({ timeout: 15_000 });
+  await page.getByText("consented").waitFor();
+});
+
+test("an exceeded explicit timeout still fails with its own budget, not 1ms", async ({ page }) => {
+  await page.setContent(`<div id="empty"></div>`);
+  const start = Date.now();
+  const error = await page
+    .getByRole("button", { name: "Never appears" })
+    // timeout: deliberate spinner-waiter escape hatch — the pass-through under test
+    .click({ timeout: 2000 })
+    .catch((e: Error) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toMatch(/Timeout 2000ms exceeded/);
+  expect(Date.now() - start).toBeGreaterThan(1500);
+});
+
+test("disappearance waits pass through untouched", async ({ page }) => {
+  // waitFor({ state: "detached" | "hidden" }) waits for the target to LEAVE —
+  // spinner-waiter's appear-oriented model doesn't apply, so those waits get
+  // vanilla Playwright behavior: a satisfied wait resolves (no 1ms fast-fail
+  // aborting it), an unsatisfied one fails on the normal action timeout.
+  await page.setContent(`
+    <div id="banner">temporary banner</div>
+    <div id="fixture">permanent fixture</div>
+    <script>
+      setTimeout(() => document.querySelector('#banner').remove(), 500);
+    </script>
+  `);
+
+  await page.getByText("temporary banner").waitFor({ state: "hidden" });
+
+  const start = Date.now();
+  const error = await page
+    .getByText("permanent fixture")
+    .waitFor({ state: "hidden" })
+    .catch((e: Error) => e);
+  expect(error).toBeInstanceOf(Error);
+  // The configured 1s actionTimeout, not spinner-waiter's 1ms fast-fail.
+  expect(String(error)).toContain("Timeout 1000ms exceeded");
+  expect(Date.now() - start).toBeGreaterThan(500);
+});
