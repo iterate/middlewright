@@ -287,21 +287,28 @@ export const addPlugins = async <const Plugins extends readonly MaybePlugin[]>(p
       page.off("popup", onPopup);
     }
     // Children dispose first (newest first) so their plugins can finalize --
-    // and, later, feed facts to parent plugins -- before the parent's own
-    // lifecycle events run. A failed child wrap must not stop the parent
-    // finalizing; it rethrows below once cleanup is done.
+    // and feed facts to parent plugins -- before the parent's own lifecycle
+    // events run. A failed child wrap OR a throwing child dispose must not
+    // stop the parent finalizing (that would drop the main page's artifacts);
+    // failures rethrow below once the parent's own teardown has run.
+    const childFailures: unknown[] = [];
     const settledChildren = await Promise.allSettled(childWraps);
     for (const result of [...settledChildren].reverse()) {
-      if (result.status === "fulfilled") {
+      if (result.status === "rejected") {
+        childFailures.push(result.reason);
+        continue;
+      }
+      try {
         await result.value[Symbol.asyncDispose]();
+      } catch (error) {
+        childFailures.push(error);
       }
     }
     await state.lifecycleEmitter.emitSerial("afterTest", { page, testInfo });
     await state.lifecycleEmitter.emitSerial("afterTestFinalize", { page, testInfo });
     state.lifecycleCleanups.forEach((cleanup) => cleanup());
-    const failedChildWrap = settledChildren.find((result) => result.status === "rejected");
-    if (failedChildWrap) {
-      throw failedChildWrap.reason;
+    if (childFailures.length > 0) {
+      throw childFailures[0];
     }
   };
 
