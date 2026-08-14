@@ -4,11 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
+import lintPlugin from "../src/lint/plugin.js";
 
 const execFileAsync = promisify(execFile);
 const preferLocatorWaitsRules = { "middlewright/prefer-locator-waits": "error" };
 const preferPositiveWaitsRules = { "middlewright/prefer-positive-waits": "error" };
 const requireTimeoutCommentRules = { "middlewright/require-timeout-comment": "error" };
+
+test("formats multiline lint guidance without outer indentation", () => {
+  const messages = [
+    lintPlugin.rules["prefer-positive-waits"].meta.messages.detached,
+    lintPlugin.rules["require-timeout-comment"].meta.messages.unexplained,
+  ];
+
+  for (const message of messages) {
+    expect(message).toBe(message.trim());
+    expect(message).not.toMatch(/(^|\n)[ \t]+\S/);
+  }
+});
 
 test("fixes visible locator assertions to locator waits", async () => {
   await using fixture = await lintFixture(
