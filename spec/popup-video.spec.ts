@@ -56,17 +56,14 @@ test("renders the popup as a dimmed overlay in one composed video", async ({
   {
     await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });
     await page.goto("https://app.middlewright.test/");
-    // Let the screencast capture real frames on each side of the popup span —
-    // an instant flow lands entirely before the recorder's first frame.
-    await page.waitForTimeout(500);
 
+    // No pacing waits: videoMode holds the popup's first action itself until
+    // the popup has painted and the enter animation window has real footage.
     const popupPromise = basePage.waitForEvent("popup");
     await page.getByRole("button", { name: "Sign in" }).click();
     const popup = await popupPromise;
-    await popup.waitForTimeout(500);
     await popup.getByRole("button", { name: "Approve" }).click();
     await page.getByText("Signed in as mmkal").waitFor();
-    await page.waitForTimeout(500);
   }
 
   await expect(video.metadata()).resolves.toMatchObject({

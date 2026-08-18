@@ -1703,6 +1703,32 @@ const mergeVideoSpans = (spans: VideoModeSpan[]) => {
   return merged;
 };
 
+/**
+ * Remove `holes` from `spans`. Used to carve popup enter/exit animations out
+ * of dead air, so compression can't fast-forward them.
+ */
+const subtractVideoSpans = (spans: VideoModeSpan[], holes: VideoModeSpan[]): VideoModeSpan[] => {
+  let result = spans;
+
+  for (const hole of holes) {
+    result = result.flatMap((span) => {
+      if (hole.end <= span.start || hole.start >= span.end) {
+        return [span];
+      }
+      const remainder: VideoModeSpan[] = [];
+      if (span.start < hole.start) {
+        remainder.push({ end: hole.start, start: span.start });
+      }
+      if (hole.end < span.end) {
+        remainder.push({ end: span.end, start: hole.end });
+      }
+      return remainder;
+    });
+  }
+
+  return result;
+};
+
 const normalizeVideoHighlights = (highlights: VideoModeHighlight[]) => {
   return highlights
     .map((highlight) => ({
@@ -4357,6 +4383,14 @@ const RECORDER_FINAL_FRAME_MIN_PADDING_MS = 1000;
 const CHILD_OVERLAY_MAX_FRACTION = 0.9;
 const CHILD_OVERLAY_BACKDROP_OPACITY = 0.4;
 const CHILD_OVERLAY_FADE_MS = 300;
+// The first action on a popup holds until this much wall-clock has passed
+// since it opened (after its load event): the screencast needs painted frames
+// for the enter animation to slide in, and an action landing mid-animation
+// would freeze mid-slide frames into its hold — slow-motion in the render.
+// Real auth popups take longer than this to load, so it rarely adds time.
+const CHILD_ENTRY_PACING_MS = CHILD_OVERLAY_FADE_MS + 150;
+// Bounds the load wait so a popup that never fires load can't hang the test.
+const CHILD_ENTRY_LOAD_TIMEOUT_MS = 5000;
 
 /** A popup screencast placed on the parent timeline as a scaled overlay. */
 type VideoModeChildLayer = {
@@ -4561,6 +4595,22 @@ const projectChildHighlight = (options: {
   const closeFloorMs = Math.floor(layer.closeMs);
   const minSliceMs = options.video.frameDurationMs + 10;
   let { actionEnd, end, start } = highlight;
+  // Entry pacing keeps actions clear of the enter animation at runtime; this
+  // is the degraded-mode backstop (paused pacing, custom flows): a highlight
+  // starting mid-slide defers past the animation so its hold can't freeze a
+  // mid-slide frame — clamped so instant popups keep a viable slice.
+  const enterEndMs = layer.enableFromMs + CHILD_OVERLAY_FADE_MS;
+  if (start < enterEndMs) {
+    const deferMs = Math.min(
+      enterEndMs - start,
+      Math.max(0, closeFloorMs - minSliceMs - start),
+    );
+    start += deferMs;
+    end += deferMs;
+    if (actionEnd !== undefined) {
+      actionEnd += deferMs;
+    }
+  }
   if (actionEnd !== undefined) {
     actionEnd = Math.min(actionEnd, closeFloorMs);
     if (actionEnd - start < minSliceMs) {
@@ -4896,17 +4946,43 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       startedAt: state.startedAt,
     };
 
+    // Video mode paces the run deliberately where watchable output needs it
+    // (recorder settling does the same at close). Entry pacing runs before
+    // the first popup action: without it, an instant flow acts before the
+    // popup screencast's first captured frame — synthetic annotations float
+    // over a popup that isn't visible yet, and action holds freeze mid-slide
+    // frames, replaying the enter animation in slow motion.
+    let entryPacing: Promise<void> | undefined;
+    const paceEntry = () => {
+      if (!entryPacing) {
+        entryPacing = (async () => {
+          // timeout bounds video-mode's internal pacing; spinner-waiter has no role inside the plugin
+          await popupPage.waitForLoadState("load", { timeout: CHILD_ENTRY_LOAD_TIMEOUT_MS }).catch(() => {});
+          const sinceOpenMs = getVideoTimestamp() - child.openedAt;
+          const remainingMs = CHILD_ENTRY_PACING_MS - sinceOpenMs;
+          if (remainingMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, remainingMs));
+          }
+        })();
+      }
+      return entryPacing;
+    };
+    const childActionMiddleware = videoModeActionMiddleware({
+      deadAirState: state,
+      highlight,
+      recordingState: childRecordingState,
+      skipMethods,
+      skipStackFrames,
+    });
+
     return {
       // Named video-mode so middleware wait-timing lookups match.
       name: "video-mode",
       forPopup: ({ page: grandchildPage }) => createPopupRecorder(grandchildPage),
-      middleware: videoModeActionMiddleware({
-        deadAirState: state,
-        highlight,
-        recordingState: childRecordingState,
-        skipMethods,
-        skipStackFrames,
-      }),
+      middleware: async (ctx, next) => {
+        await paceEntry();
+        return childActionMiddleware(ctx, next);
+      },
       testLifecycle: (emitter) => {
         const onClose = () => {
           if (child.closedAt === undefined) {
@@ -5287,6 +5363,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
                 { end: layer.enableToMs, start: layer.closeMs },
               );
             }
+            // Dead air recorded during an animation window (e.g. a child
+            // waitFor spanning the slide) must not compress it away.
+            renderTimeline.deadAir = subtractVideoSpans(renderTimeline.deadAir, renderKeepSpans);
             // A parent action right after a popup closes (waiting for the
             // signed-in state, say) would hold a freeze frame from inside the
             // overlay's exit animation — a ghost popup flashing back after it
