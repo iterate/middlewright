@@ -63,6 +63,7 @@ test("videoMode controls are inert when PWDEBUG is set", async ({ page: basePage
 
   page.videoMode.setStartTime();
   await page.videoMode.deadAir(async () => {
+    // timeout sleep gives deadAir a nonzero span to (not) record in debug mode; spinner-waiter n/a
     await page.waitForTimeout(20);
   });
   await page.getByRole("button", { name: "press" }).click();

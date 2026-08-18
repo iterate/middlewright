@@ -66,13 +66,34 @@ const preferLocatorWaits = {
   },
 };
 
+const requireTimeoutCommentSchema = [
+  {
+    type: "object",
+    properties: {
+      requiredPatterns: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+      },
+      /**
+       * Allow bare waitForTimeout sleeps. For spec files whose subject IS the
+       * recorded footage (video-mode renders), sleeps are the test input —
+       * annotating every one would be noise. Everywhere else they need the
+       * same justification as explicit timeouts.
+       */
+      allowSleeps: { type: "boolean" },
+    },
+    additionalProperties: false,
+  },
+];
+
 const requireTimeoutComment = {
   meta: {
     type: "suggestion",
     docs: {
       description: "Require explicit timeout options to explain why the timeout is needed",
     },
-    schema: requiredPatternsSchema,
+    schema: requireTimeoutCommentSchema,
     messages: {
       unexplained: dedent`
         Avoid locator timeouts by using spinnerWaiter. Best ways to resolve:
@@ -82,6 +103,14 @@ const requireTimeoutComment = {
         - If there's loading UI from a part of the code that we don't control (e.g. a library) and it isn't matched by the default spinner selectors, use \`await spinnerWaiter.settings.run({ spinnerSelectors: ["myCustomSpinnerClass"] }, async () => ...)\`.
         - If it is truly impossible for there to be loading UI, add a nearby // comment matching every required pattern: {{patterns}}.
         - If you're in a block which has done \`await spinnerWaiter.settings.run({ disabled: true }, async () => ...)\`, you should probably *un-disable* for that block and apply the above suggestions to the inner code.
+
+        See https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts for more details.
+      `,
+      sleep: dedent`
+        Avoid waitForTimeout — a sleep waits whether or not the app is ready. Best ways to resolve:
+        - Wait for positive UI instead: a locator wait covers readiness, and spinnerWaiter extends it while loading UI shows.
+        - If the sleep paces a recording, let video mode pace instead (it holds popup entry and settles the recorder itself); still-needed manual pacing is a library gap worth filing.
+        - If it is truly necessary, add a nearby // comment matching every required pattern: {{patterns}}.
 
         See https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts for more details.
       `,
@@ -97,10 +126,25 @@ const requireTimeoutComment = {
       "spinner.?waiter",
     ];
     const requiredPatterns = requiredPatternSources.map((source: string) => new RegExp(source, "i"));
+    const allowSleeps = context.options[0]?.allowSleeps === true;
 
     return {
       CallExpression(node: any) {
         if (node.callee.type !== "MemberExpression") return;
+
+        if (
+          !allowSleeps &&
+          !node.callee.computed &&
+          node.callee.property.type === "Identifier" &&
+          node.callee.property.name === "waitForTimeout" &&
+          !hasNearbyComment(node, node.callee.property, lineComments, requiredPatterns, sourceLines)
+        ) {
+          context.report({
+            node: node.callee.property,
+            messageId: "sleep",
+            data: { patterns: requiredPatternSources.join(", ") },
+          });
+        }
 
         for (const argument of node.arguments) {
           if (argument.type !== "ObjectExpression") continue;

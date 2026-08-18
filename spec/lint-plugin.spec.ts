@@ -432,6 +432,69 @@ test("reports static timeout properties without guessing dynamic shapes", async 
   expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
 });
 
+test("reports bare waitForTimeout sleeps", async () => {
+  const source = `await page.waitForTimeout(500);\n`;
+  await using fixture = await lintFixture(source, requireTimeoutCommentRules);
+
+  const result = await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]).catch((error: any) => error);
+
+  expect(result).toMatchObject({ code: 1 });
+  const output = `${result.stdout}\n${result.stderr}`;
+  expect(output).toContain("middlewright(require-timeout-comment)");
+  expect(output).toContain("a sleep waits whether or not the app is ready");
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
+test("allows justified waitForTimeout sleeps", async () => {
+  const source = [
+    `// timeout sleep paces footage for the render under test; spinner-waiter n/a`,
+    `await page.waitForTimeout(500);`,
+    ``,
+  ].join("\n");
+  await using fixture = await lintFixture(source, requireTimeoutCommentRules);
+
+  await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]);
+
+  expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
+});
+
+test("allowSleeps exempts footage specs from the sleep check but not from timeout options", async () => {
+  const source = [
+    `await page.waitForTimeout(500);`,
+    `await page.getByText("Export").click({ timeout: 10_000 });`,
+    ``,
+  ].join("\n");
+  await using fixture = await lintFixture(source, {
+    "middlewright/require-timeout-comment": ["error", { allowSleeps: true }],
+  });
+
+  const result = await execFileAsync("pnpm", [
+    "exec",
+    "oxlint",
+    "--config",
+    fixture.configPath,
+    fixture.sourcePath,
+  ]).catch((error: any) => error);
+
+  expect(result).toMatchObject({ code: 1 });
+  expect(
+    `${result.stdout}\n${result.stderr}`.match(/middlewright\(require-timeout-comment\)/g),
+  ).toHaveLength(1);
+  expect(`${result.stdout}\n${result.stderr}`).not.toContain("a sleep waits");
+});
+
 async function lintFixture(source: string, rules: Record<string, any>) {
   const directory = await mkdtemp(join(tmpdir(), "middlewright-lint-"));
   const sourcePath = join(directory, "fixture.ts");
