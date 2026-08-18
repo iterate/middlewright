@@ -510,7 +510,9 @@ async function lintFixture(source: string, rules: Record<string, any>) {
   await writeFile(
     configPath,
     JSON.stringify({
-      jsPlugins: ["middlewright/lint-plugin"],
+      // A path (not the package's ./lint-plugin export) so the plugin loads
+      // from ./src via tsx, like the repo's own config — no build required.
+      jsPlugins: ["./node_modules/middlewright/lint-plugin.local.js"],
       rules,
     }),
   );
