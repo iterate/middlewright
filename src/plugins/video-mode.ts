@@ -3322,9 +3322,29 @@ const renderedVideoFilter = (options: {
 
       let composedLabel = baseLabel;
       if (preFillInput) {
+        // The popup screencast is sparse (static pages emit frames only on
+        // change), so the frozen base can lag the logical state — a previous
+        // fill's value may not have reached any captured frame yet, blanking
+        // it for this piece's whole hold. The pre-action screenshot has the
+        // exact right state (earlier values present, this field empty,
+        // unfocused): scale it over the whole overlay box, leaving footage to
+        // supply only the backdrop dim and the page behind.
+        const screenshotLabel = `fillshot${index}`;
+        filters.push(
+          [
+            `[${preFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
+            `trim=start=0:end=${durationSeconds}`,
+            `setpts=PTS-STARTPTS[${screenshotLabel}]`,
+          ].join(","),
+        );
+        filters.push(
+          [
+            `[${composedLabel}][${screenshotLabel}]overlay=x=${transform.x}`,
+            `y=${transform.y}`,
+            `shortest=1[fillshotcomposed${index}]`,
+          ].join(":"),
+        );
         const ringLabel = `fillring${index}`;
-        const emptyLabel = `fillempty${index}`;
-        const revealStartEnable = `enable='gte(t\\,${formatSeconds(revealStart)})'`;
         filters.push(
           [
             `[${postFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
@@ -3335,19 +3355,22 @@ const renderedVideoFilter = (options: {
         );
         filters.push(
           [
+            `[fillshotcomposed${index}][${ringLabel}]overlay=x=${ringAbsolute.x}`,
+            `y=${ringAbsolute.y}`,
+            `enable='gte(t\\,${formatSeconds(revealStart)})'`,
+            `shortest=1[fillringcomposed${index}]`,
+          ].join(":"),
+        );
+        // The ring crop carries the field's filled text with it — cover the
+        // content box back to the pre-fill empty state so the bands reveal it.
+        const emptyLabel = `fillempty${index}`;
+        filters.push(
+          [
             `[${preFillInput.inputIndex}:v]scale=w=${scaledImage.width}:h=${scaledImage.height}`,
             `crop=w=${contentLocal.width}:h=${contentLocal.height}:x=${contentLocal.x}:y=${contentLocal.y}`,
             `trim=start=0:end=${durationSeconds}`,
             `setpts=PTS-STARTPTS[${emptyLabel}]`,
           ].join(","),
-        );
-        filters.push(
-          [
-            `[${composedLabel}][${ringLabel}]overlay=x=${ringAbsolute.x}`,
-            `y=${ringAbsolute.y}`,
-            revealStartEnable,
-            `shortest=1[fillringcomposed${index}]`,
-          ].join(":"),
         );
         filters.push(
           [
