@@ -88,6 +88,35 @@ export const spinnerWaiter = Object.assign(
         const settings = getSettings(options);
         if (settings.disabled) return next();
 
+        // An explicitly passed { timeout } is the test author saying "I know
+        // there is no spinner here; use this budget" — the same escape hatch
+        // as settings.run({ disabled: true }) but scoped to one action. Pass
+        // straight through: overriding it with the 1ms fast-fail would turn a
+        // deliberate long wait into a guaranteed failure (bitten in practice
+        // when popup auto-wrap put previously-raw popup actions, timeouts and
+        // all, behind this middleware).
+        const authorTimeout = explicitTimeout(method, args);
+        if (authorTimeout !== undefined) {
+          settings.log(
+            `${locator}.${method}(...) carries an explicit ${authorTimeout}ms timeout — passing through`,
+          );
+          return next();
+        }
+
+        // waitFor({ state: "detached" | "hidden" }) waits for the target to
+        // LEAVE. Spinner-waiter's whole model — fail fast unless visible
+        // loading UI justifies waiting — is about things appearing; inverted
+        // for disappearance it turns nonsensical (the visible "spinner" may
+        // be the very thing that's disappearing). Those waits are
+        // lint-discouraged in favor of positive waits; where one exists it
+        // gets vanilla Playwright behavior.
+        if (isDisappearanceWait(method, args)) {
+          settings.log(
+            `${locator}.waitFor({ state: detached|hidden }) — spinner-waiter does not deal with disappearance waits, passing through`,
+          );
+          return next();
+        }
+
         const start = Date.now();
         settings.log(`${locator}.${method}(...) starting`);
 
@@ -159,8 +188,19 @@ export const spinnerWaiter = Object.assign(
   },
 );
 
+/** waitFor({ state: "detached" | "hidden" }) — the target leaving the page. */
+function isDisappearanceWait(method: ActionContext["method"], args: unknown[]) {
+  const options = args[0];
+  return (
+    method === "waitFor" &&
+    isOptionsObject(options) &&
+    (options.state === "detached" || options.state === "hidden")
+  );
+}
+
 async function locatorIsReady(locator: Locator, method: ActionContext["method"]) {
-  if (!(await locator.isVisible())) return false;
+  const visible = await locator.isVisible();
+  if (!visible) return false;
   if (!enabledActionMethods.has(method)) return true;
   return await locator.isEnabled();
 }
@@ -176,6 +216,13 @@ async function waitForReady(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return await locatorIsReady(locator, method);
+}
+
+/** The author-passed timeout option for this action, if any. */
+function explicitTimeout(method: ActionContext["method"], args: unknown[]): number | undefined {
+  const options = args[oneArgMethodNames.has(method) ? 1 : 0];
+  if (!isOptionsObject(options)) return undefined;
+  return typeof options.timeout === "number" ? options.timeout : undefined;
 }
 
 function withTimeoutOption(method: ActionContext["method"], args: unknown[], timeout: number) {
