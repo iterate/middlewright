@@ -5594,18 +5594,21 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               (left, right) => left.start - right.start || left.end - right.end,
             );
           }
-          // A selector-driven trim start resolves over the protocol and can
-          // land a few milliseconds after a highlight recorded at effectively
-          // the same moment. The race must not drop that highlight, so a start
-          // within one source frame after a highlight start moves back to it.
+          // A trim start can never truthfully sit after a recorded highlight:
+          // nothing acts on the app before it is ready, so a selector-driven
+          // start landing past a highlight is measurement error — the selector
+          // resolving over the protocol a beat late, or calibration lag (a
+          // slow runner's screencast trails the paints it maps by frames, and
+          // the cover-based offset inherits that). Whatever the size of the
+          // error, starting at the highlight instead is harmless and keeps the
+          // action in the video; starting after it would open on footage from
+          // AFTER the action (a filled field before its reveal). So clamp
+          // back unconditionally, not just within one frame.
           if (state.sourceRange.start !== undefined) {
             const rangeStart = state.sourceRange.start;
             const racedHighlightStarts = highlights
               .map((candidate) => candidate.start)
-              .filter(
-                (start) =>
-                  start < rangeStart && rangeStart - start <= rawVideoInfo.frameDurationMs,
-              );
+              .filter((start) => start < rangeStart);
             if (racedHighlightStarts.length > 0) {
               state.sourceRange.start = Math.min(...racedHighlightStarts);
             }
