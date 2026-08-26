@@ -5612,6 +5612,26 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             if (racedHighlightStarts.length > 0) {
               state.sourceRange.start = Math.min(...racedHighlightStarts);
             }
+            // The mirror case: a start a sliver BEFORE the first highlight. That
+            // sliver is raw footage from the recording's very first frames —
+            // exactly the frames a lagging screencast hasn't truthfully
+            // captured (on a slow runner the recorder's first frames can
+            // already show the action's result: a filled field before its
+            // reveal). A lead-in shorter than the fill stabilization window
+            // is not worth keeping; open on the first highlight instead.
+            const firstHighlightStart = Math.min(
+              ...highlights.map((candidate) => candidate.start),
+            );
+            const leadInToleranceMs =
+              Math.max(0, timelineOffset) +
+              rawVideoInfo.frameDurationMs * VIDEO_MODE_FILL_PRE_ACTION_FRAME_PADDING;
+            if (
+              Number.isFinite(firstHighlightStart) &&
+              state.sourceRange.start < firstHighlightStart &&
+              firstHighlightStart - state.sourceRange.start <= leadInToleranceMs
+            ) {
+              state.sourceRange.start = firstHighlightStart;
+            }
           }
           const annotationSourceRange = metadataFor(state).sourceRange;
           const sourceRange = translateSourceRange(annotationSourceRange, timelineOffset);
