@@ -17,16 +17,11 @@ test("auth popup demo", async ({ page: basePage, context }, testInfo) => {
     const popupPromise = basePage.waitForEvent("popup");
     await test.step("Open the sign-in popup", async () => {
       await page.goto("https://app.middlewright.test/");
-      // Real frames on each side of the popup span keep the composite honest
-      // (and the demo watchable) — an instant flow would land before the
-      // screencast's first frame.
-      await page.waitForTimeout(500);
       await page.getByRole("button", { name: "Sign in" }).click();
     });
 
     const popup = await popupPromise;
     await test.step("Sign in as mmkal", async () => {
-      await popup.waitForTimeout(500);
       await popup.getByLabel("Username").fill("mmkal");
       await popup.getByLabel("Password").fill("hunter2");
       await popup.getByRole("button", { name: "Sign in" }).click();
@@ -34,7 +29,6 @@ test("auth popup demo", async ({ page: basePage, context }, testInfo) => {
 
     await test.step("Back on the app, signed in", async () => {
       await page.getByText("Signed in as mmkal").waitFor();
-      await page.waitForTimeout(500);
     });
   }
 

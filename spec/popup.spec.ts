@@ -87,6 +87,41 @@ test("wrapping an already-wrapped page throws", async ({ page: basePage, context
   );
 });
 
+test("a failing popup plugin finalizer does not stop the parent finalizing", async ({
+  page: basePage,
+  context,
+}, testInfo) => {
+  await routeAuthDemoApp(context);
+  const events: string[] = [];
+  const plugin: Plugin = {
+    name: "flaky-on-popups",
+    forPopup: () => ({
+      name: "flaky-on-popups-child",
+      testLifecycle: (emitter) => {
+        emitter.on("afterTestFinalize", () => {
+          throw new Error("popup teardown exploded");
+        });
+      },
+    }),
+    testLifecycle: (emitter) => {
+      emitter.on("afterTestFinalize", () => {
+        events.push("parent finalized");
+      });
+    },
+  };
+  const page = await addPlugins({ page: basePage, testInfo, plugins: [plugin] });
+  await page.goto("https://app.middlewright.test/");
+  const popupPromise = basePage.waitForEvent("popup");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await (await popupPromise).getByRole("button", { name: "Approve" }).click();
+  await page.getByText("Signed in as mmkal").waitFor();
+
+  // The child's failure surfaces, but only after the parent finalized — a
+  // popup teardown hiccup must not drop the main page's artifacts.
+  await expect(page[Symbol.asyncDispose]()).rejects.toThrow("popup teardown exploded");
+  expect(events).toEqual(["parent finalized"]);
+});
+
 test("popups: false leaves popups unwrapped", async ({ page: basePage, context }, testInfo) => {
   await routeAuthDemoApp(context);
   const actions: string[] = [];

@@ -5,5 +5,17 @@
     "middlewright/prefer-locator-waits": "error",
     "middlewright/prefer-positive-waits": "error",
     "middlewright/require-timeout-comment": "error"
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "spec/video-mode.spec.ts",
+        "spec/video-mode-*.spec.ts",
+        "spec/scroll-pan-demo.spec.ts"
+      ],
+      "rules": {
+        "middlewright/require-timeout-comment": ["error", { "allowSleeps": true }]
+      }
+    }
+  ]
 }
