@@ -7,7 +7,7 @@
  * a different effective action timeout while the app is visibly loading.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { ActionContext, LocatorWithOriginal, Plugin } from "../plugin-system.ts";
 import { adjustError, oneArgMethods } from "../plugin-system.ts";
 
@@ -127,14 +127,15 @@ export const spinnerWaiter = Object.assign(
           return next();
         }
 
-        // Check for spinner
+        // Check for loading UI: an app spinner, or a navigation in flight
+        // (loading UI the app cannot draw itself — see loadingVisible).
         const spinnerSelector = settings.spinnerSelectors.join(",");
         const spinnerLocator = page.locator(spinnerSelector) as LocatorWithOriginal;
-        const spinnerVisible = await anySpinnerVisible(spinnerLocator);
+        const loading = await loadingVisible(page, spinnerLocator);
 
-        if (!spinnerVisible) {
-          // No spinner - call action, suggest adding one if it fails
-          settings.log(`${locator} not ready, no spinner, failing fast`);
+        if (!loading) {
+          // No spinner, no navigation - call action, suggest a spinner if it fails
+          settings.log(`${locator} not ready, nothing loading, failing fast`);
           try {
             return await next(withTimeoutOption(method, args, 1));
           } catch (error) {
@@ -144,12 +145,12 @@ export const spinnerWaiter = Object.assign(
         }
 
         settings.log(
-          `Spinner visible, waiting up to ${settings.spinnerTimeout - 2000}ms for ${locator}`,
+          `Loading (spinner or navigation), waiting up to ${settings.spinnerTimeout - 2000}ms for ${locator}`,
         );
 
-        // Spinner is visible — wait for the element, but bail early if the spinner
-        // disappears (the loading operation finished without producing the expected element).
-        const waitResult = await waitForReadyWhileSpinning(locator, method, spinnerLocator, {
+        // Something is loading — wait for the element, but bail early once loading
+        // finishes (the operation completed without producing the expected element).
+        const waitResult = await waitForReadyWhileSpinning(locator, method, page, spinnerLocator, {
           timeout: settings.spinnerTimeout - 2000,
         });
 
@@ -160,10 +161,10 @@ export const spinnerWaiter = Object.assign(
 
         if (waitResult === "spinner-gone") {
           settings.log(
-            `Spinner disappeared but element not ready — loading finished without expected result`,
+            `Loading finished but element not ready — the operation completed without the expected result`,
           );
         } else {
-          settings.log(`Spinner still visible after ${settings.spinnerTimeout}ms, UI likely stuck`);
+          settings.log(`Still loading after ${settings.spinnerTimeout}ms, UI likely stuck`);
         }
 
         // Call action anyway (will likely fail), adjust error message
@@ -172,8 +173,8 @@ export const spinnerWaiter = Object.assign(
         } catch (error) {
           const message =
             waitResult === "spinner-gone"
-              ? `Loading finished (spinner disappeared after ${Date.now() - start}ms) but the expected element was not ready.`
-              : `Spinner was still visible after ${settings.spinnerTimeout}ms, the UI is likely stuck.`;
+              ? `Loading finished (spinner disappeared / navigation completed after ${Date.now() - start}ms) but the expected element was not ready.`
+              : `Spinner was still visible after ${settings.spinnerTimeout}ms (or a navigation was still in flight), the UI is likely stuck.`;
           adjustError(error as Error, [message], "spinner-waiter.ts");
           throw error;
         }
@@ -242,26 +243,58 @@ function isOptionsObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Wait for `target` to become ready, but bail early if `spinner` disappears.
- * Returns "appeared" if target became ready, "spinner-gone" if loading finished
- * without the target, or "timeout" if spinner was still visible at deadline.
+ * Wait for `target` to become ready, but bail early once loading finishes
+ * (spinner gone and no navigation in flight). Returns "appeared" if target
+ * became ready, "spinner-gone" if loading finished without the target, or
+ * "timeout" if still loading at the deadline.
  */
 async function waitForReadyWhileSpinning(
   target: Locator,
   method: ActionContext["method"],
+  page: Page,
   spinner: Locator,
   { timeout = 1000 } = {},
 ): Promise<"appeared" | "spinner-gone" | "timeout"> {
   const start = Date.now();
-  // Give the spinner a grace period before checking — it may flicker during transitions
+  // Give loading a grace period before checking — spinners flicker during
+  // transitions, and one navigation can hand off to another.
   const spinnerGracePeriodMs = 3000;
   while (Date.now() - start < timeout) {
     if (await locatorIsReady(target, method)) return "appeared";
     const elapsed = Date.now() - start;
-    if (elapsed > spinnerGracePeriodMs && !(await anySpinnerVisible(spinner))) return "spinner-gone";
+    if (elapsed > spinnerGracePeriodMs && !(await loadingVisible(page, spinner))) return "spinner-gone";
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return "timeout";
+}
+
+/** Loading UI: a document the browser is still loading, or an app spinner. */
+async function loadingVisible(page: Page, spinnerLocator: Locator): Promise<boolean> {
+  return (await pageIsNavigating(page)) || (await anySpinnerVisible(spinnerLocator));
+}
+
+/**
+ * A document still loading is loading UI the app cannot draw itself. The
+ * reference is the browser's own tab spinner: it stays on until the document
+ * fires `load` (readyState !== "complete"), and no execution context to ask
+ * (the gap while a navigation commits) counts too. Playwright's locator
+ * queries already wait for a pending navigation to commit, so this covers the
+ * window after that: a cold page rendering its UI client-side before `load`.
+ * The spinner grace period and timeout bound it, as for an app spinner.
+ */
+async function pageIsNavigating(page: Page): Promise<boolean> {
+  if (page.isClosed()) return false;
+  // page.evaluate waits for an execution context; while a navigation is
+  // committing there is none, so bound the wait and count a stall as loading.
+  const readyState = await Promise.race([
+    page
+      .evaluate(() => document.readyState)
+      .catch((error) =>
+        /execution context was destroyed|navigat/i.test(String(error)) ? "loading" : "complete",
+      ),
+    new Promise<"no-context">((resolve) => setTimeout(() => resolve("no-context"), 250)),
+  ]);
+  return readyState !== "complete";
 }
 
 /**
