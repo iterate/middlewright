@@ -7,20 +7,17 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
-// The raw screencast's tail is black: when recording stops, Chromium's final
-// screencast frame is black, and Playwright pads that LAST frame by >=1s into
-// the saved file (see RECORDER_FINAL_FRAME_MIN_PADDING_MS in video-mode.ts).
-// The renderer's default source range runs to the raw file's full duration, so
-// whenever the rendered timeline reaches the tail — no trailing highlight hold
-// covering it — the black plays in the output, then the finalHold reveals the
-// real final frame again: a black FLASH mid-video. Observed in the wild on a
-// three-turn agent-chat demo (iterate/iterate#2523, 0.32s of black right
-// before the final hold), and reproduced by every video-mode-start-behaviors
-// rendering (~0.76s of black each).
-//
-// This spec should pass: a rendered demo video must never show black frames
-// the page never painted. It currently fails — that's the bug.
-test.fail("the rendered video never flashes black", async ({ page: basePage }, testInfo) => {
+// Regression guard: rendered videos used to flash black near the end. The raw
+// recording's tail is videoMode's own near-black rgb(1,2,3) calibration cover
+// (settleVideoRecorder), extended by Playwright's >=1s final-frame padding —
+// and the wall→raw calibration derived from the recorder's ENDPOINT assumed
+// that padding stops at the close instant. It doesn't (it lands ~1s past it),
+// so every translated coordinate sat ~1s too deep in the raw and the cover
+// leaked into the render right before the finalHold: a black FLASH. Seen in
+// the wild on iterate/iterate#2523's demo video (0.32s). The fix calibrates
+// from the cover itself — its paint time is stamped and its first raw frame
+// is detected by color — and caps the derived source range before it.
+test("the rendered video never flashes black", async ({ page: basePage }, testInfo) => {
   const video = videoMode({ finalHold: 700, highlight: { mode: "pointer", duration: 500 } });
   {
     await using page = await addPlugins({ page: basePage, testInfo, plugins: [video] });

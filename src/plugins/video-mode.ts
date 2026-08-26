@@ -188,9 +188,14 @@ export type VideoModeChild = {
   /**
    * Parent-timeline ms of the popup recorder's settled endpoint (the raw
    * video's last frame). Missing when the popup closed itself — the raw
-   * video's own end approximates `closedAt` then.
+   * video's own end approximates `closedAt` then. Fallback only: when the
+   * calibration cover is detected in the child raw, `calibrationCoverPaintedAt`
+   * is the authoritative marker instead.
    */
   recordingEndedAt?: number;
+  /** Parent-timeline ms the teardown calibration cover was painted on the
+   * popup, pairing with the cover's first detected frame in the child raw. */
+  calibrationCoverPaintedAt?: number;
   viewport?: VideoModeViewport;
 };
 
@@ -592,6 +597,80 @@ const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undef
   }
 
   return undefined;
+};
+
+// The calibration cover's color (see settleVideoRecorder): near-black but not
+// black, so it reads as "off" to a human while staying machine-findable — no
+// real page is uniformly this shade. Tolerance absorbs webm quantization and
+// the downscale blur; it also covers true black, so any padding Playwright
+// appends after the cover counts as cover too.
+const CALIBRATION_COVER_SAMPLE_FPS = 25;
+const CALIBRATION_COVER_CHANNEL_TOLERANCE = 8;
+const CALIBRATION_COVER_RGB = [1, 2, 3];
+
+/**
+ * Raw-clock timestamp (ms) of the first frame of the recording's TRAILING
+ * calibration-cover run, or undefined when the recording doesn't end on the
+ * cover (recording without teardown calibration, decode failure). Scanning
+ * backwards from the end means an app that legitimately paints near-black
+ * mid-test can never match — only the tail the cover owns.
+ */
+const detectCalibrationCoverStartMs = async (inputPath: string): Promise<number | undefined> => {
+  const size = VIDEO_ANALYSIS_SAMPLE_SIZE;
+  const frameSize = size * size * 3;
+  let stdout: Buffer;
+  try {
+    const result = await execFile(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        inputPath,
+        "-vf",
+        `fps=${CALIBRATION_COVER_SAMPLE_FPS},scale=${size}:${size}`,
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "pipe:1",
+      ],
+      { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 },
+    );
+    stdout = result.stdout as Buffer;
+  } catch {
+    // Detection is best-effort; callers fall back to endpoint arithmetic.
+    return undefined;
+  }
+
+  const frameCount = Math.floor(stdout.length / frameSize);
+  const isCoverFrame = (index: number) => {
+    const frame = stdout.subarray(index * frameSize, (index + 1) * frameSize);
+    for (let offset = 0; offset + 2 < frame.length; offset += 3) {
+      if (
+        Math.abs(frame[offset] - CALIBRATION_COVER_RGB[0]) > CALIBRATION_COVER_CHANNEL_TOLERANCE ||
+        Math.abs(frame[offset + 1] - CALIBRATION_COVER_RGB[1]) >
+          CALIBRATION_COVER_CHANNEL_TOLERANCE ||
+        Math.abs(frame[offset + 2] - CALIBRATION_COVER_RGB[2]) > CALIBRATION_COVER_CHANNEL_TOLERANCE
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  let firstCoverIndex: number | undefined;
+  for (let index = frameCount - 1; index >= 0; index -= 1) {
+    if (!isCoverFrame(index)) {
+      break;
+    }
+    firstCoverIndex = index;
+  }
+  if (firstCoverIndex === undefined) {
+    return undefined;
+  }
+  return Math.round((firstCoverIndex / CALIBRATION_COVER_SAMPLE_FPS) * 1000);
 };
 
 const resolveNonNegativeNumber = (options: {
@@ -3869,10 +3948,20 @@ const waitForNonEmptyFile = async (path: string, timeoutMs = 5000) => {
     : new Error(`Timed out waiting for non-empty file: ${path}`);
 };
 
-const settleVideoRecorder = async (page: Page) => {
-  // This frame is deliberately outside the render range. It gives Playwright a
-  // final compositor update, then remains unchanged long enough for the raw
-  // endpoint and videoMode's close timestamp to describe the same instant.
+/**
+ * Paint the fullscreen rgb(1,2,3) calibration cover, force a compositor frame,
+ * and hold long enough for the recorder to capture it. Returns the wall-clock
+ * (`performance.now()`) moment the cover became visible — the midpoint of DOM
+ * insertion and the forcing screenshot, bracketing when its first screencast
+ * frame can have been captured. The cover is deliberately outside the render
+ * range; `detectCalibrationCoverStartMs` finds its first frame in the saved
+ * file, and that (frame, timestamp) pair is the authoritative wall→raw
+ * calibration. The recorder's ENDPOINT is not a reliable marker: Playwright
+ * extends the final frame ~1s past the close instant (version-dependent), and
+ * deriving the offset from it skewed every translation by that much — the
+ * calibration cover itself then leaked into renders as a "black flash".
+ */
+const settleVideoRecorder = async (page: Page): Promise<number> => {
   await page.evaluate(() => {
     const cover = document.createElement("div");
     cover.setAttribute("data-middlewright-video-mode-calibration", "");
@@ -3884,8 +3973,11 @@ const settleVideoRecorder = async (page: Page) => {
     });
     (document.body || document.documentElement).append(cover);
   });
+  const coverInsertedAt = performance.now();
   await page.screenshot({ scale: "css" });
+  const screenshotEndedAt = performance.now();
   await new Promise((resolve) => setTimeout(resolve, VIDEO_MODE_RECORDER_SETTLE_MS));
+  return (coverInsertedAt + screenshotEndedAt) / 2;
 };
 
 const escapeHtml = (value: string) => {
@@ -4446,20 +4538,36 @@ const childCompositeLayers = async (options: {
     if (!child.raw) continue;
     const path = join(options.outputDir, child.raw);
     const rawInfo = await videoInfo(path);
-    // A settled recorder maps the raw end to a known parent time. A popup
-    // that closed itself has no settled endpoint — and its screencast t=0 is
-    // the first *captured* frame, which lags the popup event by the initial
-    // paint. Playwright pads the final frame by >=1s on close, so the first
-    // frame lands near closedAt + padding - duration; openedAt is the floor.
+    // The calibration cover pins the mapping exactly: its paint time is known
+    // on the parent clock and its first frame is detectable in the child raw.
+    // Endpoint arithmetic is the fallback — a settled recorder approximately
+    // maps the raw end to a known parent time (skewed by however far
+    // Playwright extends the final frame past close). A popup that closed
+    // itself has neither — its screencast t=0 is the first *captured* frame,
+    // which lags the popup event by the initial paint; Playwright pads the
+    // final frame by >=1s on close, so the first frame lands near
+    // closedAt + padding - duration; openedAt is the floor.
+    const detectedCoverStartMs =
+      child.calibrationCoverPaintedAt === undefined
+        ? undefined
+        : await detectCalibrationCoverStartMs(path);
+    // Same guard as the parent: a cover run reaching t=0 leaves nothing to
+    // calibrate against — fall back to endpoint arithmetic.
+    const coverStartMs =
+      detectedCoverStartMs !== undefined && detectedCoverStartMs > rawInfo.frameDurationMs
+        ? detectedCoverStartMs
+        : undefined;
     const childOffsetMs =
-      child.recordingEndedAt === undefined
-        ? Math.max(
-            child.openedAt,
-            (child.closedAt === undefined ? child.openedAt : child.closedAt) +
-              RECORDER_FINAL_FRAME_MIN_PADDING_MS -
-              rawInfo.durationMs,
-          )
-        : child.recordingEndedAt - rawInfo.durationMs;
+      coverStartMs !== undefined && child.calibrationCoverPaintedAt !== undefined
+        ? child.calibrationCoverPaintedAt - coverStartMs
+        : child.recordingEndedAt === undefined
+          ? Math.max(
+              child.openedAt,
+              (child.closedAt === undefined ? child.openedAt : child.closedAt) +
+                RECORDER_FINAL_FRAME_MIN_PADDING_MS -
+                rawInfo.durationMs,
+            )
+          : child.recordingEndedAt - rawInfo.durationMs;
     const scale = Math.min(
       1,
       (CHILD_OVERLAY_MAX_FRACTION * options.video.width) / rawInfo.width,
@@ -4468,15 +4576,27 @@ const childCompositeLayers = async (options: {
     const width = Math.max(2, 2 * Math.round((rawInfo.width * scale) / 2));
     const height = Math.max(2, 2 * Math.round((rawInfo.height * scale) / 2));
     const enableFromMs = Math.max(0, child.openedAt + options.timelineOffsetMs);
-    const closeMs = Math.min(
+    // The cover's composite-time position bounds every overlay window: from
+    // that instant on, child footage is the calibration cover, not the popup.
+    const coverCompositeMs =
+      coverStartMs === undefined
+        ? undefined
+        : coverStartMs + childOffsetMs + options.timelineOffsetMs;
+    let closeMs = Math.min(
       options.video.durationMs,
       (child.closedAt === undefined ? child.openedAt + rawInfo.durationMs : child.closedAt) +
         options.timelineOffsetMs,
     );
+    if (coverCompositeMs !== undefined) {
+      closeMs = Math.min(closeMs, coverCompositeMs);
+    }
     // The exit fade runs AFTER close (the screencast's padded final frame
     // supplies footage): a popup that closes itself right after a click would
     // otherwise put that click — and its hold's freeze frame — mid-fade.
-    const enableToMs = Math.min(options.video.durationMs, closeMs + CHILD_OVERLAY_FADE_MS);
+    let enableToMs = Math.min(options.video.durationMs, closeMs + CHILD_OVERLAY_FADE_MS);
+    if (coverCompositeMs !== undefined) {
+      enableToMs = Math.min(enableToMs, coverCompositeMs);
+    }
 
     if (closeMs <= enableFromMs) continue;
 
@@ -5019,13 +5139,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             child.viewport = child.viewport || page.viewportSize() || undefined;
             const video = page.video();
             if (!page.isClosed()) {
+              let paintedAt: number | undefined;
               if (video) {
-                await settleVideoRecorder(page);
+                paintedAt = await settleVideoRecorder(page);
               }
               const closeStartedAt = performance.now();
               await page.close({ runBeforeUnload: false });
               const closeEndedAt = performance.now();
               if (video && state.startedAt !== undefined) {
+                if (paintedAt !== undefined) {
+                  child.calibrationCoverPaintedAt = Math.round(paintedAt - state.startedAt);
+                }
                 child.recordingEndedAt = Math.round(
                   (closeStartedAt + closeEndedAt) / 2 - state.startedAt,
                 );
@@ -5307,6 +5431,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           }
 
           let recordingEndedAt: number | undefined;
+          let coverPaintedAt: number | undefined;
           if (!page.isClosed()) {
             const needsTimelineCalibration =
               addressBars.length > 0 ||
@@ -5315,11 +5440,12 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               deadAirThreshold !== undefined ||
               finalHold > 0;
             if (needsTimelineCalibration) {
-              await settleVideoRecorder(page);
+              const paintedAt = await settleVideoRecorder(page);
               const closeStartedAt = performance.now();
               await page.close({ runBeforeUnload: false });
               const closeEndedAt = performance.now();
               if (state.startedAt !== undefined) {
+                coverPaintedAt = Math.round(paintedAt - state.startedAt);
                 recordingEndedAt = Math.round(
                   (closeStartedAt + closeEndedAt) / 2 - state.startedAt,
                 );
@@ -5339,11 +5465,36 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           });
 
           const rawVideoInfo = await videoInfo(paths.raw);
-          // Page pixels are not a clock marker: a final state can have appeared
-          // earlier, and the final live paint might never reach the screencast.
-          // settleVideoRecorder makes the recorder endpoint the reliable marker.
+          // The wall→raw calibration marker is the cover itself: videoMode
+          // stamped when it painted it, and its first raw frame is findable by
+          // color. The recorder ENDPOINT is only the fallback — Playwright
+          // extends the final frame ~1s past the close instant
+          // (version-dependent), so endpoint arithmetic skews every
+          // translation by that much and lets the cover leak into the render
+          // as a black flash.
+          const detectedCoverStartMs =
+            coverPaintedAt === undefined
+              ? undefined
+              : await detectCalibrationCoverStartMs(paths.raw);
+          // A cover run reaching (within a frame of) t=0 means the recording
+          // holds no pre-cover footage: an instant test whose only captured
+          // frames ARE the cover. Nothing to calibrate against or protect —
+          // fall back to endpoint arithmetic and render what exists.
+          const coverStartMs =
+            detectedCoverStartMs !== undefined &&
+            detectedCoverStartMs > rawVideoInfo.frameDurationMs
+              ? detectedCoverStartMs
+              : undefined;
+          // Clamped at 0: the raw's first frame can lag videoMode's clock
+          // zero slightly, making the true offset a hair negative — but range
+          // starts clamp at footage 0 anyway, so an unclamped negative offset
+          // would shift annotations relative to the range instead of with it.
           const sourceOffset =
-            recordingEndedAt === undefined ? 0 : rawVideoInfo.durationMs - recordingEndedAt;
+            coverStartMs !== undefined && coverPaintedAt !== undefined
+              ? Math.max(0, coverStartMs - coverPaintedAt)
+              : recordingEndedAt === undefined
+                ? 0
+                : rawVideoInfo.durationMs - recordingEndedAt;
           const timelineOffset =
             Math.floor(sourceOffset / rawVideoInfo.frameDurationMs) *
             rawVideoInfo.frameDurationMs;
@@ -5473,9 +5624,18 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           }
 
           if (sourceRange.end === undefined && recordingEndedAt !== undefined) {
+            // Each hold's freeze frame (sourceFrameAt) must be inside the
+            // range, plus a frame of headroom for the piece boundary.
             const minimumHighlightEnd = renderTimeline.highlights.reduce(
               (end, candidate) =>
-                Math.max(end, candidate.start + 1, candidate.actionEnd || 0),
+                Math.max(
+                  end,
+                  candidate.start + 1,
+                  candidate.actionEnd || 0,
+                  candidate.sourceFrameAt === undefined
+                    ? 0
+                    : candidate.sourceFrameAt + rawVideoInfo.frameDurationMs,
+                ),
               0,
             );
             const minimumAddressBarEnd = renderTimeline.addressBars.reduce(
@@ -5483,10 +5643,22 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
                 Math.max(end, candidate.start + rawVideoInfo.frameDurationMs),
               0,
             );
+            // The cover is never wanted footage, so it caps the endpoint term
+            // — this is what stops the tail cover playing as a black flash.
+            // One frame of margin absorbs the detector's sampling granularity
+            // (its timestamp can land a tick late). The annotation minimums
+            // still win when they need more: their holds freeze exactly the
+            // frames they pull in, cover included on near-instant recordings
+            // that never captured anything else.
+            const endpointEnd = Math.round(renderEndedAt + sourceOffset);
+            const coverCap =
+              coverStartMs === undefined
+                ? undefined
+                : Math.max(0, coverStartMs - rawVideoInfo.frameDurationMs);
             sourceRange.end = Math.max(
               minimumAddressBarEnd,
               minimumHighlightEnd,
-              Math.round(renderEndedAt + sourceOffset),
+              coverCap === undefined ? endpointEnd : Math.min(endpointEnd, coverCap),
             );
           }
 
