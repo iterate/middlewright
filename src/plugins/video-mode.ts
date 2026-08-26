@@ -605,6 +605,12 @@ const detectBlankLeadInEndMs = async (inputPath: string): Promise<number | undef
 // the downscale blur; it also covers true black, so any padding Playwright
 // appends after the cover counts as cover too.
 const CALIBRATION_COVER_SAMPLE_FPS = 25;
+// The detector timestamps on this grid, so a detected cover start can trail
+// the true first cover frame by up to one tick. Safety margins around the
+// cover must cover BOTH this granularity and the raw's own frame spacing.
+const CALIBRATION_COVER_DETECTION_TICK_MS = 1000 / CALIBRATION_COVER_SAMPLE_FPS;
+const calibrationCoverMarginMs = (frameDurationMs: number) =>
+  Math.max(frameDurationMs, CALIBRATION_COVER_DETECTION_TICK_MS);
 const CALIBRATION_COVER_CHANNEL_TOLERANCE = 8;
 const CALIBRATION_COVER_RGB = [1, 2, 3];
 
@@ -4578,10 +4584,16 @@ const childCompositeLayers = async (options: {
     const enableFromMs = Math.max(0, child.openedAt + options.timelineOffsetMs);
     // The cover's composite-time position bounds every overlay window: from
     // that instant on, child footage is the calibration cover, not the popup.
+    // A margin frame short, because ffmpeg's `between` enable windows include
+    // their end timestamp and the detector's timestamp can trail the true
+    // first cover frame by a tick.
     const coverCompositeMs =
       coverStartMs === undefined
         ? undefined
-        : coverStartMs + childOffsetMs + options.timelineOffsetMs;
+        : coverStartMs -
+          calibrationCoverMarginMs(rawInfo.frameDurationMs) +
+          childOffsetMs +
+          options.timelineOffsetMs;
     let closeMs = Math.min(
       options.video.durationMs,
       (child.closedAt === undefined ? child.openedAt + rawInfo.durationMs : child.closedAt) +
@@ -5654,7 +5666,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             const coverCap =
               coverStartMs === undefined
                 ? undefined
-                : Math.max(0, coverStartMs - rawVideoInfo.frameDurationMs);
+                : Math.max(
+                    0,
+                    coverStartMs - calibrationCoverMarginMs(rawVideoInfo.frameDurationMs),
+                  );
             sourceRange.end = Math.max(
               minimumAddressBarEnd,
               minimumHighlightEnd,
