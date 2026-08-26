@@ -4560,7 +4560,8 @@ const childCompositeLayers = async (options: {
     // Same guard as the parent: a cover run reaching t=0 leaves nothing to
     // calibrate against — fall back to endpoint arithmetic.
     const coverStartMs =
-      detectedCoverStartMs !== undefined && detectedCoverStartMs > rawInfo.frameDurationMs
+      detectedCoverStartMs !== undefined &&
+      detectedCoverStartMs > calibrationCoverMarginMs(rawInfo.frameDurationMs)
         ? detectedCoverStartMs
         : undefined;
     const childOffsetMs =
@@ -5488,13 +5489,15 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             coverPaintedAt === undefined
               ? undefined
               : await detectCalibrationCoverStartMs(paths.raw);
-          // A cover run reaching (within a frame of) t=0 means the recording
-          // holds no pre-cover footage: an instant test whose only captured
-          // frames ARE the cover. Nothing to calibrate against or protect —
-          // fall back to endpoint arithmetic and render what exists.
+          // A cover run reaching (within the cover margin of) t=0 means the
+          // recording holds no pre-cover footage: an instant test whose only
+          // captured frames ARE the cover. Nothing to calibrate against or
+          // protect — fall back to endpoint arithmetic and render what
+          // exists. Same threshold as the cap margin, so an admitted cover
+          // start can never produce a zero-width cap.
           const coverStartMs =
             detectedCoverStartMs !== undefined &&
-            detectedCoverStartMs > rawVideoInfo.frameDurationMs
+            detectedCoverStartMs > calibrationCoverMarginMs(rawVideoInfo.frameDurationMs)
               ? detectedCoverStartMs
               : undefined;
           // Clamped at 0: the raw's first frame can lag videoMode's clock
