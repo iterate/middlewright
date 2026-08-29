@@ -102,7 +102,7 @@ export const motionWaiter = Object.assign(
     return {
       name: "motion-waiter",
 
-      middleware: async ({ args, locator, method }, next) => {
+      middleware: async ({ args, locator, method, timing }, next) => {
         const settings = getSettings(options);
         if (!settings.enabled || !pointerMethods.has(method)) return next();
 
@@ -112,7 +112,13 @@ export const motionWaiter = Object.assign(
         if (explicitTimeout(method, args) !== undefined) return next();
 
         const start = Date.now();
+        const perfStart = performance.now();
         const deadline = start + settings.settleTimeout;
+        // The hold is real on-screen animation — flag it so video renderers
+        // keep the footage instead of compressing it as pre-action dead air.
+        const flagWatchable = () => {
+          timing.watchableSpans.push({ endedAt: performance.now(), startedAt: perfStart });
+        };
         // The current run of identical samples: the box and when that run started.
         let still: { box: Box; since: number } | null = null;
         let sawMotion = false;
@@ -134,6 +140,7 @@ export const motionWaiter = Object.assign(
                 settings.log(
                   `${locator}.${method}(...) target settled after ${now - start}ms of motion`,
                 );
+                flagWatchable();
               }
               return next();
             }
@@ -147,6 +154,7 @@ export const motionWaiter = Object.assign(
         settings.log(
           `${locator}.${method}(...) target still moving after the ${settings.settleTimeout}ms settle budget, proceeding`,
         );
+        if (sawMotion) flagWatchable();
         try {
           return await next();
         } catch (error) {

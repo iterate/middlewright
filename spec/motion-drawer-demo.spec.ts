@@ -27,7 +27,8 @@ test("control: without motion-waiter the click lands on a still-sliding drawer",
   await page.videoMode.caption("Playwright clicks while the drawer is still sliding", () =>
     page.getByRole("button", { name: "Notifications" }).click(),
   );
-  await page.getByRole("heading", { name: "Notifications" }).waitFor();
+  // timeout: the app holds a 700ms pressed flash + 200ms fade before navigating — nothing there for a spinner-waiter
+  await page.getByRole("heading", { name: "Notifications" }).waitFor({ timeout: 5_000 });
 
   // The app records the drawer's translateX at the moment the click landed.
   // Vanilla Playwright clicks while the drawer is still well off to the left —
@@ -43,6 +44,9 @@ test("opting in for the drawer click waits out the slide", async ({
   await using page = await addPlugins({
     page: basePage,
     testInfo,
+    // motionWaiter OUTSIDE videoMode: its settle hold completes before
+    // video-mode reads the action timing, so the flagged watchable span (the
+    // drawer's slide) renders at full speed instead of compressing away.
     plugins: [motionWaiter(), videoMode()],
   });
   await page.setContent(getDrawerAppHtml());
@@ -55,7 +59,8 @@ test("opting in for the drawer click waits out the slide", async ({
       page.getByRole("button", { name: "Notifications" }).click(),
     ),
   );
-  await page.getByRole("heading", { name: "Notifications" }).waitFor();
+  // timeout: the app holds a 700ms pressed flash + 200ms fade before navigating — nothing there for a spinner-waiter
+  await page.getByRole("heading", { name: "Notifications" }).waitFor({ timeout: 5_000 });
 
   // Same app, same clicks — the one opted-in click was held until the slide
   // finished, so it landed on the drawer at rest (translateX ≈ 0).
@@ -75,7 +80,11 @@ function getDrawerAppHtml() {
           header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: #18181b; color: #fafafa; }
           header button { font-size: 18px; background: none; color: inherit; border: 1px solid #3f3f46; border-radius: 8px; padding: 6px 10px; }
           main { padding: 24px 16px; }
-          #overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); }
+          #overlay {
+            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+            opacity: 0; transition: opacity 180ms ease;
+          }
+          #overlay.open { opacity: 1; }
           #drawer {
             position: fixed; top: 0; bottom: 0; left: 0; width: 280px;
             background: #ffffff; box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
@@ -116,6 +125,7 @@ function getDrawerAppHtml() {
 
           document.querySelector("header button").addEventListener("click", () => {
             overlay.hidden = false;
+            requestAnimationFrame(() => overlay.classList.add("open"));
             const startedAt = Date.now();
             slideTimer = setInterval(() => {
               const progress = Math.min((Date.now() - startedAt) / SLIDE_MS, 1);
@@ -135,11 +145,16 @@ function getDrawerAppHtml() {
               clearInterval(slideTimer);
               item.style.background = "#e4e4e7";
               setTimeout(() => {
-                overlay.hidden = true;
-                drawer.style.transform = "translateX(" + -DRAWER_WIDTH + "px)";
-                item.style.background = "";
-                document.getElementById("screen").innerHTML =
-                  "<h1>" + item.dataset.screen + "</h1><p>The " + item.dataset.screen.toLowerCase() + " screen.</p>";
+                overlay.classList.remove("open");
+                setTimeout(() => {
+                  overlay.hidden = true;
+                  drawer.style.transform = "translateX(" + -DRAWER_WIDTH + "px)";
+                  item.style.background = "";
+                  // Navigate only once the menu is fully gone, so the new
+                  // screen never paints under a half-faded overlay.
+                  document.getElementById("screen").innerHTML =
+                    "<h1>" + item.dataset.screen + "</h1><p>The " + item.dataset.screen.toLowerCase() + " screen.</p>";
+                }, 200);
               }, 700);
             });
           }

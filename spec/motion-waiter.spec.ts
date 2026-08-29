@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import { addPlugins, motionWaiter } from "../src/index.ts";
+import { addPlugins, motionWaiter, videoMode } from "../src/index.ts";
 
 const test = base.extend({
   page: async ({ page: basePage }, use, testInfo) => {
@@ -57,6 +57,28 @@ test("an explicit timeout passes straight through, like spinner-waiter's escape 
   await page.getByRole("button", { name: "sliding" }).click({ timeout: 5_000 });
   const clickedAt = await page.evaluate(() => (window as any).__clickedAtX);
   expect(clickedAt).toBeLessThan(200);
+});
+
+base("a motion hold is flagged watchable, so video-mode keeps the footage", async ({
+  page: basePage,
+}, testInfo) => {
+  const video = videoMode({ finalHold: 0, highlight: false });
+  await using page = await addPlugins({
+    page: basePage,
+    testInfo,
+    plugins: [motionWaiter(), video],
+  });
+  await page.setContent(getMovingButtonHtml());
+  motionWaiter.settings.enterWith({ enabled: true });
+
+  await page.evaluate(() => (window as any).startSlide(200, 800));
+  await page.getByRole("button", { name: "sliding" }).click();
+
+  // The ~800ms settle hold precedes video-mode's middleware, which would
+  // normally record it as one fat dead-air span and compress the slide away.
+  // The watchable flag carves it out — no dead-air span may span the hold.
+  const { deadAir } = await video.metadata();
+  expect(deadAir.filter((span) => span.end - span.start > 400)).toEqual([]);
 });
 
 function getMovingButtonHtml() {

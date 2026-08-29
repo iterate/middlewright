@@ -311,6 +311,8 @@ type VideoModeState = {
   children: VideoModeChild[];
   deadAirDepth: number;
   deadAirSpans: VideoModeSpan[];
+  /** Footage windows middlewares flagged via ActionTiming.watchableSpans — carved out of dead air. */
+  watchableSpans: VideoModeSpan[];
   highlights: VideoModeHighlight[];
   highlightImageIndex: number;
   lastDialogEndedAt?: number;
@@ -856,7 +858,13 @@ const metadataFor = (state: VideoModeState): VideoModeMetadata => {
       ...child,
       highlights: normalizeVideoHighlights(child.highlights),
     })),
-    deadAir: mergeVideoSpans(state.deadAirSpans),
+    // Watchable spans (a motion-settle hold over a sliding panel, say) are
+    // carved out of dead air, like popup enter/exit animations: compression
+    // must not fast-forward footage a middleware flagged as worth watching.
+    deadAir: subtractVideoSpans(
+      mergeVideoSpans(state.deadAirSpans),
+      mergeVideoSpans(state.watchableSpans),
+    ),
     highlights: normalizeVideoHighlights(state.highlights),
     outputs: state.outputs,
     schemaVersion: 2,
@@ -2353,6 +2361,21 @@ const recordActionElapsedDeadAirFromTiming = (
   }
 
   recordDeadAirSpan(state, { end, start });
+};
+
+const recordWatchableSpans = (state: VideoModeState, timing: ActionTiming) => {
+  if (state.startedAt === undefined) {
+    return;
+  }
+
+  for (const span of timing.watchableSpans) {
+    const start = Math.round(span.startedAt - state.startedAt);
+    const end = Math.round(span.endedAt - state.startedAt);
+
+    if (end > start) {
+      state.watchableSpans.push({ end, start });
+    }
+  }
 };
 
 const recordMiddlewareWaitBeforeVideoMode = (
@@ -4865,6 +4888,7 @@ const videoModeActionMiddleware = (options: {
     }
 
     recordMiddlewareWaitBeforeVideoMode(state, timing);
+    recordWatchableSpans(state, timing);
 
     if (skipMethods.includes(method)) {
       try {
@@ -5007,6 +5031,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
     children: [],
     deadAirDepth: 0,
     deadAirSpans: [],
+    watchableSpans: [],
     highlightImageIndex: 0,
     highlights: [],
     outputs: {},
@@ -5095,6 +5120,9 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
       children: [],
       deadAirDepth: 0,
       deadAirSpans: state.deadAirSpans,
+      // Like dead air, the child shares the parent's watchable list: spans
+      // land on the parent clock and protect the same timeline.
+      watchableSpans: state.watchableSpans,
       highlightImageIndex: 0,
       highlights: child.highlights,
       outputs: {},

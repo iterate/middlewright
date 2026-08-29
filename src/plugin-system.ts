@@ -85,6 +85,12 @@ export type ActionTiming = {
   attachedAt?: number;
   attachedAtStart: boolean;
   middlewares: ActionMiddlewareTiming[];
+  /**
+   * `performance.now()` spans a middleware flags as watchable footage — a
+   * settle wait spanning a real on-screen animation, say. Video renderers
+   * keep these at full speed instead of compressing them as dead air.
+   */
+  watchableSpans: { startedAt: number; endedAt: number }[];
 };
 
 /** Function that calls the next middleware or the original action */
@@ -453,6 +459,7 @@ const patchLocatorPrototype = (
         attachedAt: attachedAtStart ? actionStartedAt : undefined,
         attachedAtStart,
         middlewares: [],
+        watchableSpans: [],
       };
       const stopObservingAttached = attachedAtStart
         ? () => {}
