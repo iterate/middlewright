@@ -37,7 +37,7 @@ test("control: without motion-waiter the click lands on a still-sliding drawer",
   expect(drawerXAtClick).toBeLessThan(-40);
 });
 
-test("with motion-waiter the click waits for the drawer to settle", async ({
+test("opting in for the drawer click waits out the slide", async ({
   page: basePage,
 }, testInfo) => {
   await using page = await addPlugins({
@@ -51,11 +51,13 @@ test("with motion-waiter the click waits for the drawer to settle", async ({
     page.getByRole("button", { name: "Open menu" }).click(),
   );
   await page.videoMode.caption("motion-waiter holds the click until the drawer settles", () =>
-    page.getByRole("button", { name: "Notifications" }).click(),
+    motionWaiter.settings.run({ enabled: true }, () =>
+      page.getByRole("button", { name: "Notifications" }).click(),
+    ),
   );
   await page.getByRole("heading", { name: "Notifications" }).waitFor();
 
-  // Same app, same clicks — motion-waiter held the click until the slide
+  // Same app, same clicks — the one opted-in click was held until the slide
   // finished, so it landed on the drawer at rest (translateX ≈ 0).
   const drawerXAtClick = await page.evaluate(() => (window as any).__drawerXAtClick);
   console.log(`drawer translateX at click: ${drawerXAtClick}px (drawer is 280px wide)`);

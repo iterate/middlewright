@@ -52,6 +52,11 @@ fix it in middlewright if we care to". This is that fix.
   motivating bug), and a zero-quiet fast path would sail right through that
   parked window. Step cadences slower than `sampleInterval` can still pass
   (documented boundary, same as vanilla Playwright).
+- **Off by default** (review feedback): every guarded action pays the
+  stillness window, so the plugin opts in — register it, then
+  `motionWaiter.settings.run({ enabled: true }, ...)` around the specific
+  interactions with known-problematic animations, or `enabled: true` at
+  registration for a whole suite.
 - **Escape hatches match spinner-waiter**: `settings.run({ disabled: true })`
   per block, an author-passed explicit `{ timeout }` passes straight through
   (which also makes `[spinnerWaiter(), motionWaiter()]` compose: the

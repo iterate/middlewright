@@ -38,8 +38,14 @@ export type MotionWaiterOptions = {
   settledFor?: number;
   /** Movement smaller than this many px counts as still (subpixel jitter). Default: 0.5 */
   epsilon?: number;
-  /** Whether to skip motion checking. Default: false */
-  disabled?: boolean;
+  /**
+   * Whether motion checking is on. Default: false — every guarded action pays
+   * the stillness window, so the plugin is opt-in: register it, then enable
+   * it around the specific interactions whose animations are known to defeat
+   * Playwright's stability check (`motionWaiter.settings.run({ enabled: true },
+   * ...)`), or pass `enabled: true` at registration for a whole suite.
+   */
+  enabled?: boolean;
   /** Debug logging function */
   log?: (message: string) => void;
 };
@@ -54,7 +60,7 @@ const defaults: Required<MotionWaiterOptions> = {
   sampleInterval: 60,
   settledFor: 150,
   epsilon: 0.5,
-  disabled: false,
+  enabled: false,
   log: () => {},
 };
 
@@ -75,7 +81,12 @@ const getSettings = (baseOptions: MotionWaiterOptions = {}) => {
  *
  * Runtime settings can be overridden per-test via
  * `motionWaiter.settings.enterWith({...})`, or for a single call via
- * `motionWaiter.settings.run({...}, () => locator.click())`.
+ * `motionWaiter.settings.run({...}, () => locator.click())`. The plugin is
+ * OFF by default — the intended usage is to opt in around the interactions
+ * whose animations are known to be problematic:
+ *
+ *   await motionWaiter.settings.run({ enabled: true }, () =>
+ *     page.getByRole("button", { name: "Notifications" }).click());
  *
  * Register it INSIDE spinner-waiter (`plugins: [spinnerWaiter(),
  * motionWaiter()]`): spinner-waiter's fast-fail path passes an explicit 1ms
@@ -93,7 +104,7 @@ export const motionWaiter = Object.assign(
 
       middleware: async ({ args, locator, method }, next) => {
         const settings = getSettings(options);
-        if (settings.disabled || !pointerMethods.has(method)) return next();
+        if (!settings.enabled || !pointerMethods.has(method)) return next();
 
         // An explicitly passed { timeout } is the author (or an outer
         // middleware like spinner-waiter's fast-fail) saying "I own the
@@ -144,7 +155,7 @@ export const motionWaiter = Object.assign(
             [
               `The target was still moving when the ${settings.settleTimeout}ms motion-settle budget ran out.`,
               `If the motion is perpetual (a marquee, a rotating icon), disable the wait for this action:`,
-              `  await motionWaiter.settings.run({ disabled: true }, () => locator.${method}(...))`,
+              `  await motionWaiter.settings.run({ enabled: false }, () => locator.${method}(...))`,
             ],
             "motion-waiter.ts",
           );

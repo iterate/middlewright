@@ -14,6 +14,7 @@ const test = base.extend({
 });
 
 test("a static element clicks after a short stillness check", async ({ page }) => {
+  motionWaiter.settings.enterWith({ enabled: true });
   const start = Date.now();
   await page.getByRole("button", { name: "static" }).click();
   expect(Date.now() - start).toBeLessThan(700);
@@ -21,6 +22,7 @@ test("a static element clicks after a short stillness check", async ({ page }) =
 });
 
 test("a timer-stepped slide is waited out; the click lands at rest", async ({ page }) => {
+  motionWaiter.settings.enterWith({ enabled: true });
   // 800ms slide, stepped every 48ms — identical consecutive display frames
   // mid-slide, so vanilla Playwright would click while it moves.
   await page.evaluate(() => (window as any).startSlide(200, 800));
@@ -28,10 +30,7 @@ test("a timer-stepped slide is waited out; the click lands at rest", async ({ pa
   await page.getByText("clicked sliding at x=200").waitFor();
 });
 
-test("without the plugin the same click lands mid-slide (the gap this plugin closes)", async ({
-  page,
-}) => {
-  motionWaiter.settings.enterWith({ disabled: true });
+test("off by default: the same click lands mid-slide until a block opts in", async ({ page }) => {
   await page.evaluate(() => (window as any).startSlide(200, 800));
   await page.getByRole("button", { name: "sliding" }).click();
   const clickedAt = await page.evaluate(() => (window as any).__clickedAtX);
@@ -40,6 +39,7 @@ test("without the plugin the same click lands mid-slide (the gap this plugin clo
 });
 
 test("perpetual motion proceeds once the settle budget runs out", async ({ page }) => {
+  motionWaiter.settings.enterWith({ enabled: true });
   await page.evaluate(() => (window as any).startMarquee());
   const start = Date.now();
   await page.getByRole("button", { name: "sliding" }).click();
@@ -51,6 +51,7 @@ test("perpetual motion proceeds once the settle budget runs out", async ({ page 
 test("an explicit timeout passes straight through, like spinner-waiter's escape hatch", async ({
   page,
 }) => {
+  motionWaiter.settings.enterWith({ enabled: true });
   await page.evaluate(() => (window as any).startSlide(200, 800));
   // timeout: the explicit-timeout escape hatch IS the subject under test — motion-waiter passes through, like spinner-waiter does
   await page.getByRole("button", { name: "sliding" }).click({ timeout: 5_000 });

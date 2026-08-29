@@ -143,23 +143,28 @@ test("a test where spinners are expected to hang", async ({ page }) => {
 
 Waits for a *moving* target to settle before pointer actions (`click`, `dblclick`, `hover`). Playwright's own stability check only compares the target's bounding box across two consecutive frames, so timer-driven JS animation (React Native web's `Animated`, `setInterval` steppers) that steps coarser than the display refresh gets clicked mid-slide — the click lands on a half-open drawer, and video-mode's click-moment freeze bakes the clipped panel into the recording.
 
-motionWaiter samples the target's bounding box over a longer window: the action proceeds only once the box has been observed holding still for `settledFor` (~150ms — the per-action cost on static elements, and a real window on purpose: an element often sits parked for a frame or two before its animation starts, React Native's open → requestAnimationFrame → animate shape). The wait is budgeted — perpetual motion (marquees, rotating icons) proceeds at `settleTimeout` with a log line instead of blocking. Opacity-only fades never engage it (the box doesn't move), and step cadences slower than `sampleInterval` can pass the initial check, same as vanilla Playwright.
+motionWaiter samples the target's bounding box over a longer window: the action proceeds only once the box has been observed holding still for `settledFor` (~150ms — the per-action cost on static elements, and a real window on purpose: an element often sits parked for a frame or two before its animation starts, React Native's open → requestAnimationFrame → animate shape).
+
+Because every guarded action pays that stillness window, the plugin is **off by default**: register it, then opt in around the specific interactions whose animations are known to defeat Playwright's stability check —
+
+```ts
+await motionWaiter.settings.run({ enabled: true }, () =>
+  page.getByRole("button", { name: "Notifications" }).click(),
+);
+```
+
+— or pass `enabled: true` at registration to guard a whole suite. The wait is budgeted — perpetual motion (marquees, rotating icons) proceeds at `settleTimeout` with a log line instead of blocking. Opacity-only fades never engage it (the box doesn't move), and step cadences slower than `sampleInterval` can pass the initial check, same as vanilla Playwright.
 
 ```ts
 motionWaiter({
+  enabled: true, // guard every pointer action (default: false — opt in per block)
   settleTimeout: 1_500, // max wait for motion to stop
   sampleInterval: 60, // ms between bounding-box samples
-  settledFor: 150, // quiet window required once motion was seen
+  settledFor: 150, // stillness window required before proceeding
 });
 ```
 
-Register it after `spinnerWaiter` (`plugins: [spinnerWaiter(), motionWaiter()]`): spinner-waiter's fast-fail path passes an explicit 1ms timeout inward, and motionWaiter — like spinnerWaiter itself — treats an explicit `{ timeout }` as the author taking charge of timing and passes straight through. The same `settings.enterWith` / `settings.run` runtime overrides apply:
-
-```ts
-await motionWaiter.settings.run({ disabled: true }, () =>
-  page.getByText("stock ticker").click(),
-);
-```
+Register it after `spinnerWaiter` (`plugins: [spinnerWaiter(), motionWaiter()]`): spinner-waiter's fast-fail path passes an explicit 1ms timeout inward, and motionWaiter — like spinnerWaiter itself — treats an explicit `{ timeout }` as the author taking charge of timing and passes straight through. The same `settings.enterWith` / `settings.run` runtime overrides apply — `enterWith` turns it on for the rest of a test, `run` scopes it to one action.
 
 ### hydrationWaiter
 
