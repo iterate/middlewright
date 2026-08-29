@@ -28,9 +28,12 @@ export type MotionWaiterOptions = {
   /** Interval between bounding-box samples (ms). Default: 60 */
   sampleInterval?: number;
   /**
-   * Once motion has been observed, how long the box must hold still before the
-   * action proceeds (ms) — defeats step cadences slower than the sample
-   * interval. Default: 150
+   * How long the box must be observed holding still before the action
+   * proceeds (ms). This is the per-action cost on static elements, and it is
+   * deliberately a real window rather than a single confirming sample: an
+   * element often sits parked for a frame or two before its animation starts
+   * (React Native's open → requestAnimationFrame → animate shape), and it
+   * also defeats step cadences slower than the sample interval. Default: 150
    */
   settledFor?: number;
   /** Movement smaller than this many px counts as still (subpixel jitter). Default: 0.5 */
@@ -115,10 +118,7 @@ export const motionWaiter = Object.assign(
             still = null;
             sawMotion = true;
           } else if (still !== null && sameBox(still.box, box, settings.epsilon)) {
-            // A static element passes on its first confirming sample (~one
-            // interval of overhead); once motion was seen, demand a real
-            // quiet window.
-            if (now - still.since >= (sawMotion ? settings.settledFor : 0)) {
+            if (now - still.since >= settings.settledFor) {
               if (sawMotion) {
                 settings.log(
                   `${locator}.${method}(...) target settled after ${now - start}ms of motion`,

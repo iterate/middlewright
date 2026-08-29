@@ -143,7 +143,7 @@ test("a test where spinners are expected to hang", async ({ page }) => {
 
 Waits for a *moving* target to settle before pointer actions (`click`, `dblclick`, `hover`). Playwright's own stability check only compares the target's bounding box across two consecutive frames, so timer-driven JS animation (React Native web's `Animated`, `setInterval` steppers) that steps coarser than the display refresh gets clicked mid-slide — the click lands on a half-open drawer, and video-mode's click-moment freeze bakes the clipped panel into the recording.
 
-motionWaiter samples the target's bounding box over a longer window: a static element passes after one confirming sample (~60ms), but once motion is observed the box must hold still for `settledFor` before the action proceeds. The wait is budgeted — perpetual motion (marquees, rotating icons) proceeds at `settleTimeout` with a log line instead of blocking. Opacity-only fades never engage it (the box doesn't move), and step cadences slower than `sampleInterval` can pass the initial check, same as vanilla Playwright.
+motionWaiter samples the target's bounding box over a longer window: the action proceeds only once the box has been observed holding still for `settledFor` (~150ms — the per-action cost on static elements, and a real window on purpose: an element often sits parked for a frame or two before its animation starts, React Native's open → requestAnimationFrame → animate shape). The wait is budgeted — perpetual motion (marquees, rotating icons) proceeds at `settleTimeout` with a log line instead of blocking. Opacity-only fades never engage it (the box doesn't move), and step cadences slower than `sampleInterval` can pass the initial check, same as vanilla Playwright.
 
 ```ts
 motionWaiter({

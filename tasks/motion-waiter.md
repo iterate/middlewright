@@ -45,11 +45,14 @@ fix it in middlewright if we care to". This is that fix.
   it's a cap only paid for perpetual motion; typical cost is
   motion-duration + 150ms); perpetual motion proceeds at the deadline with a
   log line, and a subsequent action failure gets a still-moving hint appended.
-- **Cheap when nothing moves**: one extra sample interval (~60ms) per action.
-  Only once motion is observed does the plugin require a longer quiet window
-  (150ms of unchanged box) before proceeding — that defeats step cadences
-  slower than the sample interval. Cadences slower than `sampleInterval` can
-  pass the initial check (documented boundary, same as vanilla Playwright).
+- **A real stillness window, always**: the action proceeds only once the box
+  has been observed holding still for `settledFor` (150ms) — ~150-200ms per
+  pointer action on static elements. Deliberately NOT a single confirming
+  sample: an element often sits parked a frame or two before its animation
+  starts (React Native's open → requestAnimationFrame → animate shape — the
+  motivating bug), and a zero-quiet fast path would sail right through that
+  parked window. Step cadences slower than `sampleInterval` can still pass
+  (documented boundary, same as vanilla Playwright).
 - **Escape hatches match spinner-waiter**: `settings.run({ disabled: true })`
   per block, an author-passed explicit `{ timeout }` passes straight through
   (which also makes `[spinnerWaiter(), motionWaiter()]` compose: the
@@ -58,11 +61,13 @@ fix it in middlewright if we care to". This is that fix.
 
 ## Checklist
 
-- [x] Repro demo: a slow (1s) timer-driven sliding drawer app +
+- [x] Repro demo: a slow (700ms) timer-driven sliding drawer app +
       `spec/motion-drawer-demo.spec.ts` where the un-helped click provably
       lands mid-slide, for the "before" video _— control click lands at
-      translateX −240.8px of a 280px drawer (≈14% open); the app records the
-      offset at click time_
+      translateX −225px of a 280px drawer (≈20% open); the app records the
+      offset at click time, freezes the slide with a pressed-item flash so the
+      stranded drawer is visible on video, and the tests caption the videos
+      via `page.videoMode.caption`_
 - [x] `src/plugins/motion-waiter.ts`: the plugin per the decisions above
 - [x] "after" demo test: same app with `motionWaiter()` — click-time offset is
       the settled position _— translateX 0px_

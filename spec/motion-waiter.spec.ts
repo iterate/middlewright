@@ -13,7 +13,7 @@ const test = base.extend({
   },
 });
 
-test("a static element clicks with barely any overhead", async ({ page }) => {
+test("a static element clicks after a short stillness check", async ({ page }) => {
   const start = Date.now();
   await page.getByRole("button", { name: "static" }).click();
   expect(Date.now() - start).toBeLessThan(700);
