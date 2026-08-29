@@ -101,6 +101,7 @@ const requireTimeoutComment = {
         - If there's no loading UI, remove the timeout and add loading UI for spinnerWaiter.
         - If there's a loading UI but it takes even longer than the spinnerWaiter spinner timeout, use \`await spinnerWaiter.settings.run({ spinnerTimeout: 123_456 }, async () => ...)\` or similar to wait even longer for the spinner to complete.
         - If there's loading UI from a part of the code that we don't control (e.g. a library) and it isn't matched by the default spinner selectors, use \`await spinnerWaiter.settings.run({ spinnerSelectors: ["myCustomSpinnerClass"] }, async () => ...)\`.
+        - If the wait is really about an ANIMATION (a sliding drawer, a settling panel), don't time it — use \`await motionWaiter.settings.run({ enabled: true }, () => locator.click())\` to wait for the target to stop moving.
         - If it is truly impossible for there to be loading UI, add a nearby // comment matching every required pattern: {{patterns}}.
         - If you're in a block which has done \`await spinnerWaiter.settings.run({ disabled: true }, async () => ...)\`, you should probably *un-disable* for that block and apply the above suggestions to the inner code.
 
@@ -109,6 +110,7 @@ const requireTimeoutComment = {
       sleep: dedent`
         Avoid waitForTimeout — a sleep waits whether or not the app is ready. Best ways to resolve:
         - Wait for positive UI instead: a locator wait covers readiness, and spinnerWaiter extends it while loading UI shows.
+        - If the sleep lets an ANIMATION finish before clicking (a sliding drawer, a settling panel), use \`await motionWaiter.settings.run({ enabled: true }, () => locator.click())\` — it waits for the target to stop moving instead of guessing a duration.
         - If the sleep paces a recording, let video mode pace instead (it holds popup entry and settles the recorder itself); still-needed manual pacing is a library gap worth filing.
         - If it is truly necessary, add a nearby // comment matching every required pattern: {{patterns}}.
 
