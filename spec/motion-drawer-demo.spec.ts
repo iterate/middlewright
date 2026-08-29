@@ -17,7 +17,9 @@ test("control: without motion-waiter the click lands on a still-sliding drawer",
   await using page = await addPlugins({
     page: basePage,
     testInfo,
-    plugins: [videoMode()],
+    // The heading's appearance needs no highlight of its own — footage runs
+    // continuously from the click through the app's pressed-flash and fade.
+    plugins: [videoMode({ skipMethods: ["waitFor"] })],
   });
   await page.setContent(getDrawerAppHtml());
 
@@ -29,6 +31,9 @@ test("control: without motion-waiter the click lands on a still-sliding drawer",
   );
   // timeout: the app holds a 700ms pressed flash + 200ms fade before navigating — nothing there for a spinner-waiter
   await page.getByRole("heading", { name: "Notifications" }).waitFor({ timeout: 5_000 });
+  // Outlast the menu's fade-out so the recording ends on a settled screen.
+  // timeout: fade completion, invisible to the spinner-waiter
+  await page.locator("#overlay").waitFor({ state: "hidden", timeout: 5_000 });
 
   // The app records the drawer's translateX at the moment the click landed.
   // Vanilla Playwright clicks while the drawer is still well off to the left —
@@ -47,7 +52,7 @@ test("opting in for the drawer click waits out the slide", async ({
     // motionWaiter OUTSIDE videoMode: its settle hold completes before
     // video-mode reads the action timing, so the flagged watchable span (the
     // drawer's slide) renders at full speed instead of compressing away.
-    plugins: [motionWaiter(), videoMode()],
+    plugins: [motionWaiter(), videoMode({ skipMethods: ["waitFor"] })],
   });
   await page.setContent(getDrawerAppHtml());
 
@@ -61,6 +66,9 @@ test("opting in for the drawer click waits out the slide", async ({
   );
   // timeout: the app holds a 700ms pressed flash + 200ms fade before navigating — nothing there for a spinner-waiter
   await page.getByRole("heading", { name: "Notifications" }).waitFor({ timeout: 5_000 });
+  // Outlast the menu's fade-out so the recording ends on a settled screen.
+  // timeout: fade completion, invisible to the spinner-waiter
+  await page.locator("#overlay").waitFor({ state: "hidden", timeout: 5_000 });
 
   // Same app, same clicks — the one opted-in click was held until the slide
   // finished, so it landed on the drawer at rest (translateX ≈ 0).
@@ -145,15 +153,15 @@ function getDrawerAppHtml() {
               clearInterval(slideTimer);
               item.style.background = "#e4e4e7";
               setTimeout(() => {
+                // Navigate as the menu starts fading, so the new screen is
+                // what the fade reveals.
+                document.getElementById("screen").innerHTML =
+                  "<h1>" + item.dataset.screen + "</h1><p>The " + item.dataset.screen.toLowerCase() + " screen.</p>";
                 overlay.classList.remove("open");
                 setTimeout(() => {
                   overlay.hidden = true;
                   drawer.style.transform = "translateX(" + -DRAWER_WIDTH + "px)";
                   item.style.background = "";
-                  // Navigate only once the menu is fully gone, so the new
-                  // screen never paints under a half-faded overlay.
-                  document.getElementById("screen").innerHTML =
-                    "<h1>" + item.dataset.screen + "</h1><p>The " + item.dataset.screen.toLowerCase() + " screen.</p>";
                 }, 200);
               }, 700);
             });

@@ -5554,8 +5554,13 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           // composite shares the raw timeline, so nothing downstream changes.
           let renderInputPath = paths.raw;
           // Popup enter/exit animations must reach the output even when a
-          // hold's overlap-skip would jump across them.
-          const renderKeepSpans: VideoModeSpan[] = [];
+          // hold's overlap-skip would jump across them. Watchable spans (a
+          // motion-settle hold over a sliding panel) get the same protection:
+          // without it, two pointer actions within one hold of each other
+          // skip the slide entirely.
+          const renderKeepSpans: VideoModeSpan[] = mergeVideoSpans(state.watchableSpans).map(
+            (span) => translateVideoSpan(span, timelineOffset),
+          );
           const childLayers = await childCompositeLayers({
             children: metadataBeforeVideo.children,
             outputDir: testInfo.outputDir,
