@@ -18,6 +18,7 @@ export {
   type VideoModeSpan,
   type VideoModeViewport,
 } from "./video-mode.ts";
+export { motionWaiter, type MotionWaiterOptions } from "./motion-waiter.ts";
 export { spinnerWaiter, type SpinnerWaiterOptions, defaultSelectors } from "./spinner-waiter.ts";
 export { uiErrorReporter, type UIErrorReporterOptions } from "./ui-error-reporter.ts";
 export {

@@ -139,6 +139,28 @@ test("a test where spinners are expected to hang", async ({ page }) => {
 });
 ```
 
+### motionWaiter
+
+Waits for a *moving* target to settle before pointer actions (`click`, `dblclick`, `hover`). Playwright's own stability check only compares the target's bounding box across two consecutive frames, so timer-driven JS animation (React Native web's `Animated`, `setInterval` steppers) that steps coarser than the display refresh gets clicked mid-slide — the click lands on a half-open drawer, and video-mode's click-moment freeze bakes the clipped panel into the recording.
+
+motionWaiter samples the target's bounding box over a longer window: a static element passes after one confirming sample (~60ms), but once motion is observed the box must hold still for `settledFor` before the action proceeds. The wait is budgeted — perpetual motion (marquees, rotating icons) proceeds at `settleTimeout` with a log line instead of blocking. Opacity-only fades never engage it (the box doesn't move), and step cadences slower than `sampleInterval` can pass the initial check, same as vanilla Playwright.
+
+```ts
+motionWaiter({
+  settleTimeout: 1_500, // max wait for motion to stop
+  sampleInterval: 60, // ms between bounding-box samples
+  settledFor: 150, // quiet window required once motion was seen
+});
+```
+
+Register it after `spinnerWaiter` (`plugins: [spinnerWaiter(), motionWaiter()]`): spinner-waiter's fast-fail path passes an explicit 1ms timeout inward, and motionWaiter — like spinnerWaiter itself — treats an explicit `{ timeout }` as the author taking charge of timing and passes straight through. The same `settings.enterWith` / `settings.run` runtime overrides apply:
+
+```ts
+await motionWaiter.settings.run({ disabled: true }, () =>
+  page.getByText("stock ticker").click(),
+);
+```
+
 ### hydrationWaiter
 
 Before each action, waits for `[data-hydrated="false"]` to disappear. Your app cooperates by rendering that attribute server-side and flipping it once the framework hydrates. Stops the classic "test clicked a button before React attached the handler" flake at the source.

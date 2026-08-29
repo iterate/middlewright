@@ -7,8 +7,9 @@ size: medium
 
 ## Status summary
 
-Spec fleshed out, implementation not started. Main pieces: the repro demo spec
-(before video), the `motionWaiter` plugin, the after video, exports + docs.
+Plugin, demo spec (before/after), unit spec, exports and README all done and
+passing. Remaining: attach before/after videos + the todo-app baseline video
+to the PR body.
 
 ## Problem
 
@@ -40,29 +41,45 @@ fix it in middlewright if we care to". This is that fix.
   element is harmless).
 - **Pointer actions only** (`click`, `dblclick`, `hover`) — the actions where
   a moving target produces a mis-click or an ugly click-moment frame.
-- **Budgeted, never blocking**: default 1s `settleTimeout`; perpetual motion
-  (marquees, spinners that rotate the box) proceeds at the deadline with a log
-  line rather than failing.
+- **Budgeted, never blocking**: 1.5s `settleTimeout` default (judgement call:
+  it's a cap only paid for perpetual motion; typical cost is
+  motion-duration + 150ms); perpetual motion proceeds at the deadline with a
+  log line, and a subsequent action failure gets a still-moving hint appended.
 - **Cheap when nothing moves**: one extra sample interval (~60ms) per action.
   Only once motion is observed does the plugin require a longer quiet window
-  (~150ms of unchanged box) before proceeding — that defeats step cadences
-  slower than the sample interval.
+  (150ms of unchanged box) before proceeding — that defeats step cadences
+  slower than the sample interval. Cadences slower than `sampleInterval` can
+  pass the initial check (documented boundary, same as vanilla Playwright).
 - **Escape hatches match spinner-waiter**: `settings.run({ disabled: true })`
-  per block, an author-passed explicit `{ timeout }` passes straight through,
-  `PWDEBUG` disables the plugin.
+  per block, an author-passed explicit `{ timeout }` passes straight through
+  (which also makes `[spinnerWaiter(), motionWaiter()]` compose: the
+  fast-fail's injected 1ms timeout skips the inner motion wait), `PWDEBUG`
+  disables the plugin.
 
 ## Checklist
 
-- [ ] Repro demo: a slow (≈1.2s) timer-driven sliding drawer app +
+- [x] Repro demo: a slow (1s) timer-driven sliding drawer app +
       `spec/motion-drawer-demo.spec.ts` where the un-helped click provably
-      lands mid-slide (the app records the drawer's offset at click time), for
-      the "before" video
-- [ ] `src/plugins/motion-waiter.ts`: the plugin per the decisions above
-- [ ] "after" demo test: same app with `motionWaiter()` — click-time offset is
-      the settled position
-- [ ] `spec/motion-waiter.spec.ts`: fast path (static element ≈ one interval),
-      timer-stepped slide settles, perpetual marquee proceeds at deadline,
-      `disabled` + explicit-timeout passthrough
-- [ ] Export from `src/plugins/index.ts` / `src/index.ts`, README section
+      lands mid-slide, for the "before" video _— control click lands at
+      translateX −240.8px of a 280px drawer (≈14% open); the app records the
+      offset at click time_
+- [x] `src/plugins/motion-waiter.ts`: the plugin per the decisions above
+- [x] "after" demo test: same app with `motionWaiter()` — click-time offset is
+      the settled position _— translateX 0px_
+- [x] `spec/motion-waiter.spec.ts`: fast path (static click < 700ms),
+      timer-stepped slide settles, perpetual marquee proceeds at the deadline,
+      disabled + explicit-timeout passthrough _— 5 tests_
+- [x] Export from `src/plugins/index.ts` / `src/index.ts`, README section
+      _— README gets a motionWaiter section between spinnerWaiter and
+      hydrationWaiter_
 - [ ] PR body: before/after videos (user-attachments URLs) + todo-app baseline
       video per AGENTS.md
+
+## Implementation notes
+
+- Full suite: 158 passed; `spec/popup-video.spec.ts` failed once under full
+  parallelism but passes in isolation on this branch AND on main (main's tip
+  commit is itself a video-flake fix) — pre-existing flake, not this change.
+- The marquee unit test steps every 40ms: a 120ms-step marquee sits inside the
+  documented fast-path boundary (holds longer than `sampleInterval` look
+  static on the first confirming sample).
