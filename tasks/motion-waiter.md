@@ -7,9 +7,8 @@ size: medium
 
 ## Status summary
 
-Plugin, demo spec (before/after), unit spec, exports and README all done and
-passing. Remaining: attach before/after videos + the todo-app baseline video
-to the PR body.
+Done pending review: plugin, demo spec (before/after), unit spec, exports,
+README, and the PR body carries before/after + todo-app baseline videos.
 
 ## Problem
 
@@ -77,14 +76,14 @@ fix it in middlewright if we care to". This is that fix.
 - [x] Export from `src/plugins/index.ts` / `src/index.ts`, README section
       _— README gets a motionWaiter section between spinnerWaiter and
       hydrationWaiter_
-- [ ] PR body: before/after videos (user-attachments URLs) + todo-app baseline
-      video per AGENTS.md
+- [x] PR body: before/after videos (user-attachments URLs) + todo-app baseline
+      video per AGENTS.md _— all three render as inline players on PR #42_
 
 ## Implementation notes
 
-- Full suite: 158 passed; `spec/popup-video.spec.ts` failed once under full
-  parallelism but passes in isolation on this branch AND on main (main's tip
-  commit is itself a video-flake fix) — pre-existing flake, not this change.
-- The marquee unit test steps every 40ms: a 120ms-step marquee sits inside the
-  documented fast-path boundary (holds longer than `sampleInterval` look
-  static on the first confirming sample).
+- Full suite: 159 passed on the final run (an earlier run had a one-off
+  `spec/popup-video.spec.ts` failure under full parallelism that also
+  reproduces-then-passes on main — pre-existing flake, not this change).
+- The marquee unit test steps every 40ms: cadences slower than
+  `sampleInterval` can sit inside a hold across the stillness window
+  (documented boundary shared with vanilla Playwright).
