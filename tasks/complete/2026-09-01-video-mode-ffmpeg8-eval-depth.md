@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 size: small
 ---
 
@@ -7,11 +7,11 @@ size: small
 
 ## Status summary
 
-Implemented: `cursorExpression` now emits the constant-depth sum, with a new
-node-only spec (`spec/video-mode-cursor-expression.spec.ts`) guarding depth,
-ffmpeg parseability, and boundary values. Remaining: full local suite pass on
-ffmpeg 8 + real-world render of the long iterate mobile spec against the
-patched build.
+Done. `cursorExpression` emits the constant-depth sum; a new node-only spec
+(`spec/video-mode-cursor-expression.spec.ts`) guards depth, ffmpeg
+parseability, and boundary values. Full suite green on ffmpeg 8.0.1 locally,
+and the long iterate mobile spec that originally failed renders green against
+the patched build.
 
 ## Problem
 
@@ -55,8 +55,8 @@ just a first-match lookup. Flatten it to a constant-depth sum:
       ffmpeg 8 cap, and ffmpeg itself accepts it _(spec/video-mode-cursor-expression.spec.ts: 400 segments, depth < 32, ffmpeg overlay probe with production quoting, JS-evaluated value comparison at every boundary + midpoint; mutation-checked — inclusive windows fail the value test)_
 - [x] ~~Integration repro: a pointer-mode spec with enough actions to exceed the
       old nesting cap renders successfully~~ _(dropped: ~40 clicks + render would need a test-timeout bump, and on CI's older ffmpeg it could never fail for the depth reason anyway — the expression spec's ffmpeg probe is the cross-version guard, and the long iterate mobile spec was rendered against the patched build as the real-world proof)_
-- [ ] Existing video-mode specs still green locally (this machine's ffmpeg 8 is
-      the strict parser)
+- [x] Existing video-mode specs still green locally (this machine's ffmpeg 8 is
+      the strict parser) _(157 passed, 3 skipped — the skips are llm-recover specs needing credentials; and the previously-failing iterate mobile approvals spec renders green against the patched dist)_
 
 ## Non-goals / follow-ups
 
@@ -68,4 +68,14 @@ just a first-match lookup. Flatten it to a constant-depth sum:
 
 ## Implementation notes
 
-(log during implementation)
+- 2026-09-01: rewrote `cursorExpression`; exported it (not via index) for the
+  new spec, matching the lint-plugin spec's direct-internal-import precedent.
+- Mutation check: switching the window terms to inclusive `lte` makes the
+  boundary-value test fail (a naive flattening's coordinate-doubling bug), so
+  the guard is live.
+- Full suite on this machine (ffmpeg 8.0.1, the strict parser): 157 passed,
+  3 skipped (llm-recover, needs credentials).
+- Real-world proof: patched dist rsynced into iterate's node_modules, then
+  `VIDEO_MODE=1 pnpm spec --project=mobile specs/mobile/approvals.spec.ts` —
+  the exact spec that produced the original multi-kilobyte
+  `Command failed: ffmpeg` error.
