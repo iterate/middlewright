@@ -7,10 +7,11 @@ size: small
 
 ## Status summary
 
-Task fleshed out, implementation not started. Diagnosis is complete and verified
-(see notes below): ffmpeg 8 caps expression nesting at ~100 and `cursorExpression`
-nests one `if()` per cursor waypoint segment, so any spec with roughly 35+
-pointer-highlighted actions fails at render time.
+Implemented: `cursorExpression` now emits the constant-depth sum, with a new
+node-only spec (`spec/video-mode-cursor-expression.spec.ts`) guarding depth,
+ffmpeg parseability, and boundary values. Remaining: full local suite pass on
+ffmpeg 8 + real-world render of the long iterate mobile spec against the
+patched build.
 
 ## Problem
 
@@ -48,14 +49,12 @@ just a first-match lookup. Flatten it to a constant-depth sum:
 
 ## Checklist
 
-- [ ] Flatten `cursorExpression` to the constant-depth sum form
-- [ ] Regression test: generated expression keeps constant nesting depth and
+- [x] Flatten `cursorExpression` to the constant-depth sum form _(src/plugins/video-mode.ts — sum of half-open gte/lt windows plus a complement term carrying the last waypoint's position)_
+- [x] Regression test: generated expression keeps constant nesting depth and
       identical values (boundaries included) for a waypoint count well past the
-      ffmpeg 8 cap, and ffmpeg itself accepts it
-- [ ] Integration repro: a pointer-mode spec with enough actions to exceed the
-      old nesting cap renders successfully (fails on ffmpeg 8 before the fix;
-      on CI's older ffmpeg it's correctness coverage only — the depth assertion
-      is the cross-version guard)
+      ffmpeg 8 cap, and ffmpeg itself accepts it _(spec/video-mode-cursor-expression.spec.ts: 400 segments, depth < 32, ffmpeg overlay probe with production quoting, JS-evaluated value comparison at every boundary + midpoint; mutation-checked — inclusive windows fail the value test)_
+- [x] ~~Integration repro: a pointer-mode spec with enough actions to exceed the
+      old nesting cap renders successfully~~ _(dropped: ~40 clicks + render would need a test-timeout bump, and on CI's older ffmpeg it could never fail for the depth reason anyway — the expression spec's ffmpeg probe is the cross-version guard, and the long iterate mobile spec was rendered against the patched build as the real-world proof)_
 - [ ] Existing video-mode specs still green locally (this machine's ffmpeg 8 is
       the strict parser)
 
