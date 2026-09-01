@@ -256,3 +256,70 @@ test("disappearance waits pass through untouched", async ({ page }) => {
   expect(String(error)).toContain("Timeout 1000ms exceeded");
   expect(Date.now() - start).toBeGreaterThan(500);
 });
+
+test("waits while a freshly navigated document is still loading, with no spinner", async ({
+  page,
+}) => {
+  // A cross-server hop lands on a page that renders its UI on `load`, and a
+  // slow subresource keeps `load` 2.5s away. The app draws no spinner — the
+  // browser's own tab spinner is the only loading UI. Playwright itself waits
+  // for the navigation to commit; spinner-waiter must keep waiting until the
+  // document finishes loading instead of fast-failing at commit.
+  await page.route("https://app.middlewright.test/**", async (route) => {
+    await route.fulfill({ body: `<h1>middlewright dashboard</h1>`, contentType: "text/html" });
+  });
+  await page.route("https://auth.middlewright.test/slow.png", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await route.fulfill({ body: Buffer.alloc(0), contentType: "image/png" });
+  });
+  await page.route("https://auth.middlewright.test/consent", async (route) => {
+    await route.fulfill({
+      body: `
+        <img src="https://auth.middlewright.test/slow.png" alt="" />
+        <script>
+          window.addEventListener("load", () => {
+            document.body.insertAdjacentHTML("beforeend", '<button id="allow">Allow access</button>');
+          });
+        </script>
+      `,
+      contentType: "text/html",
+    });
+  });
+  await page.goto("https://app.middlewright.test/");
+  // Kick the hop off without a Playwright action waiting on it, the way a
+  // popup arrives already navigating.
+  await page.evaluate(() => {
+    location.assign("https://auth.middlewright.test/consent");
+  });
+
+  await page.getByRole("button", { name: "Allow access" }).click();
+});
+
+test("fails fast once a navigation has fully loaded without the expected element", async ({
+  page,
+}) => {
+  await page.route("https://app.middlewright.test/**", async (route) => {
+    await route.fulfill({ body: `<h1>middlewright dashboard</h1>`, contentType: "text/html" });
+  });
+  await page.route("https://auth.middlewright.test/**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await route.fulfill({ body: `<h1>Something went wrong</h1>`, contentType: "text/html" });
+  });
+  await page.goto("https://app.middlewright.test/");
+  await page.evaluate(() => {
+    location.assign("https://auth.middlewright.test/consent");
+  });
+
+  const start = Date.now();
+  const error = await page
+    .getByRole("button", { name: "Allow access" })
+    .click()
+    .catch((e: Error) => e);
+
+  // The navigation is over and the document is complete: nothing is loading,
+  // so this is the ordinary no-spinner fast-fail — not a long wait.
+  expect(error).toBeInstanceOf(Error);
+  expect(String(error)).toMatch(/Timeout 1ms exceeded/);
+  expect(String(error)).toMatch(/add a spinner/i);
+  expect(Date.now() - start).toBeLessThan(6_000);
+});

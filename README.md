@@ -110,6 +110,8 @@ Fair enough — *inside* Playwright's watchdog architecture it may not be. But i
 
 The flagship. Before each action, if the target element isn't visible but a spinner is, waits (up to `spinnerTimeout`) for the element — bailing out early if the spinner disappears without producing it. If there's no spinner and the action fails, the error message suggests adding one:
 
+A document that hasn't finished loading counts as a spinner too: right after a cross-server hop (an OAuth popup, say) the page may still be fetching and rendering before its `load` event — no app spinner exists yet, but the browser's tab spinner is on — so actions wait through it the same way. That covers auto-wrapped OAuth popups without explicit timeouts.
+
 ```
 Timeout 1000ms exceeded.
   If this is a slow operation, update the product code to add a spinner while it's running.
