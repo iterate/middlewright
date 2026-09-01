@@ -20,19 +20,37 @@ const waypoints = Array.from({ length: SEGMENT_COUNT + 1 }, (_, index) => ({
   y: 10 + (index % 7) * 41,
 }));
 
-test("cursor expression depth stays constant no matter how many waypoints", () => {
+test("cursor expression tree depth stays logarithmic no matter how many waypoints", () => {
   for (const property of ["x", "y"] as const) {
     const expression = cursorExpression(waypoints, property);
     let depth = 0;
     let maxDepth = 0;
+    const plusPerGroup = [0];
+    let maxPlusPerGroup = 0;
     for (const char of expression) {
-      if (char === "(") maxDepth = Math.max(maxDepth, (depth += 1));
-      if (char === ")") depth -= 1;
+      if (char === "(") {
+        maxDepth = Math.max(maxDepth, (depth += 1));
+        plusPerGroup.push(0);
+      }
+      if (char === ")") {
+        depth -= 1;
+        plusPerGroup.pop();
+      }
+      if (char === "+") {
+        plusPerGroup[plusPerGroup.length - 1] += 1;
+        maxPlusPerGroup = Math.max(maxPlusPerGroup, plusPerGroup[plusPerGroup.length - 1]);
+      }
     }
     expect(depth).toBe(0);
-    // Comfortably inside ffmpeg 8's ~100-level cap, with headroom for the
-    // filter around it.
+    // Comfortably inside ffmpeg 8's ~100-level parse-nesting cap, with
+    // headroom for the filter around it.
     expect(maxDepth).toBeLessThan(32);
+    // ffmpeg also WALKS the tree recursively, and a flat `a+b+c+…` chain is
+    // one tree level per term — enough terms and ffmpeg dies with SIGBUS
+    // (~5000 terms on 8.0.1) with parenthesis depth staying low the whole
+    // time. Pairwise summing keeps every group at a single `+`, so this
+    // bound plus the parenthesis bound caps the real tree depth.
+    expect(maxPlusPerGroup).toBeLessThanOrEqual(1);
   }
 });
 
