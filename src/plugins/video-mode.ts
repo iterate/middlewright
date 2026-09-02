@@ -3038,16 +3038,56 @@ const cursorActivitySpan = (
   };
 };
 
-const cursorExpression = (waypoints: CursorWaypoint[], property: "x" | "y") => {
-  let expression = formatFilterNumber(waypoints[waypoints.length - 1][property]);
+// ffmpeg parses and evaluates expressions by walking the tree recursively, so
+// a plain `a+b+c+…` chain — left-associated, one tree level per term — is
+// still linear-depth and crashes ffmpeg outright (SIGBUS on 8.0.1) at around
+// 5000 terms. Sum pairwise instead: depth grows with log2 of the term count,
+// and because each combine is parenthesized, the parenthesis-depth assertion
+// in spec/video-mode-cursor-expression.spec.ts bounds the real tree depth.
+const balancedSum = (terms: string[]): string => {
+  if (terms.length === 1) {
+    return terms[0];
+  }
+  const paired: string[] = [];
+  for (let index = 0; index < terms.length; index += 2) {
+    paired.push(
+      index + 1 < terms.length ? `(${terms[index]}+${terms[index + 1]})` : terms[index],
+    );
+  }
+  return balancedSum(paired);
+};
 
-  for (let index = waypoints.length - 2; index >= 0; index -= 1) {
+// A sum, not a nested if-chain: ffmpeg 8 caps expression nesting at
+// ~100 levels, so one nested if() per waypoint segment made any test with
+// enough pointer-highlighted actions fail to render ("Missing ')' or too
+// many args"). The segments are consecutive disjoint time windows, so
+// exactly one term is non-zero at any t inside them; half-open gte/lt
+// windows (rather than between, which includes both ends) keep a shared
+// segment boundary from firing two terms and doubling the coordinate — the
+// successor's term at its start yields the same position the boundary frame
+// always had. Outside all segments (before the first waypoint, at/after the
+// last) the complement term supplies the last waypoint's position, the same
+// fallback the nested chain used; segments are consecutive waypoint pairs,
+// so their union is exactly [first waypoint, last waypoint) and one gte/lt
+// pair covers it. Nesting depth stays logarithmic no matter how long the
+// test is. Exported for spec/video-mode-cursor-expression.spec.ts, which holds
+// the depth and boundary-value guarantees; not part of the package surface.
+export const cursorExpression = (waypoints: CursorWaypoint[], property: "x" | "y") => {
+  const fallback = formatFilterNumber(waypoints[waypoints.length - 1][property]);
+  const terms: string[] = [];
+  let firstStart: number | undefined;
+  let lastEnd: number | undefined;
+
+  for (let index = 0; index < waypoints.length - 1; index += 1) {
     const from = waypoints[index];
     const to = waypoints[index + 1];
 
     if (to.at <= from.at) {
       continue;
     }
+
+    firstStart = firstStart === undefined ? from.at : Math.min(firstStart, from.at);
+    lastEnd = lastEnd === undefined ? to.at : Math.max(lastEnd, to.at);
 
     const start = formatSeconds(from.at);
     const end = formatSeconds(to.at);
@@ -3059,10 +3099,15 @@ const cursorExpression = (waypoints: CursorWaypoint[], property: "x" | "y") => {
         ? formatFilterNumber(from[property])
         : `(${formatFilterNumber(from[property])}+(${formatFilterNumber(delta)})*${eased})`;
 
-    expression = `if(between(t\\,${start}\\,${end})\\,${value}\\,${expression})`;
+    terms.push(`(gte(t\\,${start})*lt(t\\,${end}))*${value}`);
   }
 
-  return expression;
+  if (firstStart === undefined || lastEnd === undefined) {
+    return fallback;
+  }
+
+  const covered = `(gte(t\\,${formatSeconds(firstStart)})*lt(t\\,${formatSeconds(lastEnd)}))`;
+  return balancedSum([`(1-${covered})*${fallback}`, ...terms]);
 };
 
 const cursorOverlayFilters = (options: {
