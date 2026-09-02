@@ -261,6 +261,7 @@ test("reports timeout options without an explanation", async () => {
   const output = `${result.stdout}\n${result.stderr}`;
   expect(output).toContain("middlewright(require-timeout-comment)");
   expect(output).toContain("remove the timeout and add loading UI for spinnerWaiter");
+  expect(output).toContain("motionWaiter.settings.run({ enabled: true }");
   expect(output).toContain(
     "https://github.com/iterate/middlewright#dont-fix-slow-tests-with-longer-timeouts",
   );
@@ -448,6 +449,7 @@ test("reports bare waitForTimeout sleeps", async () => {
   const output = `${result.stdout}\n${result.stderr}`;
   expect(output).toContain("middlewright(require-timeout-comment)");
   expect(output).toContain("a sleep waits whether or not the app is ready");
+  expect(output).toContain("motionWaiter.settings.run({ enabled: true }");
   expect(await readFile(fixture.sourcePath, "utf8")).toBe(source);
 });
 
