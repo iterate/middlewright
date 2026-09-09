@@ -12,6 +12,37 @@ const execFile = promisify(execFileCallback);
 
 test.use({ video: "on" });
 
+test("renders the pointer after many actions", async ({ page }, testInfo) => {
+  const video = videoMode({
+    finalHold: 0,
+    highlight: { mode: "pointer", duration: 1 },
+    trimStart: "never",
+  });
+  {
+    await using plugged = await addPlugins({ page, plugins: [video], testInfo });
+    await plugged.setViewportSize({ width: 800, height: 600 });
+    await plugged.setContent(`
+      <style>
+        #actions { display: grid; gap: 8px; grid-template-columns: repeat(4, 120px); }
+        button { height: 36px; }
+      </style>
+      <main id="actions">
+        ${Array.from(
+          { length: 52 },
+          (_, index) => `<button id="action-${index}">Action ${index}</button>`,
+        ).join("")}
+      </main>
+    `);
+
+    for (let index = 0; index < 52; index += 1) {
+      await plugged.locator(`#action-${index}`).click();
+    }
+  }
+
+  expect((await video.metadata()).highlights).toHaveLength(52);
+  expect((await stat(video.outputPaths().rendered)).size).toBeGreaterThan(0);
+});
+
 test("renders a multi-navigation release flow without changing the live page", async ({
   page: basePage,
 }, testInfo) => {
