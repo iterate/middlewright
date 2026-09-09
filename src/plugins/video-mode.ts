@@ -3039,9 +3039,10 @@ const cursorActivitySpan = (
 };
 
 const cursorExpression = (waypoints: CursorWaypoint[], property: "x" | "y") => {
-  let expression = formatFilterNumber(waypoints[waypoints.length - 1][property]);
+  const restingValue = formatFilterNumber(waypoints[waypoints.length - 1][property]);
+  const segments: { end: string; start: string; value: string }[] = [];
 
-  for (let index = waypoints.length - 2; index >= 0; index -= 1) {
+  for (let index = 0; index < waypoints.length - 1; index += 1) {
     const from = waypoints[index];
     const to = waypoints[index + 1];
 
@@ -3059,10 +3060,21 @@ const cursorExpression = (waypoints: CursorWaypoint[], property: "x" | "y") => {
         ? formatFilterNumber(from[property])
         : `(${formatFilterNumber(from[property])}+(${formatFilterNumber(delta)})*${eased})`;
 
-    expression = `if(between(t\\,${start}\\,${end})\\,${value}\\,${expression})`;
+    segments.push({ end, start, value });
   }
 
-  return expression;
+  // A balanced tree keeps FFmpeg's expression nesting logarithmic as recordings grow.
+  const expressionForSegments = (startIndex: number, endIndex: number): string => {
+    if (endIndex - startIndex === 1) {
+      const segment = segments[startIndex];
+      return `if(between(t\\,${segment.start}\\,${segment.end})\\,${segment.value}\\,${restingValue})`;
+    }
+
+    const middle = startIndex + Math.floor((endIndex - startIndex) / 2);
+    return `if(lt(t\\,${segments[middle].start})\\,${expressionForSegments(startIndex, middle)}\\,${expressionForSegments(middle, endIndex)})`;
+  };
+
+  return segments.length === 0 ? restingValue : expressionForSegments(0, segments.length);
 };
 
 const cursorOverlayFilters = (options: {
