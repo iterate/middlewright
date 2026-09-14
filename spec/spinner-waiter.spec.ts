@@ -30,6 +30,28 @@ test("slow button succeeds when there's a spinner", async ({ page }) => {
   await page.getByText("work done").waitFor();
 });
 
+test("inputValue waits for a loading composer and returns its value", async ({ page }) => {
+  await page.setContent(`
+    <p data-spinner="true">Opening chat…</p>
+    <script>
+      setTimeout(() => {
+        document.body.innerHTML = '<textarea aria-label="Message">About my edited note</textarea>';
+      }, 2000);
+    </script>
+  `);
+  expect(await page.getByLabel("Message").inputValue()).toBe("About my edited note");
+});
+
+test("inputValue preserves an explicit timeout and can read disabled inputs", async ({ page }) => {
+  await page.setContent('<input aria-label="Saved note" disabled value="green apples">');
+  expect(await page.getByLabel("Saved note").inputValue()).toBe("green apples");
+  await page.setContent('<p data-spinner="true">Opening chat…</p>');
+  // Explicit timeout must bypass spinner-waiter even while progress is visible.
+  await expect(page.getByLabel("Missing").inputValue({ timeout: 100 })).rejects.toThrow(
+    /Timeout 100ms exceeded/,
+  );
+});
+
 test("visible disabled button succeeds when there's a spinner", async ({ page }) => {
   await page.setContent(`
     <button
