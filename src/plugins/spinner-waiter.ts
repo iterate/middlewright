@@ -134,6 +134,10 @@ export const spinnerWaiter = Object.assign(
         const loading = await loadingVisible(page, spinnerLocator);
 
         if (!loading) {
+          // The target may have appeared while we checked loading. Do not
+          // turn a now-ready action into a 1ms timeout just because its
+          // spinner disappeared between the two observations.
+          if (await locatorIsReady(locator, method)) return next();
           // No spinner, no navigation - call action, suggest a spinner if it fails
           settings.log(`${locator} not ready, nothing loading, failing fast`);
           try {

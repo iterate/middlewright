@@ -1,4 +1,4 @@
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, selectors } from "@playwright/test";
 import { addPlugins, defaultSelectors, spinnerWaiter, type Plugin } from "../src/index.ts";
 
 const test = base.extend<{ slowMutationTimeout: number }>({
@@ -117,6 +117,33 @@ test("fails before a late spinner can make the no-spinner hint misleading", asyn
   expect(error?.message).toMatch(/If this is a slow operation.../);
   expect(elapsed).toBeLessThan(1500); // we don't tolerate the spinner taking a long time to appear
 });
+
+base(
+  "a control becoming ready during the loading check keeps its normal action budget",
+  async ({ page: basePage }, testInfo) => {
+    // Finish the UI update exactly when loading is checked, after the initial
+    // readiness check. The selector controls scheduling; the click is real.
+    await selectors.register("complete_spinner", () => ({
+      query: () => null,
+      queryAll(root: Document | Element) {
+        root.querySelector("button")?.removeAttribute("disabled");
+        root.querySelector("#spinner")?.remove();
+        return [];
+      },
+    }));
+    await using page = await addPlugins({
+      page: basePage,
+      testInfo,
+      plugins: [spinnerWaiter({ spinnerSelectors: ["complete_spinner=now"] })],
+    });
+    await page.setContent(`
+    <button disabled onclick="this.textContent = 'submitted'">Submit</button>
+    <p id="spinner">Loading…</p>
+  `);
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
+    await page.getByRole("button", { name: "submitted", exact: true }).waitFor();
+  },
+);
 
 base("no-spinner fast fail still runs later middleware", async ({ page: basePage }, testInfo) => {
   const calls: string[] = [];
