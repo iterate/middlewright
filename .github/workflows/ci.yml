@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, fix/input-value-loading]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
       - run: pnpm exec playwright install chromium --with-deps
       - run: pnpm test
       - run: pnpm exec pkg-pr-new publish --packageManager=pnpm
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/fix/input-value-loading'
+        if: github.event_name == 'pull_request'
       - uses: actions/upload-artifact@v5
         if: failure()
         with:
