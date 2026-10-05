@@ -7,7 +7,7 @@ size: medium
 
 **Status summary**: done. All three symptoms came from the timeline calibration failing on a padded screencast, plus the popup having no notion of "the test went back to the opener". Fixed: cover detection ignores the recorder's padding, the wall→raw offset may be negative, a left-open popup slides away when the test returns to its opener (on a short freeze of the composite), and teardown no longer counts as test time. Nothing known missing; follow-ups listed at the bottom.
 
-Seen recording iterate/private's `test/playwright/ui/sign-in.spec.ts` (branch `nobuild-pages-sign-in`), test "a page in a jsfiddle signs in…". The main page clicks a button inside an iframe, a popup opens, the test acts in the popup, then `page.reload()`s the main page and carries on there. The popup is never closed. Viewport 1280x900.
+Seen recording a sign-in spec in another repo. The main page clicks a button inside an iframe, a popup opens, the test acts in the popup, then `page.reload()`s the main page and carries on there. The popup is never closed. Viewport 1280x900.
 
 In `video-rendered.webm`:
 
