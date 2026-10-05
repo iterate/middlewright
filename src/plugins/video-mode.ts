@@ -4835,6 +4835,8 @@ const compositeChildOverlays = async (options: {
   freezes: VideoModeFreeze[];
   inputPath: string;
   layers: VideoModeChildLayer[];
+  /** How far the parent's footage is held back (ms); its first frame fills the gap. */
+  leadInMs: number;
   openerHolds: VideoModeSpan[];
   outputPath: string;
 }) => {
@@ -4867,10 +4869,16 @@ const compositeChildOverlays = async (options: {
   // The parent screencast is as sparse as the child ones (a static page emits
   // no frames), and overlay only emits output at primary-input frame times —
   // without resampling, the whole popup window can contain zero composite
-  // frames. A continuous base gives every enable window frames to land on
-  // (and, from t=0, stands in for frames an opener hold dropped at the start).
+  // frames. A continuous base gives every enable window frames to land on —
+  // from t=0, so its first frame stands in for the lead-in and for frames an
+  // opener hold dropped at the start.
   filters.push(
-    `[0:v]${[...openerHold, ...freeze, `fps=${formatFilterNumber(options.fps)}:start_time=0`].join(",")}[base]`,
+    `[0:v]${[
+      `setpts=PTS+${formatSeconds(options.leadInMs)}/TB`,
+      ...openerHold,
+      ...freeze,
+      `fps=${formatFilterNumber(options.fps)}:start_time=0`,
+    ].join(",")}[base]`,
   );
   let currentLabel = "base";
 
@@ -5744,30 +5752,47 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             detectedCoverStartMs > calibrationCoverMarginMs(rawVideoInfo.frameDurationMs)
               ? detectedCoverStartMs
               : undefined;
-          // Two readings of the same raw-minus-clock offset. Negative is
-          // ordinary: the recorder's first frame lands ~100ms after
-          // videoMode's clock zero, so the opening stretch of the test has no
-          // footage and everything after it sits that much EARLIER in the raw
-          // than on the clock (translated times clamp at footage 0 one by
-          // one; clamping the offset itself would leave the footage running
-          // ahead of every annotation).
-          //
-          // Each reading has its own way of coming out LATE — the cover's
-          // first frame reaching the screencast after the moment videoMode
-          // guessed it painted, the endpoint landing a second out whenever
-          // the page was still producing frames at close (Playwright pads the
-          // last frame it received by >=1s). Late is the harmful direction: an
-          // action's result plays before its own highlight. Early by a frame
-          // or two is invisible, so the earlier reading wins.
+          // Two readings of the raw-minus-clock offset, and two ways to be
+          // wrong. The endpoint reading lands about a second LATE whenever the
+          // page was still producing frames at close (Playwright pads the last
+          // frame it received by >=1s); late is the harmful direction — an
+          // action's result plays before its own highlight — so it may only
+          // pull the offset earlier. The cover reading is the sharper one, but
+          // a negative one (the recorder's first frame landed after
+          // videoMode's clock zero: ordinary, ~100ms) moves the whole render
+          // off the test's clock, so it needs the endpoint to agree before it
+          // goes below zero.
           const endpointOffset =
             recordingEndedAt === undefined ? 0 : rawVideoInfo.durationMs - recordingEndedAt;
-          const sourceOffset =
+          const coverOffset =
             coverStartMs !== undefined && coverPaintedAt !== undefined
-              ? Math.min(coverStartMs - coverPaintedAt, endpointOffset)
-              : endpointOffset;
+              ? coverStartMs - coverPaintedAt
+              : undefined;
+          const sourceOffset =
+            coverOffset === undefined
+              ? endpointOffset
+              : Math.min(Math.max(0, coverOffset), endpointOffset);
           const timelineOffset =
             Math.floor(sourceOffset / rawVideoInfo.frameDurationMs) *
             rawVideoInfo.frameDurationMs;
+          // What that leaves uncorrected is footage running ahead of its
+          // annotations by the part of a negative cover reading the endpoint
+          // didn't confirm. Under a popup that shows: the opener's state from
+          // a moment later. The composite re-times the footage anyway, so it
+          // holds the opener's back by the difference — its first frame fills
+          // the gap, and every raw time below shifts with it.
+          const footageLeadInMs =
+            coverOffset === undefined || !metadataBeforeVideo.children.some((child) => child.raw)
+              ? 0
+              : timelineOffset -
+                Math.floor(
+                  Math.min(coverOffset, endpointOffset) / rawVideoInfo.frameDurationMs,
+                ) *
+                  rawVideoInfo.frameDurationMs;
+          const footageInfo = {
+            ...rawVideoInfo,
+            durationMs: rawVideoInfo.durationMs + footageLeadInMs,
+          };
           const rawTimeline = translateVideoTimeline({
             addressBars,
             captions,
@@ -5775,30 +5800,33 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             highlights,
             offsetMs: timelineOffset,
           });
-          // Where the footage worth rendering ends, on the raw clock: the end
-          // of the test, capped before the cover. The cover is never wanted
-          // footage — this cap is what stops the tail cover playing as a black
-          // flash. One frame of margin absorbs the detector's sampling
-          // granularity (its timestamp can land a tick late).
+          // Where the footage worth rendering ends: the end of the test,
+          // capped before the cover. The cover is never wanted footage — this
+          // cap is what stops the tail cover playing as a black flash. One
+          // frame of margin absorbs the detector's sampling granularity (its
+          // timestamp can land a tick late).
           const endpointEnd = Math.round(renderEndedAt + sourceOffset);
           const coverCap =
             coverStartMs === undefined
               ? undefined
               : Math.max(
                   0,
-                  coverStartMs - calibrationCoverMarginMs(rawVideoInfo.frameDurationMs),
+                  coverStartMs +
+                    footageLeadInMs -
+                    calibrationCoverMarginMs(rawVideoInfo.frameDurationMs),
                 );
           const footageEndMs =
             recordingEndedAt === undefined
-              ? rawVideoInfo.durationMs
+              ? footageInfo.durationMs
               : coverCap === undefined
                 ? endpointEnd
                 : Math.min(endpointEnd, coverCap);
 
           // Popup composite (pass A): overlay each popup's screencast onto the
           // raw footage, then annotate that composite instead of the raw. The
-          // composite runs on the raw timeline plus a freeze per popup exit, so
-          // everything downstream moves onto that clock here and nowhere else.
+          // composite runs on the raw timeline plus the lead-in and a freeze
+          // per popup exit, so everything downstream moves onto that clock
+          // here and nowhere else.
           let renderInputPath = paths.raw;
           // Popup enter/exit animations must reach the output even when a
           // hold's overlap-skip would jump across them.
@@ -5825,10 +5853,10 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             openerHighlights: rawTimeline.highlights,
             outputDir: testInfo.outputDir,
             timelineOffsetMs: timelineOffset,
-            video: rawVideoInfo,
+            video: footageInfo,
           });
           const renderTimeline = compositeVideoTimeline(rawTimeline, freezes);
-          if (childLayers.length > 0) {
+          if (childLayers.length > 0 || footageLeadInMs > 0) {
             const compositePath = join(
               testInfo.outputDir,
               suffixArtifactFileName(VIDEO_MODE_COMPOSITE_FILE, state.artifactSuffix),
@@ -5838,6 +5866,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               freezes,
               inputPath: paths.raw,
               layers: childLayers,
+              leadInMs: footageLeadInMs,
               openerHolds,
               outputPath: compositePath,
             });
@@ -5931,8 +5960,8 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               detectedStart >= TRIM_START_MIN_LEAD_IN_MS &&
               annotationSourceRange.start === undefined
             ) {
-              state.sourceRange.start = detectedStart;
-              sourceRange.start = detectedStart;
+              state.sourceRange.start = detectedStart + footageLeadInMs;
+              sourceRange.start = detectedStart + footageLeadInMs;
             }
           }
 
