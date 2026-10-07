@@ -120,18 +120,44 @@ export const spinnerWaiter = Object.assign(
         const start = Date.now();
         settings.log(`${locator}.${method}(...) starting`);
 
-        // Quick check if element is already ready for the attempted action.
-        const elementReady = await waitForReady(locator, method, { timeout: 1000 });
-        if (elementReady) {
-          settings.log(`${locator} already ready, proceeding`);
-          return next();
-        }
-
-        // Check for loading UI: an app spinner, or a navigation in flight
-        // (loading UI the app cannot draw itself — see loadingVisible).
         const spinnerSelector = settings.spinnerSelectors.join(",");
         const spinnerLocator = page.locator(spinnerSelector) as LocatorWithOriginal;
-        const loading = await loadingVisible(page, spinnerLocator);
+        // All waiting here, quick checks included, ends at the deadline; the
+        // action's own timeout gets the last second.
+        const deadline = start + settings.spinnerTimeout - 1000;
+
+        // Quick check if element is already ready for the attempted action,
+        // otherwise check for loading UI: an app spinner, or a navigation in
+        // flight (loading UI the app cannot draw itself — see loadingVisible).
+        //
+        // Both describe whatever document the page shows at the time, and the
+        // main frame can navigate in between: the quick check spends its
+        // second on the page a click left behind, or the loading check reads
+        // readyState from the old document and counts spinners once the new
+        // one has committed (Chromium holds locator queries while a navigation
+        // is in flight; a query that loses its document reports "not visible"
+        // and 0). A fast-fail would then hit a document that never had its
+        // second, so after a navigation the quick check runs again. A page
+        // still navigating at the deadline counts as loading.
+        let navigations = mainFrameNavigations(page);
+        let loading: boolean;
+        for (;;) {
+          if (await waitForReady(locator, method, { timeout: 1000 })) {
+            settings.log(`${locator} already ready, proceeding`);
+            return next();
+          }
+          loading = await loadingVisible(page, spinnerLocator);
+          const seen = mainFrameNavigations(page);
+          if (loading || seen === navigations) break;
+          if (Date.now() >= deadline) {
+            loading = true;
+            break;
+          }
+          navigations = seen;
+          settings.log(
+            `The main frame navigated while checking, giving the new document its own quick check`,
+          );
+        }
 
         if (!loading) {
           // No spinner, no navigation - call action, suggest a spinner if it fails
@@ -144,14 +170,13 @@ export const spinnerWaiter = Object.assign(
           }
         }
 
-        settings.log(
-          `Loading (spinner or navigation), waiting up to ${settings.spinnerTimeout - 2000}ms for ${locator}`,
-        );
+        const remaining = Math.max(0, deadline - Date.now());
+        settings.log(`Loading (spinner or navigation), waiting up to ${remaining}ms for ${locator}`);
 
         // Something is loading — wait for the element, but bail early once loading
         // finishes (the operation completed without producing the expected element).
         const waitResult = await waitForReadyWhileSpinning(locator, method, page, spinnerLocator, {
-          timeout: settings.spinnerTimeout - 2000,
+          timeout: remaining,
         });
 
         if (waitResult === "appeared") {
@@ -277,10 +302,13 @@ async function loadingVisible(page: Page, spinnerLocator: Locator): Promise<bool
  * A document still loading is loading UI the app cannot draw itself. The
  * reference is the browser's own tab spinner: it stays on until the document
  * fires `load` (readyState !== "complete"), and no execution context to ask
- * (the gap while a navigation commits) counts too. Playwright's locator
- * queries already wait for a pending navigation to commit, so this covers the
- * window after that: a cold page rendering its UI client-side before `load`.
- * The spinner grace period and timeout bound it, as for an app spinner.
+ * (the gap while a navigation commits) counts too. Chromium holds evaluations
+ * and locator queries while a navigation is in flight (DevTools suspends
+ * renderer-bound commands from DidStartNavigation to DidFinishNavigation); a
+ * query that loses its document reports "not visible" or 0, a fresh one sees
+ * the new document. So this covers the window after that: a cold page
+ * rendering its UI client-side before `load`. The spinner grace period and
+ * timeout bound it, as for an app spinner.
  */
 async function pageIsNavigating(page: Page): Promise<boolean> {
   if (page.isClosed()) return false;
@@ -295,6 +323,29 @@ async function pageIsNavigating(page: Page): Promise<boolean> {
     new Promise<"no-context">((resolve) => setTimeout(() => resolve("no-context"), 250)),
   ]);
   return readyState !== "complete";
+}
+
+/**
+ * How often the page's main frame has navigated since spinner-waiter first
+ * looked at the page: new documents and same-document navigations alike
+ * (pushState, hash changes — Playwright's framenavigated does not tell them
+ * apart, and a route change can bring new loading UI as much). A changed
+ * count means an earlier check may describe a page that is gone. A failed
+ * navigation does not count; Chromium's error page commit does.
+ */
+const navigationCounts = new WeakMap<Page, number>();
+
+function mainFrameNavigations(page: Page): number {
+  let count = navigationCounts.get(page);
+  if (count === undefined) {
+    count = 0;
+    navigationCounts.set(page, count);
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      navigationCounts.set(page, (navigationCounts.get(page) ?? 0) + 1);
+    });
+  }
+  return count;
 }
 
 /**

@@ -1,3 +1,5 @@
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { test as base, expect } from "@playwright/test";
 import { addPlugins, defaultSelectors, spinnerWaiter, type Plugin } from "../src/index.ts";
 
@@ -317,9 +319,122 @@ test("fails fast once a navigation has fully loaded without the expected element
     .catch((e: Error) => e);
 
   // The navigation is over and the document is complete: nothing is loading,
-  // so this is the ordinary no-spinner fast-fail — not a long wait.
+  // so this is the ordinary no-spinner fast-fail — not a long wait. When the
+  // commit lands inside the quick check, the new document gets one more
+  // second first.
   expect(error).toBeInstanceOf(Error);
   expect(String(error)).toMatch(/Timeout 1ms exceeded/);
   expect(String(error)).toMatch(/add a spinner/i);
   expect(Date.now() - start).toBeLessThan(6_000);
 });
+
+test("waits through a redirect chain whose landing page draws its spinner after it commits", async ({
+  page,
+}) => {
+  // A Connect button first creates the integration over fetch (no loading UI
+  // of its own), then follows a server redirect chain the way an OAuth
+  // connection does: consent, callback, project page. The project page
+  // commits inside spinner-waiter's 1s quick check and draws its loading
+  // state 850ms after that (a data fetch after hydration), then the result.
+  //
+  // From the click, in ms: fetch resolves ~400, consent 302 ~550, callback
+  // 302 ~700, project page commits ~750, spinner ~1600, result ~3250. The
+  // quick check spends most of its second on the page the click left, so the
+  // loading check runs ~1050ms in: the project page is complete and has not
+  // drawn its spinner yet. Unless the new document gets a quick check of its
+  // own, that reads as "nothing loading" and fast-fails at 1ms mid-flow.
+  // (A very slow runner can shift that ordering so the old code passes too;
+  // the fix passes in every ordering.)
+  await using app = await serveConnectFlow();
+  await page.goto(app.url);
+  await page
+    .getByRole("button", { name: "Connect GitHub" })
+    // noWaitAfter: the click must not wait for a navigation it sets off.
+    .click({ noWaitAfter: true });
+  await page.getByText("GitHub connected").waitFor();
+});
+
+test("gives up on a page that keeps navigating and blames the navigation", async ({ page }) => {
+  // A page that reloads itself every 300ms never gives the target a chance
+  // and never shows a spinner. Each navigation would buy the new document
+  // another quick check; the deadline (spinnerTimeout minus the action's
+  // last second) stops that and reports a navigation still in flight instead
+  // of the no-spinner hint.
+  await page.route("https://app.middlewright.test/**", async (route) => {
+    await route.fulfill({
+      body: `<h1>Reload loop</h1><script>setTimeout(() => location.reload(), 300)</script>`,
+      contentType: "text/html",
+    });
+  });
+  await page.goto("https://app.middlewright.test/");
+  spinnerWaiter.settings.enterWith({ spinnerTimeout: 3001 });
+
+  const start = Date.now();
+  const error = await page.getByText("Settled").waitFor().catch((e: Error) => e);
+
+  expect(error).toBeInstanceOf(Error);
+  expect(String(error)).toMatch(/navigation was still in flight/);
+  expect(Date.now() - start).toBeLessThan(6_000);
+});
+
+/**
+ * A tiny app on 127.0.0.1 whose Connect button creates the integration over
+ * fetch and then follows the OAuth-style redirect chain consent → callback →
+ * project page. Real HTTP, because Chromium follows a route-fulfilled 302
+ * without passing the next hop back through page.route.
+ */
+async function serveConnectFlow() {
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const pages: Record<string, string> = {
+    "/": `
+      <button id="connect">Connect GitHub</button>
+      <script>
+        document.querySelector("#connect").addEventListener("click", async () => {
+          const response = await fetch("/api/connect", { method: "POST" });
+          location.assign((await response.json()).url);
+        });
+      </script>
+    `,
+    "/project": `
+      <h1>Project</h1>
+      <div id="integrations"></div>
+      <script>
+        const integrations = document.querySelector("#integrations");
+        setTimeout(() => { integrations.innerHTML = '<p aria-label="Loading">Loading integrations…</p>'; }, 850);
+        setTimeout(() => { integrations.textContent = "GitHub connected"; }, 2500);
+      </script>
+    `,
+  };
+  const server = http.createServer(async (request, response) => {
+    const { pathname } = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (pathname === "/api/connect") {
+      await delay(400);
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ url: "/oauth/consent" }));
+    } else if (pathname === "/oauth/consent") {
+      await delay(150);
+      response.writeHead(302, { location: "/oauth/callback?code=1" }).end();
+    } else if (pathname === "/oauth/callback") {
+      await delay(150);
+      response.writeHead(302, { location: "/project" }).end();
+    } else if (pathname in pages) {
+      response.setHeader("content-type", "text/html");
+      response.end(pages[pathname]);
+    } else {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/`,
+    [Symbol.asyncDispose]: async () => {
+      const closed = new Promise((resolve) => server.close(resolve));
+      server.closeAllConnections();
+      await closed;
+    },
+  };
+}
