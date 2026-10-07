@@ -1,6 +1,6 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, selectors } from "@playwright/test";
 import { addPlugins, defaultSelectors, spinnerWaiter, type Plugin } from "../src/index.ts";
 
 const test = base.extend<{ slowMutationTimeout: number }>({
@@ -30,6 +30,28 @@ const test = base.extend<{ slowMutationTimeout: number }>({
 test("slow button succeeds when there's a spinner", async ({ page }) => {
   await page.getByText("start work").click();
   await page.getByText("work done").waitFor();
+});
+
+test("inputValue waits for a loading composer and returns its value", async ({ page }) => {
+  await page.setContent(`
+    <p data-spinner="true">Opening chat…</p>
+    <script>
+      setTimeout(() => {
+        document.body.innerHTML = '<textarea aria-label="Message">About my edited note</textarea>';
+      }, 2000);
+    </script>
+  `);
+  expect(await page.getByLabel("Message").inputValue()).toBe("About my edited note");
+});
+
+test("inputValue preserves an explicit timeout and can read disabled inputs", async ({ page }) => {
+  await page.setContent('<input aria-label="Saved note" disabled value="green apples">');
+  expect(await page.getByLabel("Saved note").inputValue()).toBe("green apples");
+  await page.setContent('<p data-spinner="true">Opening chat…</p>');
+  // Explicit timeout must bypass spinner-waiter even while progress is visible.
+  await expect(page.getByLabel("Missing").inputValue({ timeout: 100 })).rejects.toThrow(
+    /Timeout 100ms exceeded/,
+  );
 });
 
 test("visible disabled button succeeds when there's a spinner", async ({ page }) => {
@@ -97,6 +119,33 @@ test("fails before a late spinner can make the no-spinner hint misleading", asyn
   expect(error?.message).toMatch(/If this is a slow operation.../);
   expect(elapsed).toBeLessThan(1500); // we don't tolerate the spinner taking a long time to appear
 });
+
+base(
+  "a control becoming ready during the loading check keeps its normal action budget",
+  async ({ page: basePage }, testInfo) => {
+    // Finish the UI update exactly when loading is checked, after the initial
+    // readiness check. The selector controls scheduling; the click is real.
+    await selectors.register("complete_spinner", () => ({
+      query: () => null,
+      queryAll(root: Document | Element) {
+        root.querySelector("button")?.removeAttribute("disabled");
+        root.querySelector("#spinner")?.remove();
+        return [];
+      },
+    }));
+    await using page = await addPlugins({
+      page: basePage,
+      testInfo,
+      plugins: [spinnerWaiter({ spinnerSelectors: ["complete_spinner=now"] })],
+    });
+    await page.setContent(`
+    <button disabled onclick="this.textContent = 'submitted'">Submit</button>
+    <p id="spinner">Loading…</p>
+  `);
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
+    await page.getByRole("button", { name: "submitted", exact: true }).waitFor();
+  },
+);
 
 base("no-spinner fast fail still runs later middleware", async ({ page: basePage }, testInfo) => {
   const calls: string[] = [];

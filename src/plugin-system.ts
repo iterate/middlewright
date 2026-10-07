@@ -27,6 +27,7 @@ const overrideableMethods = [
   "blur",
   "focus",
   "hover",
+  "inputValue",
   ...oneArgMethods,
 ] satisfies (keyof Locator)[];
 type OverrideableMethod = (typeof overrideableMethods)[number];

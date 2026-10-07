@@ -2,7 +2,7 @@
 
 A plugin/middleware system for Playwright locator actions — the one Playwright doesn't have.
 
-Wrap `click`, `fill`, `waitFor` and friends with composable middleware, so your tests can be smart about *why* an action is slow or failing, without sprinkling `waitForSomething()` helpers through every test.
+Wrap `click`, `fill`, `inputValue`, `waitFor` and friends with composable middleware, so your tests can be smart about *why* an action is slow or failing, without sprinkling `waitForSomething()` helpers through every test.
 
 ## Quick start
 
@@ -523,7 +523,7 @@ configured pattern must match the nearby comment:
 
 ## How it works
 
-`addPlugins` patches `Locator.prototype` (once per process), replacing `click`, `dblclick`, `fill`, `type`, `press`, `clear`, `blur`, `focus`, `hover` and `waitFor` with a dispatcher. The dispatcher looks up the plugin state stored on the action's page; if the page has plugins, it runs the middleware chain (each middleware calling `next()` until the original method runs); if not, it calls the original method directly.
+`addPlugins` patches `Locator.prototype` (once per process), replacing `click`, `dblclick`, `fill`, `type`, `press`, `clear`, `blur`, `focus`, `hover`, `inputValue` and `waitFor` with a dispatcher. The dispatcher looks up the plugin state stored on the action's page; if the page has plugins, it runs the middleware chain (each middleware calling `next()` until the original method runs); if not, it calls the original method directly.
 
 To keep Playwright's HTML report pointing at *your test code* rather than plugin internals, it registers the plugin files with playwright-core's internal `setBoxedStackPrefixes` — the same mechanism Playwright uses to hide its own frames. This is the unofficial-API part of the hack; set `PLAYWRIGHT_PLUGIN_DEBUG=1` to disable it when debugging the plugins themselves.
 
@@ -546,3 +546,5 @@ Extracted from the internal test infrastructure of the [iterate](https://github.
 ## License
 
 MIT
+
+`inputValue()` uses the same loading-aware wait when the input has not appeared yet, then returns its current value. It does not wait for a particular value; an explicit timeout still passes through unchanged.
