@@ -317,6 +317,13 @@ type VideoModeState = {
   outputs: VideoModeOutputs;
   sourceRange: VideoModeSourceRange;
   startedAt?: number;
+  /**
+   * When the test body finished, on this instance's clock. Stamped by the
+   * first finalizer to run — popup recorders finalize before their parent, and
+   * each spends over a second settling its recorder, which is teardown, not
+   * test time.
+   */
+  endedAt?: number;
 };
 
 type VideoModeDialogLayout = {
@@ -614,6 +621,14 @@ const calibrationCoverMarginMs = (frameDurationMs: number) =>
 const CALIBRATION_COVER_CHANNEL_TOLERANCE = 8;
 const CALIBRATION_COVER_RGB = [1, 2, 3];
 
+// Playwright's recorder scales each screencast frame to fit the video size and
+// pads the rest with gray (right and bottom). A viewport that doesn't scale
+// evenly into the video — 1280x900 into 800x562 leaves a 2px strip — therefore
+// has pixels the cover can never reach; the cover is looked for only inside
+// the screencast's own area, this far in from its computed edge (Chrome rounds
+// the frame size down to even numbers).
+const CALIBRATION_COVER_EDGE_INSET_PX = 4;
+
 /**
  * Raw-clock timestamp (ms) of the first frame of the recording's TRAILING
  * calibration-cover run, or undefined when the recording doesn't end on the
@@ -621,9 +636,21 @@ const CALIBRATION_COVER_RGB = [1, 2, 3];
  * backwards from the end means an app that legitimately paints near-black
  * mid-test can never match — only the tail the cover owns.
  */
-const detectCalibrationCoverStartMs = async (inputPath: string): Promise<number | undefined> => {
+const detectCalibrationCoverStartMs = async (options: {
+  inputPath: string;
+  video: { height: number; width: number };
+  /** The recorded page's viewport; undefined when it isn't emulated. */
+  viewport: VideoModeViewport | undefined;
+}): Promise<number | undefined> => {
   const size = VIDEO_ANALYSIS_SAMPLE_SIZE;
   const frameSize = size * size * 3;
+  const screencast = options.viewport
+    ? scaledViewportSize(options.viewport, options.video)
+    : options.video;
+  const crop = {
+    height: Math.max(1, screencast.height - CALIBRATION_COVER_EDGE_INSET_PX),
+    width: Math.max(1, screencast.width - CALIBRATION_COVER_EDGE_INSET_PX),
+  };
   let stdout: Buffer;
   try {
     const result = await execFile(
@@ -633,9 +660,9 @@ const detectCalibrationCoverStartMs = async (inputPath: string): Promise<number 
         "-loglevel",
         "error",
         "-i",
-        inputPath,
+        options.inputPath,
         "-vf",
-        `fps=${CALIBRATION_COVER_SAMPLE_FPS},scale=${size}:${size}`,
+        `fps=${CALIBRATION_COVER_SAMPLE_FPS},crop=${crop.width}:${crop.height}:0:0,scale=${size}:${size}`,
         "-f",
         "rawvideo",
         "-pix_fmt",
@@ -4557,17 +4584,30 @@ const CHILD_OVERLAY_FADE_MS = 300;
 const CHILD_ENTRY_PACING_MS = CHILD_OVERLAY_FADE_MS + 150;
 // Bounds the load wait so a popup that never fires load can't hang the test.
 const CHILD_ENTRY_LOAD_TIMEOUT_MS = 5000;
+// Popup holds freeze composite footage (a popup's screenshots can't stand in
+// for it), so the popup's last highlighted state has to be in its screencast
+// for a few frames before the teardown cover replaces it. Only a test that
+// ends within moments of a popup action waits for this.
+const CHILD_FINAL_STATE_HOLD_MS = 150;
+// While Playwright holds a newborn popup paused for its debugger, Chrome dims
+// the OPENER and paints "Debugger paused in another tab" across it, and the
+// opener's screencast sometimes catches that. The composite drops the opener's
+// frames around each popup's birth and repeats the one before; this long
+// covers the pause plus the calibration's early bias.
+const CHILD_BIRTH_OPENER_HOLD_MS = 240;
 
-/** A popup screencast placed on the parent timeline as a scaled overlay. */
+/** A popup screencast placed on the composite timeline as a scaled overlay. */
 type VideoModeChildLayer = {
   child: VideoModeChild;
-  /** Composite-time close (ms) — where the exit fade starts. */
+  /** Composite-time close (ms) — where the exit animation starts. */
   closeMs: number;
-  /** Shift applied to child-raw frames to land them in composite time (ms). */
+  /** Shift applied to child-raw frames to land them on the parent raw clock (ms). */
   delayMs: number;
-  /** Overlay visibility window in composite time (ms), including exit fade. */
+  /** Overlay visibility window in composite time (ms), including the exit. */
   enableFromMs: number;
   enableToMs: number;
+  /** False for a popup still up when the footage ends: nothing to exit into. */
+  exits: boolean;
   /** Scaled placement in composite pixels, centered and even-sized. */
   height: number;
   width: number;
@@ -4577,13 +4617,78 @@ type VideoModeChildLayer = {
   rawInfo: VideoInfo;
 };
 
+/**
+ * A pause spliced into the composite: from `atMs` on the parent raw clock,
+ * every source holds its frame for `durationMs` while a popup overlay animates
+ * out. The exit needs time of its own because the footage has none to spare —
+ * the test can act on the opener the instant it leaves the popup, and those
+ * frames must not play underneath a half-gone overlay.
+ */
+type VideoModeFreeze = { atMs: number; durationMs: number };
+
+/** Composite time (ms) of a parent-raw instant: after every freeze at or before it. */
+const compositeTimeMs = (freezes: VideoModeFreeze[], rawMs: number) =>
+  freezes.reduce((ms, freeze) => (freeze.atMs <= rawMs ? ms + freeze.durationMs : ms), rawMs);
+
+/** Like `compositeTimeMs`, for where a span ENDS: before a freeze starting right there. */
+const compositeEndMs = (freezes: VideoModeFreeze[], rawMs: number) =>
+  freezes.reduce((ms, freeze) => (freeze.atMs < rawMs ? ms + freeze.durationMs : ms), rawMs);
+
+/**
+ * Move a parent-raw timeline onto the composite clock. Highlights and address
+ * bars shift whole (their `end - start` is a rendered duration, not footage);
+ * captions and dead air are footage spans, so one containing a freeze grows.
+ */
+const compositeVideoTimeline = (
+  timeline: ReturnType<typeof translateVideoTimeline>,
+  freezes: VideoModeFreeze[],
+): ReturnType<typeof translateVideoTimeline> => {
+  const span = (rawSpan: VideoModeSpan): VideoModeSpan => ({
+    end: compositeEndMs(freezes, rawSpan.end),
+    start: compositeTimeMs(freezes, rawSpan.start),
+  });
+  return {
+    addressBars: timeline.addressBars.map((addressBar) => {
+      const shiftMs = compositeTimeMs(freezes, addressBar.start) - addressBar.start;
+      return { ...addressBar, end: addressBar.end + shiftMs, start: addressBar.start + shiftMs };
+    }),
+    captions: timeline.captions.map((caption) => ({ ...caption, ...span(caption) })),
+    deadAir: timeline.deadAir.map(span),
+    highlights: timeline.highlights.map((highlight) => {
+      const shiftMs = compositeTimeMs(freezes, highlight.start) - highlight.start;
+      return {
+        ...highlight,
+        actionEnd: highlight.actionEnd === undefined ? undefined : highlight.actionEnd + shiftMs,
+        end: highlight.end + shiftMs,
+        sourceFrameAt:
+          highlight.sourceFrameAt === undefined ? undefined : highlight.sourceFrameAt + shiftMs,
+        start: highlight.start + shiftMs,
+      };
+    }),
+  };
+};
+
 const childCompositeLayers = async (options: {
   children: VideoModeChild[];
+  /** How long each exit freeze holds (ms): the animation plus settle time. */
+  exitFreezeMs: number;
+  /** Parent-raw time (ms) the rendered footage ends: test end, short of the cover. */
+  footageEndMs: number;
+  /** The opener's highlights on the parent raw clock. */
+  openerHighlights: VideoModeHighlight[];
   outputDir: string;
   timelineOffsetMs: number;
   video: VideoInfo;
-}): Promise<VideoModeChildLayer[]> => {
-  const layers: VideoModeChildLayer[] = [];
+}): Promise<{
+  freezes: VideoModeFreeze[];
+  layers: VideoModeChildLayer[];
+  /** Parent-raw spans whose opener frames are dropped (see CHILD_BIRTH_OPENER_HOLD_MS). */
+  openerHolds: VideoModeSpan[];
+}> => {
+  const placements: (Omit<VideoModeChildLayer, "closeMs" | "enableFromMs" | "enableToMs"> & {
+    closeRawMs: number;
+    openRawMs: number;
+  })[] = [];
 
   for (const child of options.children) {
     if (!child.raw) continue;
@@ -4601,7 +4706,11 @@ const childCompositeLayers = async (options: {
     const detectedCoverStartMs =
       child.calibrationCoverPaintedAt === undefined
         ? undefined
-        : await detectCalibrationCoverStartMs(path);
+        : await detectCalibrationCoverStartMs({
+            inputPath: path,
+            video: rawInfo,
+            viewport: child.viewport,
+          });
     // Same guard as the parent: a cover run reaching t=0 leaves nothing to
     // calibrate against — fall back to endpoint arithmetic.
     const coverStartMs =
@@ -4627,44 +4736,57 @@ const childCompositeLayers = async (options: {
     );
     const width = Math.max(2, 2 * Math.round((rawInfo.width * scale) / 2));
     const height = Math.max(2, 2 * Math.round((rawInfo.height * scale) / 2));
-    const enableFromMs = Math.max(0, child.openedAt + options.timelineOffsetMs);
-    // The cover's composite-time position bounds every overlay window: from
-    // that instant on, child footage is the calibration cover, not the popup.
-    // A margin frame short, because ffmpeg's `between` enable windows include
-    // their end timestamp and the detector's timestamp can trail the true
-    // first cover frame by a tick.
-    const coverCompositeMs =
-      coverStartMs === undefined
-        ? undefined
-        : coverStartMs -
-          calibrationCoverMarginMs(rawInfo.frameDurationMs) +
-          childOffsetMs +
-          options.timelineOffsetMs;
-    let closeMs = Math.min(
-      options.video.durationMs,
-      (child.closedAt === undefined ? child.openedAt + rawInfo.durationMs : child.closedAt) +
-        options.timelineOffsetMs,
+    // Never on the first frame: that one belongs to the opener, and whatever
+    // happened before the recorder started (the click that opened this popup,
+    // say) can only be shown on it.
+    const openRawMs = Math.max(
+      options.video.frameDurationMs,
+      child.openedAt + options.timelineOffsetMs,
     );
-    if (coverCompositeMs !== undefined) {
-      closeMs = Math.min(closeMs, coverCompositeMs);
-    }
-    // The exit fade runs AFTER close (the screencast's padded final frame
-    // supplies footage): a popup that closes itself right after a click would
-    // otherwise put that click — and its hold's freeze frame — mid-fade.
-    let enableToMs = Math.min(options.video.durationMs, closeMs + CHILD_OVERLAY_FADE_MS);
-    if (coverCompositeMs !== undefined) {
-      enableToMs = Math.min(enableToMs, coverCompositeMs);
-    }
+    // Where the popup's own footage ends. Covered at teardown, it is good
+    // right up to its cover (from there on, child footage is the calibration
+    // cover, not the popup) — a margin frame short, because the detector's
+    // timestamp can trail the true first cover frame by a tick. Without a
+    // detected cover, the end of the rendered footage is the best bound.
+    const lastFootageMs = Math.min(
+      options.video.durationMs,
+      coverStartMs === undefined
+        ? options.footageEndMs
+        : coverStartMs -
+            calibrationCoverMarginMs(rawInfo.frameDurationMs) +
+            childOffsetMs +
+            options.timelineOffsetMs,
+    );
+    // A popup leaves the screen when it closes — or, still open, when the test
+    // goes back to the opener: the first opener highlight after the popup's
+    // last one. A popup the test never acted in stays up until it closes;
+    // there, only an opener highlight within a frame of the close counts (its
+    // hold would otherwise freeze the first frames of the exit).
+    const closedRawMs =
+      child.closedAt === undefined ? Infinity : child.closedAt + options.timelineOffsetMs;
+    const lastActivityRawMs =
+      child.highlights.length === 0
+        ? Math.min(closedRawMs, lastFootageMs) - options.video.frameDurationMs
+        : Math.max(
+            ...child.highlights.map((highlight) => highlight.actionEnd || highlight.start),
+          ) + options.timelineOffsetMs;
+    const returnedRawMs = Math.min(
+      Infinity,
+      ...options.openerHighlights
+        .map((highlight) => highlight.start)
+        .filter((start) => start >= lastActivityRawMs),
+    );
+    const closeRawMs = Math.min(lastFootageMs, closedRawMs, returnedRawMs);
 
-    if (closeMs <= enableFromMs) continue;
+    if (closeRawMs <= openRawMs) continue;
 
-    layers.push({
+    placements.push({
       child,
-      closeMs,
+      closeRawMs,
       delayMs: childOffsetMs + options.timelineOffsetMs,
-      enableFromMs,
-      enableToMs,
+      exits: closeRawMs < lastFootageMs,
       height,
+      openRawMs,
       path,
       rawInfo,
       width,
@@ -4673,30 +4795,91 @@ const childCompositeLayers = async (options: {
     });
   }
 
-  return layers;
+  // One freeze per exit instant: popups leaving together animate together.
+  const freezes = [
+    ...new Set(placements.filter((placement) => placement.exits).map(({ closeRawMs }) => closeRawMs)),
+  ]
+    .sort((left, right) => left - right)
+    .map((atMs): VideoModeFreeze => ({ atMs, durationMs: options.exitFreezeMs }));
+
+  return {
+    freezes,
+    openerHolds: placements.map(({ openRawMs }) => ({
+      end: openRawMs + CHILD_BIRTH_OPENER_HOLD_MS,
+      start: openRawMs - options.video.frameDurationMs,
+    })),
+    layers: placements.map(({ closeRawMs, openRawMs, ...layer }) => {
+      const closeMs = compositeEndMs(freezes, closeRawMs);
+      return {
+        ...layer,
+        closeMs,
+        enableFromMs: compositeTimeMs(freezes, openRawMs),
+        enableToMs: layer.exits ? closeMs + CHILD_OVERLAY_FADE_MS : closeMs,
+      };
+    }),
+  };
 };
 
 /**
  * Pass A of the popup composite: overlay each popup screencast onto the
  * parent's raw footage — dimmed backdrop, scaled to fit, alpha-faded in and
  * out, windowed to the popup's open/close span, newest stacked on top. The
- * output shares the parent raw timeline exactly, so the annotation render
- * (pass B) runs on it unchanged; holds there freeze the composite, so it
- * never matters which source triggered them.
+ * output is the parent raw timeline plus the exit freezes (the composite
+ * clock, see `compositeTimeMs`); the annotation render (pass B) runs on it
+ * unchanged, and holds there freeze the composite, so it never matters which
+ * source triggered them.
  */
 const compositeChildOverlays = async (options: {
   /** Continuous frame rate for the overlay chains (see fps note below). */
   fps: number;
+  freezes: VideoModeFreeze[];
   inputPath: string;
   layers: VideoModeChildLayer[];
+  /** How far the parent's footage is held back (ms); its first frame fills the gap. */
+  leadInMs: number;
+  openerHolds: VideoModeSpan[];
   outputPath: string;
 }) => {
   const filters: string[] = [];
+  // Every source freezes together: frames from a freeze's instant on move
+  // later by its duration, and the fps resample below fills the hole with the
+  // last frame before it.
+  const freeze =
+    options.freezes.length === 0
+      ? []
+      : [
+          `setpts='PTS+(${options.freezes
+            .map(
+              ({ atMs, durationMs }) =>
+                `gte(T\\,${formatSeconds(atMs)})*${formatSeconds(durationMs)}`,
+            )
+            .join("+")})/TB'`,
+        ];
+  const openerHold =
+    options.openerHolds.length === 0
+      ? []
+      : [
+          `select='not(${options.openerHolds
+            .map(
+              ({ end, start }) =>
+                `between(t\\,${formatSeconds(Math.max(0, start))}\\,${formatSeconds(end)})`,
+            )
+            .join("+")})'`,
+        ];
   // The parent screencast is as sparse as the child ones (a static page emits
   // no frames), and overlay only emits output at primary-input frame times —
   // without resampling, the whole popup window can contain zero composite
-  // frames. A continuous base gives every enable window frames to land on.
-  filters.push(`[0:v]fps=${formatFilterNumber(options.fps)}[base]`);
+  // frames. A continuous base gives every enable window frames to land on —
+  // from t=0, so its first frame stands in for the lead-in and for frames an
+  // opener hold dropped at the start.
+  filters.push(
+    `[0:v]${[
+      `setpts=PTS+${formatSeconds(options.leadInMs)}/TB`,
+      ...openerHold,
+      ...freeze,
+      `fps=${formatFilterNumber(options.fps)}:start_time=0`,
+    ].join(",")}[base]`,
+  );
   let currentLabel = "base";
 
   options.layers.forEach((layer, index) => {
@@ -4713,7 +4896,13 @@ const compositeChildOverlays = async (options: {
     );
     filters.push(
       [
-        `[${index + 1}:v]setpts=PTS+${formatSeconds(layer.delayMs)}/TB`,
+        // A popup that opened before the opener's first recorded frame has
+        // footage from before composite time 0. It can't be shown, and left
+        // in it blanks the whole overlay (a stream starting at negative time
+        // throws off the fps/fade chain below).
+        `[${index + 1}:v]trim=start=${formatSeconds(Math.max(0, -layer.delayMs))}`,
+        `setpts=PTS+${formatSeconds(layer.delayMs)}/TB`,
+        ...freeze,
         // A mostly-static popup screencast has sparse frames; without
         // resampling, the frame that happens to pass `fade` mid-ramp keeps
         // its partial alpha while framesync repeats it for the whole window,
@@ -4795,7 +4984,10 @@ const projectChildHighlight = (options: {
   // nudge the highlight a few ms earlier; order-preserving in practice.
   const closeFloorMs = Math.floor(layer.closeMs);
   const minSliceMs = options.video.frameDurationMs + 10;
-  let { actionEnd, end, start } = highlight;
+  // A highlight with no action of its own (waitFor) still needs a source
+  // slice of composite frames to hold on, kept clear of close the same way.
+  let { end, start } = highlight;
+  let actionEnd = highlight.actionEnd === undefined ? start + minSliceMs : highlight.actionEnd;
   // Entry pacing keeps actions clear of the enter animation at runtime; this
   // is the degraded-mode backstop (paused pacing, custom flows): a highlight
   // starting mid-slide defers past the animation so its hold can't freeze a
@@ -4808,20 +5000,16 @@ const projectChildHighlight = (options: {
     );
     start += deferMs;
     end += deferMs;
-    if (actionEnd !== undefined) {
-      actionEnd += deferMs;
-    }
+    actionEnd += deferMs;
   }
-  if (actionEnd !== undefined) {
-    actionEnd = Math.min(actionEnd, closeFloorMs);
-    if (actionEnd - start < minSliceMs) {
-      actionEnd = Math.min(closeFloorMs, start + minSliceMs);
-    }
-    if (actionEnd - start < minSliceMs) {
-      const shift = minSliceMs - (actionEnd - start);
-      start -= shift;
-      end -= shift;
-    }
+  actionEnd = Math.min(actionEnd, closeFloorMs);
+  if (actionEnd - start < minSliceMs) {
+    actionEnd = Math.min(closeFloorMs, start + minSliceMs);
+  }
+  if (actionEnd - start < minSliceMs) {
+    const shift = minSliceMs - (actionEnd - start);
+    start -= shift;
+    end -= shift;
   }
 
   return {
@@ -5194,11 +5382,27 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         const offAfterTestFinalize = emitter.on(
           "afterTestFinalize",
           async ({ page, testInfo }) => {
+            if (state.endedAt === undefined) {
+              state.endedAt = getVideoTimestamp();
+            }
+            // A popup still open here outlived the test: closedAt stays unset
+            // and the close below is teardown, not something to render.
+            popupPage.off("close", onClose);
             child.viewport = child.viewport || page.viewportSize() || undefined;
             const video = page.video();
             if (!page.isClosed()) {
               let paintedAt: number | undefined;
               if (video) {
+                const sinceLastHighlightMs =
+                  getVideoTimestamp() -
+                  Math.max(
+                    ...child.highlights.map((highlight) => highlight.actionEnd || highlight.start),
+                  );
+                if (sinceLastHighlightMs < CHILD_FINAL_STATE_HOLD_MS) {
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, CHILD_FINAL_STATE_HOLD_MS - sinceLastHighlightMs),
+                  );
+                }
                 paintedAt = await settleVideoRecorder(page);
               }
               const closeStartedAt = performance.now();
@@ -5213,7 +5417,6 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
                 );
               }
             }
-            onClose();
             if (video) {
               const raw = suffixArtifactFileName(
                 VIDEO_MODE_RAW_FILE,
@@ -5432,7 +5635,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
       const offAfterTestFinalize = emitter.on("afterTestFinalize", async ({ page, testInfo }) => {
         await Promise.all(pendingDialogHighlights);
-        const renderEndedAt = getVideoTimestamp();
+        const renderEndedAt = state.endedAt === undefined ? getVideoTimestamp() : state.endedAt;
         const metadataBeforeVideo = metadataFor(state);
         const addressBars = metadataBeforeVideo.addressBars;
         const captions = metadataBeforeVideo.captions;
@@ -5490,6 +5693,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
 
           let recordingEndedAt: number | undefined;
           let coverPaintedAt: number | undefined;
+          const viewportAtEnd = page.viewportSize() || undefined;
           if (!page.isClosed()) {
             const needsTimelineCalibration =
               addressBars.length > 0 ||
@@ -5525,15 +5729,18 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
           const rawVideoInfo = await videoInfo(paths.raw);
           // The wall→raw calibration marker is the cover itself: videoMode
           // stamped when it painted it, and its first raw frame is findable by
-          // color. The recorder ENDPOINT is only the fallback — Playwright
-          // extends the final frame ~1s past the close instant
-          // (version-dependent), so endpoint arithmetic skews every
-          // translation by that much and lets the cover leak into the render
-          // as a black flash.
+          // color. The recorder ENDPOINT can't carry the calibration alone —
+          // Playwright can extend the final frame ~1s past the close instant,
+          // which skews every translation by that much and lets the cover
+          // leak into the render as a black flash.
           const detectedCoverStartMs =
             coverPaintedAt === undefined
               ? undefined
-              : await detectCalibrationCoverStartMs(paths.raw);
+              : await detectCalibrationCoverStartMs({
+                  inputPath: paths.raw,
+                  video: rawVideoInfo,
+                  viewport: viewportAtEnd,
+                });
           // A cover run reaching (within the cover margin of) t=0 means the
           // recording holds no pre-cover footage: an instant test whose only
           // captured frames ARE the cover. Nothing to calibrate against or
@@ -5545,92 +5752,148 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
             detectedCoverStartMs > calibrationCoverMarginMs(rawVideoInfo.frameDurationMs)
               ? detectedCoverStartMs
               : undefined;
-          // Clamped at 0: the raw's first frame can lag videoMode's clock
-          // zero slightly, making the true offset a hair negative — but range
-          // starts clamp at footage 0 anyway, so an unclamped negative offset
-          // would shift annotations relative to the range instead of with it.
-          const sourceOffset =
+          // Two readings of the raw-minus-clock offset, and two ways to be
+          // wrong. The endpoint reading lands about a second LATE whenever the
+          // page was still producing frames at close (Playwright pads the last
+          // frame it received by >=1s); late is the harmful direction — an
+          // action's result plays before its own highlight — so it may only
+          // pull the offset earlier. The cover reading is the sharper one, but
+          // a negative one (the recorder's first frame landed after
+          // videoMode's clock zero: ordinary, ~100ms) moves the whole render
+          // off the test's clock, so it needs the endpoint to agree before it
+          // goes below zero.
+          const endpointOffset =
+            recordingEndedAt === undefined ? 0 : rawVideoInfo.durationMs - recordingEndedAt;
+          const coverOffset =
             coverStartMs !== undefined && coverPaintedAt !== undefined
-              ? Math.max(0, coverStartMs - coverPaintedAt)
-              : recordingEndedAt === undefined
-                ? 0
-                : rawVideoInfo.durationMs - recordingEndedAt;
+              ? coverStartMs - coverPaintedAt
+              : undefined;
+          const sourceOffset =
+            coverOffset === undefined
+              ? endpointOffset
+              : Math.min(Math.max(0, coverOffset), endpointOffset);
           const timelineOffset =
             Math.floor(sourceOffset / rawVideoInfo.frameDurationMs) *
             rawVideoInfo.frameDurationMs;
-          const renderTimeline = translateVideoTimeline({
+          // What that leaves uncorrected is footage running ahead of its
+          // annotations by the part of a negative cover reading the endpoint
+          // didn't confirm. Under a popup that shows: the opener's state from
+          // a moment later. The composite re-times the footage anyway, so it
+          // holds the opener's back by the difference — its first frame fills
+          // the gap, and every raw time below shifts with it.
+          const footageLeadInMs =
+            coverOffset === undefined || !metadataBeforeVideo.children.some((child) => child.raw)
+              ? 0
+              : timelineOffset -
+                Math.floor(
+                  Math.min(coverOffset, endpointOffset) / rawVideoInfo.frameDurationMs,
+                ) *
+                  rawVideoInfo.frameDurationMs;
+          const footageInfo = {
+            ...rawVideoInfo,
+            durationMs: rawVideoInfo.durationMs + footageLeadInMs,
+          };
+          const rawTimeline = translateVideoTimeline({
             addressBars,
             captions,
             deadAir,
             highlights,
             offsetMs: timelineOffset,
           });
+          // Where the footage worth rendering ends: the end of the test,
+          // capped before the cover. The cover is never wanted footage — this
+          // cap is what stops the tail cover playing as a black flash. One
+          // frame of margin absorbs the detector's sampling granularity (its
+          // timestamp can land a tick late).
+          const endpointEnd = Math.round(renderEndedAt + sourceOffset);
+          const coverCap =
+            coverStartMs === undefined
+              ? undefined
+              : Math.max(
+                  0,
+                  coverStartMs +
+                    footageLeadInMs -
+                    calibrationCoverMarginMs(rawVideoInfo.frameDurationMs),
+                );
+          const footageEndMs =
+            recordingEndedAt === undefined
+              ? footageInfo.durationMs
+              : coverCap === undefined
+                ? endpointEnd
+                : Math.min(endpointEnd, coverCap);
 
           // Popup composite (pass A): overlay each popup's screencast onto the
           // raw footage, then annotate that composite instead of the raw. The
-          // composite shares the raw timeline, so nothing downstream changes.
+          // composite runs on the raw timeline plus the lead-in and a freeze
+          // per popup exit, so everything downstream moves onto that clock
+          // here and nowhere else.
           let renderInputPath = paths.raw;
           // Popup enter/exit animations must reach the output even when a
           // hold's overlap-skip would jump across them.
           const renderKeepSpans: VideoModeSpan[] = [];
-          const childLayers = await childCompositeLayers({
+          // An exit freeze lasts the animation plus the fill stabilization
+          // window: the opener action it hands over to can open on a
+          // full-frame pre-action still (see preActionStabilizationMs), which
+          // must replace settled frames, not the tail of the slide. Whole
+          // frames, so footage after the freeze stays on its frame grid.
+          const exitFreezeMs =
+            Math.ceil(
+              (CHILD_OVERLAY_FADE_MS + Math.max(0, timelineOffset)) / rawVideoInfo.frameDurationMs +
+                VIDEO_MODE_FILL_PRE_ACTION_FRAME_PADDING +
+                1,
+            ) * rawVideoInfo.frameDurationMs;
+          const {
+            freezes,
+            layers: childLayers,
+            openerHolds,
+          } = await childCompositeLayers({
             children: metadataBeforeVideo.children,
+            exitFreezeMs,
+            footageEndMs,
+            openerHighlights: rawTimeline.highlights,
             outputDir: testInfo.outputDir,
             timelineOffsetMs: timelineOffset,
-            video: rawVideoInfo,
+            video: footageInfo,
           });
-          if (childLayers.length > 0) {
+          const renderTimeline = compositeVideoTimeline(rawTimeline, freezes);
+          if (childLayers.length > 0 || footageLeadInMs > 0) {
             const compositePath = join(
               testInfo.outputDir,
               suffixArtifactFileName(VIDEO_MODE_COMPOSITE_FILE, state.artifactSuffix),
             );
             await compositeChildOverlays({
               fps: 1000 / rawVideoInfo.frameDurationMs,
+              freezes,
               inputPath: paths.raw,
               layers: childLayers,
+              leadInMs: footageLeadInMs,
+              openerHolds,
               outputPath: compositePath,
             });
             renderInputPath = compositePath;
             for (const layer of childLayers) {
-              renderKeepSpans.push(
-                { end: layer.enableFromMs + CHILD_OVERLAY_FADE_MS, start: layer.enableFromMs },
-                { end: layer.enableToMs, start: layer.closeMs },
-              );
+              renderKeepSpans.push({
+                end: layer.enableFromMs + CHILD_OVERLAY_FADE_MS,
+                start: layer.enableFromMs,
+              });
+              if (layer.exits) {
+                renderKeepSpans.push({ end: layer.closeMs + exitFreezeMs, start: layer.closeMs });
+              }
             }
             // Dead air recorded during an animation window (e.g. a child
             // waitFor spanning the slide) must not compress it away.
             renderTimeline.deadAir = subtractVideoSpans(renderTimeline.deadAir, renderKeepSpans);
-            // A parent action right after a popup closes (waiting for the
-            // signed-in state, say) would hold a freeze frame from inside the
-            // overlay's exit animation — a ghost popup flashing back after it
-            // disappeared. Shift such highlights past the fade window.
-            for (const parentHighlight of renderTimeline.highlights) {
-              for (const layer of childLayers) {
-                const fadeEndMs = layer.enableToMs + rawVideoInfo.frameDurationMs;
-                if (
-                  parentHighlight.start >= layer.closeMs - rawVideoInfo.frameDurationMs &&
-                  parentHighlight.start < fadeEndMs
-                ) {
-                  const shift = fadeEndMs - parentHighlight.start;
-                  parentHighlight.start += shift;
-                  parentHighlight.end += shift;
-                  if (parentHighlight.actionEnd !== undefined) {
-                    parentHighlight.actionEnd += shift;
-                  }
-                  if (parentHighlight.sourceFrameAt !== undefined) {
-                    parentHighlight.sourceFrameAt += shift;
-                  }
-                }
-              }
-            }
             const projectedChildHighlights = childLayers.flatMap((layer) =>
-              translateVideoTimeline({
-                addressBars: [],
-                captions: [],
-                deadAir: [],
-                highlights: layer.child.highlights,
-                offsetMs: timelineOffset,
-              }).highlights.map((highlight) =>
+              compositeVideoTimeline(
+                translateVideoTimeline({
+                  addressBars: [],
+                  captions: [],
+                  deadAir: [],
+                  highlights: layer.child.highlights,
+                  offsetMs: timelineOffset,
+                }),
+                freezes,
+              ).highlights.map((highlight) =>
                 projectChildHighlight({ highlight, layer, video: rawVideoInfo }),
               ),
             );
@@ -5697,13 +5960,17 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
               detectedStart >= TRIM_START_MIN_LEAD_IN_MS &&
               annotationSourceRange.start === undefined
             ) {
-              state.sourceRange.start = detectedStart;
-              sourceRange.start = detectedStart;
+              state.sourceRange.start = detectedStart + footageLeadInMs;
+              sourceRange.start = detectedStart + footageLeadInMs;
             }
           }
 
           if (sourceRange.start === undefined) {
             sourceRange.start = Math.max(0, timelineOffset);
+          }
+          sourceRange.start = compositeTimeMs(freezes, sourceRange.start);
+          if (sourceRange.end !== undefined) {
+            sourceRange.end = compositeEndMs(freezes, sourceRange.end);
           }
 
           if (sourceRange.end === undefined && recordingEndedAt !== undefined) {
@@ -5726,25 +5993,18 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
                 Math.max(end, candidate.start + rawVideoInfo.frameDurationMs),
               0,
             );
-            // The cover is never wanted footage, so it caps the endpoint term
-            // — this is what stops the tail cover playing as a black flash.
-            // One frame of margin absorbs the detector's sampling granularity
-            // (its timestamp can land a tick late). The annotation minimums
-            // still win when they need more: their holds freeze exactly the
-            // frames they pull in, cover included on near-instant recordings
-            // that never captured anything else.
-            const endpointEnd = Math.round(renderEndedAt + sourceOffset);
-            const coverCap =
-              coverStartMs === undefined
-                ? undefined
-                : Math.max(
-                    0,
-                    coverStartMs - calibrationCoverMarginMs(rawVideoInfo.frameDurationMs),
-                  );
+            // The annotation minimums win over the footage end when they need
+            // more: their holds freeze exactly the frames they pull in, cover
+            // included on near-instant recordings that never captured
+            // anything else. A popup still up at the end stays up to the last
+            // frame: the render stops where that popup's footage does.
             sourceRange.end = Math.max(
               minimumAddressBarEnd,
               minimumHighlightEnd,
-              coverCap === undefined ? endpointEnd : Math.min(endpointEnd, coverCap),
+              Math.min(
+                compositeEndMs(freezes, footageEndMs),
+                ...childLayers.filter((layer) => !layer.exits).map((layer) => layer.closeMs),
+              ),
             );
           }
 
@@ -5837,6 +6097,7 @@ export const videoMode = (options: VideoModeOptions = {}): VideoModePlugin => {
         }
 
         state.startedAt = undefined;
+        state.endedAt = undefined;
         console.log(
           `video-mode metadata written to ${videoModeOutputPaths(testInfo, state.artifactSuffix).metadata}`,
         );

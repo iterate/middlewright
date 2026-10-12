@@ -364,7 +364,7 @@ const popup = await popupPromise; // already wrapped
 await popup.getByRole("button", { name: "Approve" }).click();
 ```
 
-In video mode, the popup renders as an overlay **in the main page's video**: scaled to fit 90% of the frame over the dimmed page, faded in and out on open/close, with popup clicks pointer-annotated inside the overlay. One composed video per test, popups included. The popup's facts land in `video-mode.json` under `children`.
+In video mode, the popup renders as an overlay **in the main page's video**: scaled to fit 90% of the frame over the dimmed page, faded in and out on open/close, with popup clicks pointer-annotated inside the overlay. A popup the test leaves open slides away when the test goes back to the page that opened it. One composed video per test, popups included. The popup's facts land in `video-mode.json` under `children`.
 
 Details and escape hatches:
 
